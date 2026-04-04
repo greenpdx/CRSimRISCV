@@ -79,7 +79,7 @@ const opLabel = computed(() => {
   background: #f5f5f5;
   border: 1.5px solid #444;
   border-radius: 2px;
-  min-width: 140px;
+  min-width: 125px;
   min-height: 80px;
 }
 

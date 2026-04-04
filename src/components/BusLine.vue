@@ -23,12 +23,12 @@
       fill="none"
       stroke-linecap="round"
       stroke-linejoin="round"
-      :opacity="state === 'idle' ? 0.25 : 0.9"
+      :opacity="effectiveState === 'idle' ? 0.25 : 0.9"
     />
 
     <!-- Animated pulse overlay — only when active -->
     <path
-      v-if="state === 'active'"
+      v-if="effectiveState === 'active'"
       :d="pathD"
       :stroke="busColor"
       :stroke-width="strokeWidth"
@@ -47,7 +47,7 @@
         :width="labelW + 6"
         :height="14"
         rx="2"
-        :fill="state === 'idle' ? '#333' : busColor"
+        :fill="effectiveState === 'idle' ? '#333' : busColor"
         opacity="0.9"
       />
       <text
@@ -65,6 +65,8 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import type { SignalState } from '../types/cpu'
+import { useCpuPhases } from '../stores/cpuPhases'
+import type { Phase } from '../stores/cpuPhases'
 
 export interface Point { x: number; y: number }
 
@@ -75,13 +77,23 @@ const props = defineProps<{
   value:      number
   state:      SignalState
   showLabel?: boolean
+  /** If set, this bus only activates during this specific phase */
+  phase?:     Phase
 }>()
+
+const phases = useCpuPhases()
+
+/** Effective state: if phase is set, only active when current phase matches */
+const effectiveState = computed<SignalState>(() => {
+  if (!props.phase) return props.state
+  return phases.currentPhase === props.phase ? props.state : 'idle'
+})
 
 const hovered = ref(false)
 const clicked = ref(false)
 
 const showValue = computed(() =>
-  hovered.value || clicked.value || (props.state === 'active' && props.showLabel)
+  hovered.value || clicked.value || (effectiveState.value === 'active' && props.showLabel)
 )
 
 /** Build SVG path string from waypoints */

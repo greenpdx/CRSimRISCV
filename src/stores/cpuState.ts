@@ -53,11 +53,18 @@ export const useCpuState = defineStore('cpu', () => {
   const nextPc = ref<number>(0x00000004)
 
   // ── Memory ─────────────────────────────────────────────────────────────────
+  const DEFAULT_PROGRAM: { value: number; asm: string }[] = [
+    { value: 0x00700193, asm: 'addi x3, x0, 7'  },  // t0 = 7
+    { value: 0x00518213, asm: 'addi x4, x3, 5'  },  // a0 = t0 + 5 = 12
+    { value: 0x000102b7, asm: 'lui  x5, 0x10'   },  // a1 = 0x00010000
+    { value: 0x0042a223, asm: 'sw   x4, 4(x5)'  },  // MEM[0x10004] = 12
+  ]
+
   const romWords = ref<MemoryWord[]>(
     Array.from({ length: 32 }, (_, i) => ({
       address: 0x00000000 + i * 4,
-      value:   0x00000013,  // NOP (addi x0, x0, 0)
-      asm:     'nop',
+      value:   i < DEFAULT_PROGRAM.length ? DEFAULT_PROGRAM[i].value : 0x00000013,
+      asm:     i < DEFAULT_PROGRAM.length ? DEFAULT_PROGRAM[i].asm   : 'nop',
       active:  false,
     }))
   )
@@ -104,6 +111,11 @@ export const useCpuState = defineStore('cpu', () => {
   function clearBusStates() {
     for (const key in busStates.value)     busStates.value[key].state    = 'idle'
     for (const key in controlStates.value) controlStates.value[key].asserted = false
+  }
+
+  /** Clear only bus visual states (idle), preserve control signal values */
+  function clearBusVisuals() {
+    for (const key in busStates.value)     busStates.value[key].state = 'idle'
   }
 
   function setBus(netId: string, value: number) {
@@ -390,6 +402,80 @@ export const useCpuState = defineStore('cpu', () => {
     ioData.value = value >>> 0
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // State persistence (localStorage)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  const STORAGE_KEY = 'cpuvis_state'
+
+  function saveState(phaseData?: { phase: string; phaseIndex: number }) {
+    try {
+      const state = {
+        registers: registers.value.map(r => ({ name: r.name, xNum: r.xNum, value: r.value })),
+        pc: pc.value,
+        nextPc: nextPc.value,
+        romWords: romWords.value.map(w => ({ address: w.address, value: w.value, asm: w.asm })),
+        ramWords: ramWords.value.map(w => ({ address: w.address, value: w.value })),
+        ioBaseAddress: ioBaseAddress.value,
+        ioData: ioData.value,
+        cycleCount: cycleCount.value,
+        halted: halted.value,
+        lastInstr: lastInstr.value,
+        phase: phaseData?.phase ?? 'idle',
+        phaseIndex: phaseData?.phaseIndex ?? -1,
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    } catch { /* ignore storage errors */ }
+  }
+
+  function restoreState(): { restored: boolean; phase?: string; phaseIndex?: number } {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      if (!raw) return { restored: false }
+      const state = JSON.parse(raw)
+
+      if (state.registers) {
+        state.registers.forEach((r: any, i: number) => {
+          if (registers.value[i]) {
+            registers.value[i].value = r.value ?? 0
+          }
+        })
+      }
+      if (state.pc !== undefined) pc.value = state.pc
+      if (state.nextPc !== undefined) nextPc.value = state.nextPc
+      if (state.romWords) {
+        romWords.value = state.romWords.map((w: any) => ({
+          address: w.address, value: w.value, asm: w.asm ?? 'nop', active: false,
+        }))
+      }
+      if (state.ramWords) {
+        ramWords.value = state.ramWords.map((w: any) => ({
+          address: w.address, value: w.value, active: false,
+        }))
+      }
+      if (state.ioBaseAddress !== undefined) ioBaseAddress.value = state.ioBaseAddress
+      if (state.ioData !== undefined) ioData.value = state.ioData
+      if (state.cycleCount !== undefined) cycleCount.value = state.cycleCount
+      if (state.halted !== undefined) halted.value = state.halted
+      if (state.lastInstr !== undefined) lastInstr.value = state.lastInstr
+
+      return {
+        restored: true,
+        phase: state.phase,
+        phaseIndex: state.phaseIndex,
+      }
+    } catch {
+      return { restored: false }
+    }
+  }
+
+  function clearSavedState() {
+    localStorage.removeItem(STORAGE_KEY)
+  }
+
+  // Restore on first load
+  restoreState()
+
   return {
     // State
     registers,
@@ -416,5 +502,19 @@ export const useCpuState = defineStore('cpu', () => {
     loadProgram,
     loadProgramWithAsm,
     setIoData,
+    clearActiveFlags,
+    clearBusStates,
+    clearBusVisuals,
+    setBus,
+    setCtrl,
+    romRead,
+    regRead,
+    regWrite,
+    ramRead,
+    ramWrite,
+    isIoAddress,
+    saveState,
+    restoreState,
+    clearSavedState,
   }
 })

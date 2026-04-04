@@ -3,7 +3,8 @@
 
     <div class="ctrl__header">
       <span class="ctrl__title">Decoder / Control</span>
-      <span class="ctrl__subtitle">{{ entry?.name ?? 'unknown' }} · {{ opcodeBin }}</span>
+      <span v-if="asmText" class="ctrl__asm">{{ asmText }}</span>
+      <span class="ctrl__phase-label">{{ phaseText ?? '' }}</span>
     </div>
 
     <div class="ctrl__body">
@@ -22,22 +23,22 @@
         <div class="ctrl__group" style="left: 34px">
           <ControlSignalBadge label="RegWr" :value="signals.regWrite ? 1 : 0" />
         </div>
-        <div class="ctrl__group" style="left: 102px">
+        <div class="ctrl__group" style="left: 159px">
           <ControlSignalBadge label="ImmSel" :value="signals.immSel" :hint="IMM_FORMAT_LABEL[entry?.immFormat ?? 'none']" :bits="3" />
         </div>
-        <div class="ctrl__group" style="left: 173px">
+        <div class="ctrl__group" style="left: 230px">
           <ControlSignalBadge label="JALR" :value="signals.pcSel === 2 ? 1 : 0" />
         </div>
         <div class="ctrl__group" style="left: 334px">
           <ControlSignalBadge label="ALUSrc" :value="signals.aluSrc ? 1 : 0" :hint="signals.aluSrc ? 'imm' : 'rs2'" />
         </div>
-        <div class="ctrl__group" style="left: 420px">
+        <div class="ctrl__group" style="left: 477px">
           <ControlSignalBadge label="+4/Br" :value="signals.pcSel === 1 ? 1 : 0" />
         </div>
         <div class="ctrl__group" style="left: 553px">
           <ControlSignalBadge label="ALUOp" :value="signals.aluOp" :hint="ALU_OP_LABEL[signals.aluOp]" :bits="2" />
         </div>
-        <div class="ctrl__group" style="left: 693px">
+        <div class="ctrl__group" style="left: 655px">
           <ControlSignalBadge label="WBSel" :value="signals.wbSel" :hint="WB_SEL_LABEL[signals.wbSel]" :bits="2" />
         </div>
       </div>
@@ -60,10 +61,12 @@ import {
 import type { ControlSignals } from '../data/controlData'
 
 const props = defineProps<{
-  /** 7-bit opcode from instruction[6:0] */
   opcode: number
-  /** True while decoding this cycle */
   active?: boolean
+  /** Current assembly instruction text */
+  asmText?: string
+  /** Current micro-phase label */
+  phaseText?: string
 }>()
 
 const entry = computed(() => OPCODE_BY_VALUE.get(props.opcode & 0x7f))
@@ -114,9 +117,19 @@ const signals = computed<ControlSignals>(() =>
   color: #ffffff;
   text-transform: uppercase;
 }
-.ctrl__subtitle {
-  font-size: 9px;
-  color: #ffcccc;
+.ctrl__asm {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: #ffffff;
+  text-transform: uppercase;
+  margin-left: 5em;
+}
+.ctrl__phase-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #ffffff;
+  margin-left: auto;
 }
 
 /* Body */

@@ -90,7 +90,7 @@ const hexValue = computed(() =>
 
 .reg-row__dec   { padding: 2px 6px; font-size: 10px; color: #2a4a60;
                   font-family: 'JetBrains Mono','Courier New',monospace;
-                  text-align: right; }
+                  text-align: right; min-width: 80px; }
 
 .reg-row__dot        { padding: 0 4px; width: 12px; }
 .reg-row__dot-inner  { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }

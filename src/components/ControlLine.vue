@@ -9,13 +9,13 @@
       fill="none"
       stroke-linecap="round"
       stroke-linejoin="round"
-      :stroke-dasharray="asserted ? 'none' : '4,3'"
-      :opacity="asserted ? 0.9 : 0.3"
+      :stroke-dasharray="effectiveAsserted ? 'none' : '4,3'"
+      :opacity="effectiveAsserted ? 0.9 : 0.3"
     />
 
     <!-- Pulse when transitioning to asserted -->
     <path
-      v-if="asserted"
+      v-if="effectiveAsserted"
       :d="pathD"
       stroke="#ff4444"
       stroke-width="1.5"
@@ -27,7 +27,7 @@
 
     <!-- Asserted dot at destination end -->
     <circle
-      v-if="asserted && endPoint"
+      v-if="effectiveAsserted && endPoint"
       :cx="endPoint.x"
       :cy="endPoint.y"
       r="3"
@@ -41,7 +41,7 @@
       :x="midpoint.x"
       :y="midpoint.y - 4"
       class="ctrl-line__label"
-      :fill="asserted ? '#cc2222' : '#cc888888'"
+      :fill="effectiveAsserted ? '#cc2222' : '#cc888888'"
       text-anchor="middle"
     >{{ netId.replace('ctrl_', '') }}</text>
 
@@ -50,19 +50,26 @@
 
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
+import { useCpuPhases } from '../stores/cpuPhases'
+import type { Phase } from '../stores/cpuPhases'
 
 export interface Point { x: number; y: number }
 
 const props = defineProps<{
-  /** Matches a Net.id — should be a 1-bit net */
   netId:     string
-  /** Ordered waypoints */
   points:    Point[]
-  /** Current asserted state */
   asserted:  boolean
-  /** Show net name as label */
   showLabel?: boolean
+  /** If set, this control line only activates during this specific phase */
+  phase?:    Phase
 }>()
+
+const phases = useCpuPhases()
+
+const effectiveAsserted = computed(() => {
+  if (!props.phase) return props.asserted
+  return phases.currentPhase === props.phase ? props.asserted : false
+})
 
 const pathD = computed(() => {
   if (props.points.length < 2) return ''

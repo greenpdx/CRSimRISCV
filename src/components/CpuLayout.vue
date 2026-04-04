@@ -11,23 +11,26 @@
         :points="[{ x: 334, y: 105 }, { x: 334, y: 466 }]"
         :asserted="cpu.controlStates['ctrl_reg_write']?.asserted ?? false"
         :show-label="true"
-      />
+        :phase="wbPhase"
+        />
 
-      <!-- immSel → Imm Generator -->
+      <!-- immSel → Imm Generator: only when aluSrc=imm -->
       <ControlLine
         net-id="ctrl_imm_sel"
-        :points="[{ x: 402, y: 105 }, { x: 402, y: 255 }]"
+        :points="[{ x: 459, y: 105 }, { x: 459, y: 255 }]"
         :asserted="busVal('ctrl_imm_sel') !== 5"
         :show-label="true"
-      />
+        :phase="immChainPhase"
+        />
 
       <!-- ctrl_is_jalr → PC Sel MUX -->
       <ControlLine
         net-id="ctrl_is_jalr"
-        :points="[{ x: 473, y: 105 }, { x: 473, y: 161 }]"
+        :points="[{ x: 530, y: 105 }, { x: 530, y: 161 }]"
         :asserted="cpu.controlStates['ctrl_is_jalr']?.asserted ?? false"
         :show-label="true"
-      />
+        phase="pcupdate"
+        />
 
       <!-- aluSrc → ALU Src MUX -->
       <ControlLine
@@ -35,15 +38,17 @@
         :points="[{ x: 634, y: 105 }, { x: 634, y: 528 }]"
         :asserted="cpu.controlStates['ctrl_alu_src']?.asserted ?? false"
         :show-label="true"
-      />
+        phase="regread"
+        />
 
       <!-- ctrl_offset_sel → +4/Imm MUX -->
       <ControlLine
         net-id="ctrl_offset_sel"
-        :points="[{ x: 720, y: 105 }, { x: 720, y: 141 }]"
+        :points="[{ x: 777, y: 105 }, { x: 777, y: 141 }]"
         :asserted="cpu.controlStates['ctrl_offset_sel']?.asserted ?? false"
         :show-label="true"
-      />
+        phase="pcupdate"
+        />
 
       <!-- aluOp → ALU Control -->
       <ControlLine
@@ -51,15 +56,17 @@
         :points="[{ x: 853, y: 105 }, { x: 853, y: 327 }]"
         :asserted="busVal('ctrl_alu_op') !== 0"
         :show-label="true"
-      />
+        phase="execute"
+        />
 
       <!-- wbSel → WB Sel MUX -->
       <ControlLine
         net-id="ctrl_wb_sel"
-        :points="[{ x: 993, y: 105 }, { x: 993, y: 390 }]"
+        :points="[{ x: 955, y: 105 }, { x: 955, y: 390 }]"
         :asserted="busVal('ctrl_wb_sel') !== 0"
         :show-label="true"
-      />
+        :phase="wbPhase"
+        />
 
       <!-- ── Data buses ── -->
 
@@ -67,86 +74,92 @@
       <BusLine
         net-id="pc_out"
         :points="[
-          { x: 300, y: 198 },
-          { x: 260, y: 198 },
-          { x: 260, y: 55 },
+          { x: 357, y: 198 },
+          { x: 297, y: 198 },
+          { x: 297, y: 55 },
           { x: 240, y: 55 },
         ]"
         :bits="32"
         :value="cpu.pc"
         :state="busActive('pc_out') ? 'active' : 'idle'"
         :show-label="true"
-      />
+      phase="fetch"
+        />
 
       <!-- PC Sel (next_pc) → PC: straight from mux output to PC right side -->
       <BusLine
         net-id="next_pc"
         :points="[
-          { x: 417, y: 198 },
-          { x: 390, y: 198 },
+          { x: 474, y: 198 },
+          { x: 447, y: 198 },
         ]"
         :bits="32"
         :value="cpu.nextPc"
         :state="busActive('next_pc') ? 'active' : 'idle'"
         :show-label="true"
-      />
+      phase="pcupdate"
+        />
 
       <!-- PC → Adder: down from PC bottom, right along bus, up into adder bottom -->
       <BusLine
         net-id="pc_out_adder"
         :points="[
-          { x: 260, y: 198 },
-          { x: 260, y: 244 },
-          { x: 587, y: 244 },
-          { x: 587, y: 199 },
+          { x: 317, y: 198 },
+          { x: 317, y: 244 },
+          { x: 663, y: 244 },
+          { x: 663, y: 199 },
         ]"
         :bits="32"
         :value="cpu.pc"
         :state="busActive('pc_out') ? 'active' : 'idle'"
         :show-label="false"
-      />
+      phase="pcupdate"
+        />
 
        <!-- Adder output → MUX PC Sel input -->
       <BusLine
         net-id="pc_adder_result"
         :points="[
-          { x: 568, y: 180 },
-          { x: 530, y: 180 },
+          { x: 644, y: 180 },
+          { x: 587, y: 180 },
         ]"
         :bits="32"
         :value="busVal('pc_adder_result')"
         :state="busActive('pc_adder_result') ? 'active' : 'idle'"
         :show-label="false"
-      />
+      phase="pcupdate"
+        />
 
-      <!-- Instruction bus branch: down to ImmGen -->
+      <!-- Instruction bus branch: down to ImmGen (only when aluSrc=imm) -->
       <BusLine
         net-id="instr_immgen"
         :points="[
           { x: 280, y: 40 },
           { x: 280, y: 287 },
-          { x: 355, y: 287 },
+          { x: 412, y: 287 },
         ]"
         :bits="32"
         :value="busVal('instr')"
         :state="busActive('instr') ? 'active' : 'idle'"
         :show-label="false"
-      />
+        :phase="immChainPhase"
+        />
 
-      <!-- ImmGen output trunk -->
+      <!-- ImmGen output trunk (only when aluSrc=imm) -->
       <BusLine
         net-id="immediate"
         :points="[
-          { x: 465, y: 287 },
+          { x: 522, y: 287 },
           { x: 565, y: 287 },
         ]"
         :bits="32"
         :value="busVal('immediate')"
         :state="busActive('immediate') ? 'active' : 'idle'"
         :show-label="true"
-      />
+        :phase="immChainPhase"
+        />
 
-      <!-- ImmGen → ALU Src mux (imm input): down from trunk to mux -->
+      <!-- ImmGen → ALU Src mux (imm input): only when aluSrc=imm -->
       <BusLine
         net-id="immediate_alusrc"
         :points="[
@@ -158,22 +171,24 @@
         :value="busVal('immediate')"
         :state="busActive('immediate') ? 'active' : 'idle'"
         :show-label="false"
-      />
+        :phase="aluSrcSel === 1 ? 'regread' : 'idle'"
+        />
 
       <!-- ImmGen → +4/Imm mux (imm input): right, up, short left into mux -->
       <BusLine
         net-id="immediate_pcoffset"
         :points="[
           { x: 565, y: 287 },
-          { x: 786, y: 287 },
-          { x: 786, y: 190 },
-          { x: 776, y: 190 },
+          { x: 843, y: 287 },
+          { x: 843, y: 190 },
+          { x: 833, y: 190 },
         ]"
         :bits="32"
         :value="busVal('immediate')"
         :state="busActive('immediate') ? 'active' : 'idle'"
         :show-label="false"
-      />
+        phase="pcupdate"
+        />
 
       <!-- ALU Control → ALU -->
       <BusLine
@@ -186,7 +201,8 @@
         :value="busVal('alu_control')"
         :state="busActive('alu_control') ? 'active' : 'idle'"
         :show-label="false"
-      />
+      phase="execute"
+        />
 
       <!-- ALU Src output → ALU B input -->
       <BusLine
@@ -199,13 +215,14 @@
         :value="busVal('alu_b')"
         :state="busActive('alu_b') ? 'active' : 'idle'"
         :show-label="false"
-      />
+        phase="regread"
+        />
 
       <!-- WB Sel → RegFile write data -->
       <BusLine
         net-id="write_data"
         :points="[
-          { x: 937, y: 435 },
+          { x: 899, y: 435 },
           { x: 410, y: 435 },
           { x: 410, y: 466 },
         ]"
@@ -213,99 +230,184 @@
         :value="busVal('write_data')"
         :state="busActive('write_data') ? 'active' : 'idle'"
         :show-label="false"
-      />
+        :phase="wbPhase"
+        />
 
-      <!-- ALU result → WB Sel input 0 -->
+      <!-- ALU result trunk: ALU → corner (highlights in execute AND memory) -->
       <BusLine
-        net-id="alu_result_wb"
+        net-id="alu_result_trunk"
         :points="[
           { x: 936, y: 545 },
-          { x: 1075, y: 545 },
-          { x: 1075, y: 415 },
-          { x: 1049, y: 415 },
+          { x: 1060, y: 545 },
+          { x: 1060, y: 415 },
         ]"
         :bits="32"
         :value="busVal('alu_result')"
         :state="busActive('alu_result') ? 'active' : 'idle'"
         :show-label="false"
-      />
+        phase="execute"
+        />
+
+      <!-- ALU result trunk (duplicate for memory phase) -->
+      <BusLine
+        net-id="alu_result_trunk_mem"
+        :points="[
+          { x: 936, y: 545 },
+          { x: 1060, y: 545 },
+          { x: 1060, y: 415 },
+        ]"
+        :bits="32"
+        :value="busVal('alu_result')"
+        :state="busActive('alu_result') ? 'active' : 'idle'"
+        :show-label="false"
+        :phase="memPhase"
+        />
+
+      <!-- ALU result corner → WB Sel input 0 -->
+      <BusLine
+        net-id="alu_result_to_wb"
+        :points="[
+          { x: 1060, y: 415 },
+          { x: 1011, y: 415 },
+        ]"
+        :bits="32"
+        :value="busVal('alu_result')"
+        :state="busActive('alu_result') ? 'active' : 'idle'"
+        :show-label="false"
+        phase="execute"
+        />
 
       <!-- LoadStore load data → WB Sel input 1 -->
       <BusLine
         net-id="mem_read_data"
         :points="[
-          { x: 1130, y: 100 },
-          { x: 1130, y: 435 },
-          { x: 1049, y: 435 },
+          { x: 1159, y: 100 },
+          { x: 1159, y: 435 },
+          { x: 1011, y: 435 },
         ]"
         :bits="32"
         :value="busVal('mem_read_data')"
         :state="busActive('mem_read_data') ? 'active' : 'idle'"
         :show-label="false"
-      />
+      :phase="memPhase"
+        />
 
-      <!-- PC Adder result → WB Sel input 2 (PC+4 for JAL/JALR) -->
+      <!-- PC Adder result → WB Sel input 2 (PC+4 link for JAL/JALR only) -->
       <BusLine
         net-id="pc_adder_result_wb"
         :points="[
-          { x: 567, y: 180 },
-          { x: 567, y: 260 },
-          { x: 1060, y: 260 },
-          { x: 1060, y: 455 },
-          { x: 1049, y: 455 },
+          { x: 624, y: 180 },
+          { x: 624, y: 260 },
+          { x: 1035, y: 260 },
+          { x: 1035, y: 455 },
+          { x: 1011, y: 455 },
         ]"
         :bits="32"
         :value="busVal('pc_adder_result')"
         :state="busActive('pc_adder_result') ? 'active' : 'idle'"
         :show-label="false"
-      />
+        :phase="wbSel === 2 ? 'memwb' : 'idle'"
+        />
 
-      <!-- LoadStore addr → RAM -->
+      <!-- ctrl_mem_read → LoadStore -->
+      <ControlLine
+        net-id="ctrl_mem_read"
+        :points="[{ x: 1003, y: 75 }, { x: 1079, y: 75 }]"
+        :asserted="cpu.controlStates['ctrl_mem_read']?.asserted ?? false"
+        :show-label="true"
+        :phase="memPhase"
+        />
+
+      <!-- ctrl_mem_write → LoadStore -->
+      <ControlLine
+        net-id="ctrl_mem_write"
+        :points="[{ x: 1003, y: 82 }, { x: 1079, y: 82 }]"
+        :asserted="cpu.controlStates['ctrl_mem_write']?.asserted ?? false"
+        :show-label="true"
+        :phase="memPhase"
+        />
+
+      <!-- ALU result → LoadStore addr input -->
+      <BusLine
+        net-id="alu_result_ls"
+        :points="[
+          { x: 1060, y: 415 },
+          { x: 1060, y: 40 },
+          { x: 1079, y: 40 },
+        ]"
+        :bits="32"
+        :value="busVal('alu_result')"
+        :state="busActive('alu_result') ? 'active' : 'idle'"
+        :show-label="false"
+        :phase="memPhase"
+        />
+
+      <!-- rs2 store data → LoadStore store data input -->
+      <BusLine
+        net-id="rs2_data_ls"
+        :points="[
+          { x: 540, y: 548 },
+          { x: 540, y: 624 },
+          { x: 1075, y: 624 },
+          { x: 1075, y: 65 },
+          { x: 1079, y: 65 },
+        ]"
+        :bits="32"
+        :value="busVal('rs2_data')"
+        :state="busActive('rs2_data') ? 'active' : 'idle'"
+        :show-label="false"
+        :phase="memPhase"
+        />
+
+      <!-- LoadStore addr → RAM (only for RAM addresses) -->
       <BusLine
         net-id="ls_addr_ram"
         :points="[
-          { x: 1200, y: 35 },
+          { x: 1220, y: 35 },
           { x: 1280, y: 35 },
         ]"
         :bits="32"
         :value="busVal('alu_result')"
         :state="busActive('alu_result') ? 'active' : 'idle'"
         :show-label="false"
-      />
+        :phase="ramPhase"
+        />
 
-      <!-- LoadStore data → RAM -->
+      <!-- LoadStore data → RAM (only for RAM addresses) -->
       <BusLine
         net-id="ls_data_ram"
         :points="[
-          { x: 1200, y: 55 },
+          { x: 1220, y: 55 },
           { x: 1280, y: 55 },
         ]"
         :bits="32"
         :value="busVal('rs2_data')"
         :state="busActive('rs2_data') ? 'active' : 'idle'"
         :show-label="false"
-      />
+        :phase="ramPhase"
+        />
 
-      <!-- LoadStore addr → I/O -->
+      <!-- LoadStore addr → I/O (only for I/O addresses) -->
       <BusLine
         net-id="ls_addr_io"
         :points="[
-          { x: 1200, y: 70 },
-          { x: 1240, y: 70 },
-          { x: 1240, y: 470 },
+          { x: 1220, y: 70 },
+          { x: 1260, y: 70 },
+          { x: 1260, y: 470 },
           { x: 1280, y: 470 },
         ]"
         :bits="32"
         :value="busVal('alu_result')"
         :state="busActive('alu_result') ? 'active' : 'idle'"
         :show-label="false"
-      />
+        :phase="ioPhase"
+        />
 
-      <!-- LoadStore data → I/O -->
+      <!-- LoadStore data → I/O (only for I/O addresses) -->
       <BusLine
         net-id="ls_data_io"
         :points="[
-          { x: 1200, y: 85 },
+          { x: 1220, y: 85 },
           { x: 1250, y: 85 },
           { x: 1250, y: 485 },
           { x: 1280, y: 485 },
@@ -314,7 +416,8 @@
         :value="busVal('rs2_data')"
         :state="busActive('rs2_data') ? 'active' : 'idle'"
         :show-label="false"
-      />
+        :phase="ioPhase"
+        />
 
       <!-- RegFile rs1 → ALU A input -->
       <BusLine
@@ -327,9 +430,10 @@
         :value="busVal('rs1_data')"
         :state="busActive('rs1_data') ? 'active' : 'idle'"
         :show-label="false"
-      />
+      phase="regread"
+        />
 
-      <!-- RegFile rs2 → ALU Src mux -->
+      <!-- RegFile rs2 → ALU Src mux: only when aluSrc=rs2 -->
       <BusLine
         net-id="rs2_data"
         :points="[
@@ -340,7 +444,8 @@
         :value="busVal('rs2_data')"
         :state="busActive('rs2_data') ? 'active' : 'idle'"
         :show-label="false"
-      />
+        :phase="aluSrcSel === 0 ? 'regread' : 'idle'"
+        />
 
       <!-- Instruction bus branch: down to ALU Control -->
       <BusLine
@@ -355,7 +460,8 @@
         :value="busVal('instr')"
         :state="busActive('instr') ? 'active' : 'idle'"
         :show-label="false"
-      />
+      phase="regread"
+        />
 
       <!-- Instruction bus: ROM → Decoder -->
       <BusLine
@@ -368,25 +474,27 @@
         :value="busVal('instr')"
         :state="busActive('instr') ? 'active' : 'idle'"
         :show-label="true"
-      />
+      phase="fetch"
+        />
 
        <!-- +4/Imm MUX output → Adder right input -->
       <BusLine
         net-id="pc_offset"
         :points="[
-          { x: 665, y: 180 },
-          { x: 608, y: 180 },
+          { x: 722, y: 180 },
+          { x: 684, y: 180 },
         ]"
         :bits="32"
         :value="busVal('pc_offset')"
         :state="busActive('pc_offset') ? 'active' : 'idle'"
         :show-label="false"
-      />
+      phase="pcupdate"
+        />
 
     </svg>
 
     <!-- ── ROM (far left, tall) ── -->
-    <div class="cpu-block" :style="px(20, 20)">
+    <div class="cpu-block" :style="px(0, 20)">
       <RomBlock
         :words="cpu.romWords"
         :pc="cpu.pc"
@@ -395,7 +503,7 @@
 
     <!-- ── PC chain (horizontal row: PC → MUX PC Sel → Adder → MUX +4/Imm) ── -->
 
-    <div class="cpu-block" :style="px(300, 178)">
+    <div class="cpu-block" :style="px(357, 178)">
       <PcRegister
         :pc="cpu.pc"
         :next-pc="cpu.nextPc"
@@ -403,7 +511,7 @@
       />
     </div>
 
-    <div class="cpu-block" :style="px(417, 161)">
+    <div class="cpu-block" :style="px(474, 161)">
       <MuxTrapezoid
         label="PC Sel"
         output-label="New PC"
@@ -413,7 +521,7 @@
       />
     </div>
 
-    <div class="cpu-block" :style="px(567, 159)">
+    <div class="cpu-block" :style="px(643, 159)">
       <PcAdder
         :pc="cpu.pc"
         :offset="busVal('pc_offset')"
@@ -421,7 +529,7 @@
       />
     </div>
 
-    <div class="cpu-block" :style="px(664, 141)">
+    <div class="cpu-block" :style="px(721, 141)">
       <MuxTrapezoid
         label="+4/Imm"
         output-label="offset"
@@ -436,11 +544,13 @@
       <DecoderControl
         :opcode="opcode"
         :active="busActive('instr')"
+        :asm-text="currentAsm"
+        :phase-text="phases.phaseLabel"
       />
     </div>
 
     <!-- ── Immediate Generator ── -->
-    <div class="cpu-block" :style="px(357, 255)">
+    <div class="cpu-block" :style="px(414, 255)">
       <ImmGenerator
         :instruction="cpu.lastInstr"
         :imm-sel="immSel"
@@ -460,7 +570,7 @@
     </div>
 
     <!-- ── Register File ── -->
-    <div class="cpu-block" :style="px(300, 466)">
+    <div class="cpu-block" :style="px(258, 466)">
       <RegisterFile
         :registers="cpu.registers"
       />
@@ -489,7 +599,7 @@
     </div>
 
     <!-- ── MUX Write-Back ── -->
-    <div class="cpu-block" :style="px(937, 390)">
+    <div class="cpu-block" :style="px(899, 390)">
       <MuxTrapezoid
         label="WB Sel"
         output-label="write data"
@@ -500,7 +610,7 @@
     </div>
 
     <!-- ── Load / Store ── -->
-    <div class="cpu-block" :style="px(1060, 20)">
+    <div class="cpu-block" :style="px(1079, 20)">
       <LoadStore
         :op="loadStoreOp"
         :address="busVal('alu_result')"
@@ -531,12 +641,103 @@
       />
     </div>
 
+    <!-- ── Clock Controls ── -->
+    <div class="clock-bar">
+      <!-- Editor (new tab) -->
+      <button class="clock-btn clock-btn--edit" @click="openEditor">Edit</button>
+
+      <span class="clock-divider">|</span>
+
+      <!-- Program menu -->
+      <button class="clock-btn clock-btn--file" @click="loadProgram">Load</button>
+      <button class="clock-btn clock-btn--file" @click="saveProgram">Save</button>
+      <div class="clock-examples">
+        <button class="clock-btn clock-btn--file" @click="showExamples = !showExamples">Examples</button>
+        <div v-if="showExamples" class="clock-examples__menu">
+          <button
+            v-for="ex in examplePrograms"
+            :key="ex.name"
+            class="clock-examples__item"
+            @click="loadExample(ex)"
+          >{{ ex.name }}</button>
+        </div>
+      </div>
+
+      <button class="clock-btn clock-btn--file" @click="showConfig = true">Config</button>
+
+      <span class="clock-divider">|</span>
+
+      <!-- Execution controls -->
+      <button class="clock-btn" @click="phases.microStep()" :disabled="phases.animating">Micro</button>
+      <button class="clock-btn" @click="phases.animatedStep()" :disabled="phases.animating">Step</button>
+      <button class="clock-btn" @click="phases.toggleAutoRun()">{{ phases.autoRunning ? 'Stop' : 'Run' }}</button>
+      <button class="clock-btn clock-btn--reset" @click="phases.reset()">Reset</button>
+      <input
+        type="range"
+        class="clock-speed"
+        min="100"
+        max="2000"
+        step="50"
+        v-model.number="phases.animDuration"
+        title="Animation speed (ms)"
+      />
+      <span class="clock-label">{{ phases.animDuration }}ms</span>
+      <span class="clock-phase">{{ phases.phaseLabel }}</span>
+      <span class="clock-label">Cycle: {{ cpu.cycleCount }}</span>
+      <span class="clock-label">PC: 0x{{ (cpu.pc >>> 0).toString(16).padStart(8, '0') }}</span>
+    </div>
+
+    <!-- Config Modal -->
+    <div v-if="showConfig" class="modal-overlay" @click.self="showConfig = false">
+      <div class="modal">
+        <div class="modal__header">
+          <span class="modal__title">Configuration</span>
+          <button class="modal__close" @click="showConfig = false">X</button>
+        </div>
+        <div class="modal__body">
+          <div class="modal__row">
+            <label class="modal__label">I/O Base Address</label>
+            <input class="modal__input" v-model="configIoBase" placeholder="0x40020000" />
+          </div>
+          <div class="modal__row">
+            <label class="modal__label">ROM Size (words)</label>
+            <input class="modal__input" type="number" v-model.number="configRomSize" min="4" max="256" />
+          </div>
+          <div class="modal__row">
+            <label class="modal__label">RAM Size (words)</label>
+            <input class="modal__input" type="number" v-model.number="configRamSize" min="4" max="256" />
+          </div>
+          <div class="modal__row">
+            <label class="modal__label">Register Mode</label>
+            <select class="modal__input" v-model="configRegMode">
+              <option value="8">8 registers</option>
+              <option value="32">32 registers</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal__footer">
+          <button class="modal__btn modal__btn--apply" @click="applyConfig">Apply</button>
+          <button class="modal__btn" @click="showConfig = false">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hidden file input for loading -->
+    <input
+      ref="fileInput"
+      type="file"
+      accept=".json,.hex,.txt"
+      style="display: none"
+      @change="onFileLoad"
+    />
+
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useCpuState } from '../stores/cpuState'
+import { useCpuPhases } from '../stores/cpuPhases'
 import type { ImmSel } from '../data/immData'
 
 import RomBlock from './RomBlock.vue'
@@ -557,6 +758,131 @@ import ControlLine from './ControlLine.vue'
 // ── Store ────────────────────────────────────────────────────────────────────
 
 const cpu = useCpuState()
+
+const phases = useCpuPhases()
+
+// ── Program Load / Save ─────────────────────────────────────────────────────
+
+const fileInput = ref<HTMLInputElement | null>(null)
+const showExamples = ref(false)
+const showConfig = ref(false)
+const configIoBase = ref('0x40020000')
+const configRomSize = ref(32)
+const configRamSize = ref(32)
+const configRegMode = ref('8')
+
+const emit = defineEmits<{
+  'switch-tab': []
+}>()
+
+function openEditor() {
+  emit('switch-tab')
+}
+
+function applyConfig() {
+  const ioBase = parseInt(configIoBase.value, 16)
+  if (!isNaN(ioBase)) {
+    cpu.ioBaseAddress = ioBase
+  }
+  // ROM/RAM size and reg mode would need store changes — placeholder for now
+  showConfig.value = false
+  phases.reset()
+}
+
+interface ProgramEntry { hex: string; asm: string }
+interface ProgramFile { name: string; program: ProgramEntry[] }
+
+const examplePrograms: ProgramFile[] = [
+  {
+    name: 'Add & Store',
+    program: [
+      { hex: '0x00700193', asm: 'addi x3, x0, 7' },
+      { hex: '0x00518213', asm: 'addi x4, x3, 5' },
+      { hex: '0x000102b7', asm: 'lui  x5, 0x10' },
+      { hex: '0x0042a223', asm: 'sw   x4, 4(x5)' },
+    ],
+  },
+  {
+    name: 'Count to 5',
+    program: [
+      { hex: '0x00500193', asm: 'addi x3, x0, 5' },
+      { hex: '0x00100213', asm: 'addi x4, x0, 1' },
+      { hex: '0x00420213', asm: 'addi x4, x4, 0' },
+      { hex: '0xfff18193', asm: 'addi x3, x3, -1' },
+      { hex: '0xfe019ce3', asm: 'bne  x3, x0, -8' },
+    ],
+  },
+  {
+    name: 'NOP sled',
+    program: [],
+  },
+]
+
+function loadExample(ex: ProgramFile) {
+  showExamples.value = false
+  if (ex.program.length === 0) {
+    cpu.loadProgram([])
+    return
+  }
+  cpu.loadProgramWithAsm(
+    ex.program.map(e => ({ value: parseInt(e.hex, 16), asm: e.asm }))
+  )
+}
+
+function loadProgram() {
+  fileInput.value?.click()
+}
+
+function onFileLoad(event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0]
+  if (!file) return
+
+  const reader = new FileReader()
+  reader.onload = () => {
+    const text = reader.result as string
+    try {
+      // Try JSON format first
+      const json = JSON.parse(text) as ProgramFile
+      if (json.program && Array.isArray(json.program)) {
+        cpu.loadProgramWithAsm(
+          json.program.map(e => ({ value: parseInt(e.hex, 16), asm: e.asm }))
+        )
+        return
+      }
+    } catch {
+      // Not JSON — try hex-per-line format
+    }
+
+    // Hex per line
+    const lines = text.trim().split('\n').filter(l => l.trim())
+    const words = lines.map(l => parseInt(l.trim(), 16)).filter(n => !isNaN(n))
+    if (words.length > 0) {
+      cpu.loadProgram(words)
+    }
+  }
+  reader.readAsText(file)
+
+  // Reset input so same file can be loaded again
+  ;(event.target as HTMLInputElement).value = ''
+}
+
+function saveProgram() {
+  const program: ProgramEntry[] = cpu.romWords
+    .filter(w => w.value !== 0x00000013 || w.asm !== 'nop')
+    .map(w => ({
+      hex: '0x' + (w.value >>> 0).toString(16).padStart(8, '0'),
+      asm: w.asm ?? 'unknown',
+    }))
+
+  const data: ProgramFile = { name: 'program', program }
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'program.json'
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 // ── Position helper (direct pixel coordinates) ──────────────────────────────
 
@@ -581,6 +907,11 @@ const funct3   = computed(() => (cpu.lastInstr >> 12) & 0x07)
 const funct7b30 = computed(() => ((cpu.lastInstr >> 30) & 0x1) as 0 | 1)
 const isLui    = computed(() => opcode.value === 0b0110111)
 
+const currentAsm = computed(() => {
+  const word = cpu.romWords.find(w => w.address === cpu.pc)
+  return word?.asm ?? ''
+})
+
 // ── Control signal values ────────────────────────────────────────────────────
 
 const aluOp    = computed(() => (busVal('ctrl_alu_op') as 0 | 1 | 2))
@@ -589,6 +920,18 @@ const aluSrcSel = computed(() => cpu.controlStates['ctrl_alu_src']?.asserted ? 1
 const wbSel    = computed(() => busVal('ctrl_wb_sel'))
 const offsetSel = computed(() => cpu.controlStates['ctrl_offset_sel']?.asserted ? 1 : 0)
 const isJalrSel = computed(() => cpu.controlStates['ctrl_is_jalr']?.asserted ? 1 : 0)
+const isBranchTaken = computed(() => offsetSel.value === 1)
+const isRegWrite = computed(() => cpu.controlStates['ctrl_reg_write']?.asserted ?? false)
+
+/** Phase for WB buses: memwb only if regWrite is asserted */
+const wbPhase = computed(() => isRegWrite.value ? 'memwb' as const : 'idle' as const)
+
+/** Phase for imm chain: regread if aluSrc=imm, OR pcupdate if branch taken */
+const immChainPhase = computed(() => {
+  if (aluSrcSel.value === 1) return 'regread' as const
+  if (isBranchTaken.value) return 'pcupdate' as const
+  return 'idle' as const
+})
 
 // ── MUX input arrays ─────────────────────────────────────────────────────────
 
@@ -614,6 +957,23 @@ const muxWbInputs = computed(() => [
 ])
 
 // ── Load / Store derived state ───────────────────────────────────────────────
+
+const isMemOp = computed(() =>
+  cpu.controlStates['ctrl_mem_read']?.asserted || cpu.controlStates['ctrl_mem_write']?.asserted
+)
+
+const isIoAddr = computed(() =>
+  isMemOp.value && cpu.isIoAddress(busVal('alu_result'))
+)
+
+/** Phase for memory-only buses: memwb if mem op, otherwise idle */
+const memPhase = computed(() => isMemOp.value ? 'memwb' as const : 'idle' as const)
+
+/** Phase for RAM buses: only if mem op AND not I/O address */
+const ramPhase = computed(() => (isMemOp.value && !isIoAddr.value) ? 'memwb' as const : 'idle' as const)
+
+/** Phase for I/O buses: only if mem op AND I/O address */
+const ioPhase = computed(() => (isMemOp.value && isIoAddr.value) ? 'memwb' as const : 'idle' as const)
 
 const loadStoreOp = computed(() => {
   if (cpu.controlStates['ctrl_mem_read']?.asserted)  return 'load' as const
@@ -655,5 +1015,219 @@ const ramLastValue = computed(() => {
 .cpu-block {
   position: absolute;
   z-index: 1;
+}
+
+/* Clock controls bar */
+.clock-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #1a1a2e;
+  border-top: 2px solid #333;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.clock-btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 16px;
+  border: 1px solid #555;
+  border-radius: 3px;
+  background: #2a2a4a;
+  color: #eee;
+  cursor: pointer;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  transition: background 0.1s;
+}
+.clock-btn:hover {
+  background: #3a3a6a;
+}
+.clock-btn:active {
+  background: #4a4a8a;
+}
+.clock-btn--reset {
+  border-color: #cc2222;
+  color: #ff6666;
+}
+.clock-btn--reset:hover {
+  background: #3a1a1a;
+}
+
+.clock-speed {
+  width: 120px;
+  accent-color: #0099cc;
+}
+
+.clock-label {
+  font-size: 11px;
+  color: #88aacc;
+  letter-spacing: 0.5px;
+}
+
+.clock-btn--edit {
+  border-color: #88f;
+  color: #aaf;
+}
+.clock-btn--edit:hover {
+  background: #1a1a4a;
+}
+
+.clock-btn--file {
+  border-color: #4a8;
+  color: #8fc;
+}
+.clock-btn--file:hover {
+  background: #1a3a2a;
+}
+
+.clock-divider {
+  color: #444;
+  font-size: 16px;
+  user-select: none;
+}
+
+.clock-examples {
+  position: relative;
+}
+.clock-examples__menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  background: #1a1a2e;
+  border: 1px solid #555;
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 140px;
+  z-index: 20;
+}
+.clock-examples__item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: none;
+  color: #ccc;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.clock-examples__item:hover {
+  background: #2a2a4a;
+  color: #fff;
+}
+
+/* Config Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal {
+  background: #1a1a2e;
+  border: 1px solid #555;
+  border-radius: 6px;
+  min-width: 320px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #eee;
+}
+.modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid #333;
+}
+.modal__title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.modal__close {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+}
+.modal__close:hover { color: #fff; }
+
+.modal__body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modal__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.modal__label {
+  font-size: 11px;
+  color: #aaa;
+  width: 140px;
+  flex-shrink: 0;
+}
+.modal__input {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 4px 8px;
+  background: #2a2a4a;
+  border: 1px solid #555;
+  border-radius: 3px;
+  color: #eee;
+  width: 140px;
+}
+.modal__input:focus {
+  outline: none;
+  border-color: #0099cc;
+}
+
+.modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid #333;
+}
+.modal__btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 5px 14px;
+  border: 1px solid #555;
+  border-radius: 3px;
+  background: #2a2a4a;
+  color: #ccc;
+  cursor: pointer;
+}
+.modal__btn:hover { background: #3a3a6a; }
+.modal__btn--apply {
+  border-color: #4a8;
+  color: #8fc;
+}
+.modal__btn--apply:hover { background: #1a3a2a; }
+
+.clock-phase {
+  font-size: 12px;
+  color: #ffffff;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  flex: 1;
 }
 </style>

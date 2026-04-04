@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import TheWelcome from '../components/TheWelcome.vue'
+import CpuLayout from '../components/CpuLayout.vue'
 </script>
 
 <template>
-  <main>
-    <TheWelcome />
-  </main>
+  <CpuLayout />
 </template>
