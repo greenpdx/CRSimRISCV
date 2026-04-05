@@ -9,8 +9,19 @@
     <!-- Fixed address — never changes, not selectable -->
     <td class="mem-row__addr">{{ addrHex }}</td>
 
-    <!-- Hex bytes — mutable, updated by simulator -->
-    <td class="mem-row__bytes">{{ bytesDisplay }}</td>
+    <!-- Hex bytes — double-click to edit (RAM only) -->
+    <td class="mem-row__bytes" @dblclick="startEdit" v-if="!editing">{{ bytesDisplay }}</td>
+    <td class="mem-row__bytes" v-else>
+      <input
+        ref="editInput"
+        class="mem-row__edit"
+        :value="'0x' + (word.value >>> 0).toString(16).padStart(8, '0')"
+        @keydown.enter="commitEdit($event)"
+        @keydown.escape="editing = false"
+        @blur="commitEdit($event)"
+        spellcheck="false"
+      />
+    </td>
 
     <!-- ASM (ROM) or decimal (RAM) — optional, slot-driven by parent -->
     <td v-if="showAnnotation" class="mem-row__annotation">
@@ -25,16 +36,37 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, nextTick } from 'vue'
 import type { MemoryWord } from '../types/cpu'
 
 const props = defineProps<{
   word: MemoryWord
-  /** 'rom' shows asm column, 'ram' shows signed decimal column */
   kind: 'rom' | 'ram'
-  /** Alternating background stripe */
   stripe?: boolean
 }>()
+
+const editing = ref(false)
+const editInput = ref<HTMLInputElement | null>(null)
+
+function startEdit() {
+  if (props.kind !== 'ram') return // only RAM is editable
+  editing.value = true
+  nextTick(() => editInput.value?.select())
+}
+
+function commitEdit(event: Event) {
+  const val = (event.target as HTMLInputElement).value.trim()
+  editing.value = false
+  let num: number
+  if (val.startsWith('0x') || val.startsWith('0X')) {
+    num = parseInt(val, 16)
+  } else {
+    num = parseInt(val, 10)
+  }
+  if (!isNaN(num)) {
+    props.word.value = num >>> 0
+  }
+}
 
 /** Whether to render the annotation (asm/dec) column */
 const showAnnotation = computed(() => props.kind === 'rom' || props.kind === 'ram')
@@ -62,6 +94,7 @@ const decValue = computed(() => (props.word.value | 0).toString(10))
 <style scoped>
 .mem-row {
   transition: background-color 0.15s ease;
+  cursor: pointer;
 }
 .mem-row--stripe {
   background-color: #e8f8fb;
@@ -99,6 +132,18 @@ const decValue = computed(() => (props.word.value | 0).toString(10))
   font-family: 'JetBrains Mono', 'Courier New', monospace;
   white-space: nowrap;
   text-align: left;
+}
+
+.mem-row__edit {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 10px;
+  width: 80px;
+  padding: 1px 3px;
+  border: 1px solid #38bdf8;
+  border-radius: 2px;
+  background: #fff;
+  color: #0a2030;
+  outline: none;
 }
 
 /* Active dot */

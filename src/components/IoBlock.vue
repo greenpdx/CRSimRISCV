@@ -8,26 +8,38 @@
 
     <div class="io__body">
 
-      <!-- 8-bit LED indicators — bit 7 left, bit 0 right -->
+      <!-- 8-bit LED indicators — click to toggle bits -->
       <div class="io__leds">
         <div
           v-for="bit in bitIndices"
           :key="bit"
           class="io__led-col"
+          @click="toggleBit(bit)"
         >
           <div
             class="io__led"
             :class="getBit(bit) ? 'io__led--on' : 'io__led--off'"
-            :title="`bit ${bit} = ${getBit(bit)}`"
+            :title="`bit ${bit} = ${getBit(bit)} (click to toggle)`"
           />
           <span class="io__bit-label">{{ bit }}</span>
         </div>
       </div>
 
-      <!-- Byte value below LEDs -->
-      <div class="io__byte-row">
+      <!-- Byte value below LEDs — double-click to edit -->
+      <div class="io__byte-row" @dblclick="startEdit" v-if="!editing">
         <span class="io__byte-hex">{{ fmtByte(data) }}</span>
         <span class="io__byte-bin">{{ fmtBin(data) }}</span>
+      </div>
+      <div class="io__byte-row" v-else>
+        <input
+          ref="editInput"
+          class="io__edit"
+          :value="fmtByte(data)"
+          @keydown.enter="commitEdit($event)"
+          @keydown.escape="editing = false"
+          @blur="commitEdit($event)"
+          spellcheck="false"
+        />
       </div>
 
     </div>
@@ -36,23 +48,47 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, nextTick } from 'vue'
+import { useCpuState } from '../stores/cpuState'
 
 export type IoOp = 'idle' | 'read' | 'write'
 
 const props = defineProps<{
-  /** Base address of this peripheral, e.g. 0x40020000 */
   baseAddress: number
-  /** Effective address being accessed */
   address:     number
-  /** Current output data register value */
   data:        number
-  /** Operation this cycle */
   op:          IoOp
 }>()
 
+const cpu = useCpuState()
+const editing = ref(false)
+const editInput = ref<HTMLInputElement | null>(null)
+
 /** bit 7 down to bit 0, left to right */
 const bitIndices = [7, 6, 5, 4, 3, 2, 1, 0]
+
+function toggleBit(bit: number) {
+  cpu.setIoData(props.data ^ (1 << bit))
+}
+
+function startEdit() {
+  editing.value = true
+  nextTick(() => editInput.value?.select())
+}
+
+function commitEdit(event: Event) {
+  const val = (event.target as HTMLInputElement).value.trim()
+  editing.value = false
+  let num: number
+  if (val.startsWith('0x') || val.startsWith('0X')) {
+    num = parseInt(val, 16)
+  } else {
+    num = parseInt(val, 10)
+  }
+  if (!isNaN(num)) {
+    cpu.setIoData(num & 0xFF)
+  }
+}
 
 const getBit = (bit: number): 0 | 1 =>
   ((props.data >>> bit) & 1) as 0 | 1
@@ -194,5 +230,21 @@ const fmtBin  = (v: number) => (v & 0xff).toString(2).padStart(8, '0')
   font-size: 9px;
   color: #6a9ab0;
   letter-spacing: 1px;
+}
+
+.io__edit {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 10px;
+  width: 50px;
+  padding: 1px 3px;
+  border: 1px solid #38bdf8;
+  border-radius: 2px;
+  background: #fff;
+  color: #0a2030;
+  outline: none;
+}
+
+.io__led-col {
+  cursor: pointer;
 }
 </style>

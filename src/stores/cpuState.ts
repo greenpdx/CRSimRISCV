@@ -240,11 +240,17 @@ export const useCpuState = defineStore('cpu', () => {
     const aluB = sig.aluSrc ? immediate : rs2Val
     setBus('alu_b', aluB >>> 0)
 
-    // ── 6. ALU control + compute ─────────────────────────────────────────────
+    // ── 6. ALU control + compute ─────────────────────��───────────────────────
+    // For I-type ALU, bit 30 is part of immediate, not funct7. Only R-type
+    // and I-type shifts (SLLI/SRLI/SRAI) use funct7b30.
+    const isRtype = opcode === 0b0110011
+    const isShiftImm = opcode === 0b0010011 && (funct3 === 0b101 || funct3 === 0b001)
+    const effectiveFunct7b30 = (isRtype || isShiftImm) ? (funct7b30 as 0 | 1) : 0
+
     const aluCtrlCode = computeAluControl(
       sig.aluOp as 0 | 1 | 2,
       funct3,
-      funct7b30 as 0 | 1,
+      effectiveFunct7b30,
       isLui,
     )
     setBus('alu_control', aluCtrlCode)

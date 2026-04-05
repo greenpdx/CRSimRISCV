@@ -15,6 +15,7 @@ coverage
 *.local
 CLAUDE.md
 /.claude/
+/target/
 
 # Editor directories and files
 .vscode/*

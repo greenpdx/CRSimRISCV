@@ -233,11 +233,24 @@
         :phase="wbPhase"
         />
 
-      <!-- ALU result trunk: ALU → corner (highlights in execute AND memory) -->
+      <!-- ALU result: horizontal from ALU to corner -->
       <BusLine
-        net-id="alu_result_trunk"
+        net-id="alu_result_horiz"
         :points="[
           { x: 936, y: 545 },
+          { x: 1060, y: 545 },
+        ]"
+        :bits="32"
+        :value="busVal('alu_result')"
+        :state="busActive('alu_result') ? 'active' : 'idle'"
+        :show-label="false"
+        :phase="aluResultTrunkPhase"
+        />
+
+      <!-- ALU result: vertical lower (corner to WB/LS junction) -->
+      <BusLine
+        net-id="alu_result_vert_lower"
+        :points="[
           { x: 1060, y: 545 },
           { x: 1060, y: 415 },
         ]"
@@ -245,25 +258,10 @@
         :value="busVal('alu_result')"
         :state="busActive('alu_result') ? 'active' : 'idle'"
         :show-label="false"
-        phase="execute"
+        :phase="aluResultTrunkPhase"
         />
 
-      <!-- ALU result trunk (duplicate for memory phase) -->
-      <BusLine
-        net-id="alu_result_trunk_mem"
-        :points="[
-          { x: 936, y: 545 },
-          { x: 1060, y: 545 },
-          { x: 1060, y: 415 },
-        ]"
-        :bits="32"
-        :value="busVal('alu_result')"
-        :state="busActive('alu_result') ? 'active' : 'idle'"
-        :show-label="false"
-        :phase="memPhase"
-        />
-
-      <!-- ALU result corner → WB Sel input 0 -->
+      <!-- ALU result: junction → WB Sel input 0 -->
       <BusLine
         net-id="alu_result_to_wb"
         :points="[
@@ -275,6 +273,34 @@
         :state="busActive('alu_result') ? 'active' : 'idle'"
         :show-label="false"
         phase="execute"
+        />
+
+      <!-- ALU result: vertical upper (junction to JALR tap) -->
+      <BusLine
+        net-id="alu_result_vert_upper"
+        :points="[
+          { x: 1060, y: 415 },
+          { x: 1060, y: 228 },
+        ]"
+        :bits="32"
+        :value="busVal('alu_result')"
+        :state="busActive('alu_result') ? 'active' : 'idle'"
+        :show-label="false"
+        :phase="jalrPhase"
+        />
+
+      <!-- JALR target → PC Sel mux input 1 -->
+      <BusLine
+        net-id="jalr_target"
+        :points="[
+          { x: 1060, y: 228 },
+          { x: 586, y: 228 },
+        ]"
+        :bits="32"
+        :value="busVal('jalr_target')"
+        :state="busActive('jalr_target') ? 'active' : 'idle'"
+        :show-label="false"
+        :phase="jalrPhase"
         />
 
       <!-- LoadStore load data → WB Sel input 1 -->
@@ -494,7 +520,7 @@
     </svg>
 
     <!-- ── ROM (far left, tall) ── -->
-    <div class="cpu-block" :style="px(0, 20)">
+    <div class="cpu-block" :style="px(0, 20)" @click="onRomClick">
       <RomBlock
         :words="cpu.romWords"
         :pc="cpu.pc"
@@ -546,6 +572,7 @@
         :active="busActive('instr')"
         :asm-text="currentAsm"
         :phase-text="phases.phaseLabel"
+        @asm-click="(e: MouseEvent) => showInstrPopup(currentAsm, e)"
       />
     </div>
 
@@ -722,6 +749,9 @@
       </div>
     </div>
 
+    <!-- Instruction description popup -->
+    <InstrPopup ref="instrPopup" />
+
     <!-- Hidden file input for loading -->
     <input
       ref="fileInput"
@@ -754,12 +784,30 @@ import IoBlock from './IoBlock.vue'
 import MuxTrapezoid from './MuxTrapezoid.vue'
 import BusLine from './BusLine.vue'
 import ControlLine from './ControlLine.vue'
+import InstrPopup from './InstrPopup.vue'
 
 // ── Store ────────────────────────────────────────────────────────────────────
 
 const cpu = useCpuState()
 
 const phases = useCpuPhases()
+const instrPopup = ref<InstanceType<typeof InstrPopup> | null>(null)
+
+function showInstrPopup(asm: string, event: MouseEvent) {
+  if (!asm || asm === 'nop') return
+  instrPopup.value?.show(asm.toUpperCase(), event.clientX + 10, event.clientY - 10)
+}
+
+function onRomClick(event: MouseEvent) {
+  // Find the clicked row's annotation cell
+  const target = event.target as HTMLElement
+  const row = target.closest('tr')
+  if (!row) return
+  const annotation = row.querySelector('.mem-row__annotation')
+  if (!annotation) return
+  const asm = annotation.textContent?.trim() ?? ''
+  if (asm) showInstrPopup(asm, event)
+}
 
 // ── Program Load / Save ─────────────────────────────────────────────────────
 
@@ -816,17 +864,96 @@ const examplePrograms: ProgramFile[] = [
     name: 'NOP sled',
     program: [],
   },
+  {
+    name: 'RV32-Scramble (all ops)',
+    program: [
+      { hex: '0x00010337', asm: 'lui x6, 0x10' },
+      { hex: '0x00000397', asm: 'auipc x7, 0' },
+      { hex: '0x04700193', asm: 'addi x3, x0, 0x47' },
+      { hex: '0x05a06213', asm: 'ori x4, x0, 0x5a' },
+      { hex: '0x00519293', asm: 'slli x5, x3, 5' },
+      { hex: '0x0031d093', asm: 'srli x1, x3, 3' },
+      { hex: '0x0012c1b3', asm: 'xor x3, x5, x1' },
+      { hex: '0x004181b3', asm: 'add x3, x3, x4' },
+      { hex: '0x4041d293', asm: 'srai x5, x3, 4' },
+      { hex: '0xfff2c293', asm: 'xori x5, x5, -1' },
+      { hex: '0x0051f0b3', asm: 'and x1, x3, x5' },
+      { hex: '0x0070e1b3', asm: 'or x3, x1, x7' },
+      { hex: '0x404182b3', asm: 'sub x5, x3, x4' },
+      { hex: '0x00f2f113', asm: 'andi x2, x5, 0xf' },
+      { hex: '0x002190b3', asm: 'sll x1, x3, x2' },
+      { hex: '0x0021d2b3', asm: 'srl x5, x3, x2' },
+      { hex: '0x4020d1b3', asm: 'sra x3, x1, x2' },
+      { hex: '0x0041a2b3', asm: 'slt x5, x3, x4' },
+      { hex: '0x003230b3', asm: 'sltu x1, x4, x3' },
+      { hex: '0x0641a113', asm: 'slti x2, x3, 100' },
+      { hex: '0x0c81b393', asm: 'sltiu x7, x3, 200' },
+      { hex: '0x008000ef', asm: 'jal x1, 8' },
+      { hex: '0x00000063', asm: 'beq x0, x0, 0' },
+      { hex: '0x00332023', asm: 'sw x3, 0(x6)' },
+      { hex: '0x00531223', asm: 'sh x5, 4(x6)' },
+      { hex: '0x00230423', asm: 'sb x2, 8(x6)' },
+      { hex: '0x00032183', asm: 'lw x3, 0(x6)' },
+      { hex: '0x00431203', asm: 'lh x4, 4(x6)' },
+      { hex: '0x00830283', asm: 'lb x5, 8(x6)' },
+      { hex: '0x00435103', asm: 'lhu x2, 4(x6)' },
+      { hex: '0x00834383', asm: 'lbu x7, 8(x6)' },
+      { hex: '0x00008067', asm: 'jalr x0, x1, 0' },
+    ],
+  },
+  {
+    name: 'All Opcodes',
+    program: [
+      { hex: '0x00700193', asm: 'addi x3, x0, 7' },
+      { hex: '0x00300213', asm: 'addi x4, x0, 3' },
+      { hex: '0x004182b3', asm: 'add x5, x3, x4' },
+      { hex: '0x404182b3', asm: 'sub x5, x3, x4' },
+      { hex: '0x0041f2b3', asm: 'and x5, x3, x4' },
+      { hex: '0x0041e2b3', asm: 'or x5, x3, x4' },
+      { hex: '0x0041c2b3', asm: 'xor x5, x3, x4' },
+      { hex: '0x004192b3', asm: 'sll x5, x3, x4' },
+      { hex: '0x0041d2b3', asm: 'srl x5, x3, x4' },
+      { hex: '0x003222b3', asm: 'slt x5, x4, x3' },
+      { hex: '0x0031f293', asm: 'andi x5, x3, 3' },
+      { hex: '0x0101e293', asm: 'ori x5, x3, 16' },
+      { hex: '0xfff1c293', asm: 'xori x5, x3, -1' },
+      { hex: '0x00219293', asm: 'slli x5, x3, 2' },
+      { hex: '0x0011d293', asm: 'srli x5, x3, 1' },
+      { hex: '0x00a1a293', asm: 'slti x5, x3, 10' },
+      { hex: '0x00010337', asm: 'lui x6, 0x10' },
+      { hex: '0x00000397', asm: 'auipc x7, 0' },
+      { hex: '0x00332023', asm: 'sw x3, 0(x6)' },
+      { hex: '0x00032283', asm: 'lw x5, 0(x6)' },
+      { hex: '0x00200193', asm: 'addi x3, x0, 2' },
+      { hex: '0xfff18193', asm: 'addi x3, x3, -1' },
+      { hex: '0xfe019ee3', asm: 'bne x3, x0, -4' },
+      { hex: '0x00c000ef', asm: 'jal x1, 12' },
+      { hex: '0x02a00293', asm: 'addi x5, x0, 42' },
+      { hex: '0x00c0006f', asm: 'jal x0, 12' },
+      { hex: '0x06300193', asm: 'addi x3, x0, 99' },
+      { hex: '0x00008067', asm: 'jalr x0, x1, 0' },
+      { hex: '0x40020337', asm: 'lui x6, 0x40020' },
+      { hex: '0x00532023', asm: 'sw x5, 0(x6)' },
+      { hex: '0x0000006f', asm: 'jal x0, 0' },
+    ],
+  },
 ]
 
 function loadExample(ex: ProgramFile) {
   showExamples.value = false
   if (ex.program.length === 0) {
     cpu.loadProgram([])
+    localStorage.setItem('cpuvis_asm', '')
     return
   }
   cpu.loadProgramWithAsm(
     ex.program.map(e => ({ value: parseInt(e.hex, 16), asm: e.asm }))
   )
+  // Copy asm to editor pane via localStorage
+  const asmText = ex.program
+    .map(e => '          ' + e.asm.toUpperCase())
+    .join('\n')
+  localStorage.setItem('cpuvis_asm', asmText)
 }
 
 function loadProgram() {
@@ -847,6 +974,10 @@ function onFileLoad(event: Event) {
         cpu.loadProgramWithAsm(
           json.program.map(e => ({ value: parseInt(e.hex, 16), asm: e.asm }))
         )
+        const asmText = json.program
+          .map(e => '          ' + e.asm.toUpperCase())
+          .join('\n')
+        localStorage.setItem('cpuvis_asm', asmText)
         return
       }
     } catch {
@@ -925,6 +1056,20 @@ const isRegWrite = computed(() => cpu.controlStates['ctrl_reg_write']?.asserted 
 
 /** Phase for WB buses: memwb only if regWrite is asserted */
 const wbPhase = computed(() => isRegWrite.value ? 'memwb' as const : 'idle' as const)
+
+/** Phase for ALU result trunk: highlights in execute, memwb(if memOp), or pcupdate(if JALR) */
+const aluResultTrunkPhase = computed(() => {
+  const p = phases.currentPhase
+  if (p === 'execute') return 'execute' as const
+  if (p === 'memwb' && isMemOp.value) return 'memwb' as const
+  if (p === 'pcupdate' && isJalrSel.value === 1) return 'pcupdate' as const
+  return 'idle' as const
+})
+
+/** Phase for JALR-only segments */
+const jalrPhase = computed(() =>
+  (phases.currentPhase === 'pcupdate' && isJalrSel.value === 1) ? 'pcupdate' as const : 'idle' as const
+)
 
 /** Phase for imm chain: regread if aluSrc=imm, OR pcupdate if branch taken */
 const immChainPhase = computed(() => {

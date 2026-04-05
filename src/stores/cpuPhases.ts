@@ -176,10 +176,16 @@ export const useCpuPhases = defineStore('cpuPhases', () => {
     cpu.setBus('alu_b', ctx.aluB >>> 0)
 
     // ALU control
+    // For I-type ALU (opcode 0010011), funct7b30 is part of the immediate,
+    // not a function selector. Only R-type (0110011) and shifts (SRAI) use it.
+    const isRtype = ctx.opcode === 0b0110011
+    const isShiftImm = ctx.opcode === 0b0010011 && (ctx.funct3 === 0b101 || ctx.funct3 === 0b001)
+    const effectiveFunct7b30 = (isRtype || isShiftImm) ? (ctx.funct7b30 as 0 | 1) : 0
+
     ctx.aluCtrlCode = computeAluControl(
       ctx.sig.aluOp as 0 | 1 | 2,
       ctx.funct3,
-      ctx.funct7b30 as 0 | 1,
+      effectiveFunct7b30,
       ctx.isLui,
     )
     cpu.setBus('alu_control', ctx.aluCtrlCode)
@@ -274,6 +280,11 @@ export const useCpuPhases = defineStore('cpuPhases', () => {
 
     const jalrTarget = ctx.aluResult & 0xFFFFFFFE
     cpu.setBus('jalr_target', jalrTarget)
+
+    // Re-activate alu_result for JALR trunk highlighting
+    if (isJalr) {
+      cpu.setBus('alu_result', ctx.aluResult)
+    }
 
     cpu.setCtrl('ctrl_is_jalr', isJalr)
     const computedNextPc = isJalr ? jalrTarget : pcAdderResult

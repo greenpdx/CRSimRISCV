@@ -12,7 +12,7 @@ const activeTab = ref<'cpu' | 'editor'>('cpu')
       <CpuLayout @switch-tab="activeTab = 'editor'" />
     </div>
     <div v-show="activeTab === 'editor'">
-      <EditorView @switch-tab="activeTab = 'cpu'" />
+      <EditorView :visible="activeTab === 'editor'" @switch-tab="activeTab = 'cpu'" />
     </div>
   </div>
 </template>

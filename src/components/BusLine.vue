@@ -42,18 +42,18 @@
     <!-- Value label — shown on hover, click, or when active+showLabel -->
     <g v-if="showValue">
       <rect
-        :x="midpoint.x - labelW / 2 - 3"
-        :y="midpoint.y - 14"
-        :width="labelW + 6"
-        :height="14"
-        rx="2"
+        :x="midpoint.x - bigLabelW / 2 - 4"
+        :y="midpoint.y - 22"
+        :width="bigLabelW + 8"
+        :height="20"
+        rx="3"
         :fill="effectiveState === 'idle' ? '#333' : busColor"
         opacity="0.9"
       />
       <text
         :x="midpoint.x"
-        :y="midpoint.y - 4"
-        class="bus-line__label"
+        :y="midpoint.y - 7"
+        class="bus-line__label bus-line__label--big"
         fill="#fff"
         text-anchor="middle"
       >{{ valueLabel }}</text>
@@ -63,7 +63,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import type { SignalState } from '../types/cpu'
 import { useCpuPhases } from '../stores/cpuPhases'
 import type { Phase } from '../stores/cpuPhases'
@@ -91,6 +91,10 @@ const effectiveState = computed<SignalState>(() => {
 
 const hovered = ref(false)
 const clicked = ref(false)
+
+function onEscape(e: KeyboardEvent) { if (e.key === 'Escape') clicked.value = false }
+onMounted(() => window.addEventListener('keydown', onEscape))
+onUnmounted(() => window.removeEventListener('keydown', onEscape))
 
 const showValue = computed(() =>
   hovered.value || clicked.value || (effectiveState.value === 'active' && props.showLabel)
@@ -139,6 +143,7 @@ const valueLabel = computed(() => {
 
 /** Approximate label width for background rect */
 const labelW = computed(() => valueLabel.value.length * 6)
+const bigLabelW = computed(() => valueLabel.value.length * 10)
 
 /** Path length for dash animation */
 const pathLength = ref(200)
@@ -173,5 +178,8 @@ onMounted(() => {
   font-size: 8px;
   font-weight: 600;
   pointer-events: none;
+}
+.bus-line__label--big {
+  font-size: 14px;
 }
 </style>

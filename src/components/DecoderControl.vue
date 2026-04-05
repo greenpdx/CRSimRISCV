@@ -3,7 +3,7 @@
 
     <div class="ctrl__header">
       <span class="ctrl__title">Decoder / Control</span>
-      <span v-if="asmText" class="ctrl__asm">{{ asmText }}</span>
+      <span v-if="asmText" class="ctrl__asm ctrl__asm--clickable" @click="emit('asm-click', $event)">{{ asmText }}</span>
       <span class="ctrl__phase-label">{{ phaseText ?? '' }}</span>
     </div>
 
@@ -63,10 +63,12 @@ import type { ControlSignals } from '../data/controlData'
 const props = defineProps<{
   opcode: number
   active?: boolean
-  /** Current assembly instruction text */
   asmText?: string
-  /** Current micro-phase label */
   phaseText?: string
+}>()
+
+const emit = defineEmits<{
+  'asm-click': [event: MouseEvent]
 }>()
 
 const entry = computed(() => OPCODE_BY_VALUE.get(props.opcode & 0x7f))
@@ -124,6 +126,13 @@ const signals = computed<ControlSignals>(() =>
   color: #ffffff;
   text-transform: uppercase;
   margin-left: 5em;
+}
+.ctrl__asm--clickable {
+  cursor: pointer;
+  border-bottom: 1px dashed rgba(255,255,255,0.4);
+}
+.ctrl__asm--clickable:hover {
+  color: #f0c060;
 }
 .ctrl__phase-label {
   font-size: 10px;

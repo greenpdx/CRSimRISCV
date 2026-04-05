@@ -111,7 +111,7 @@ const fmtHex = (v: number) =>
   border-radius: 3px;
   overflow: hidden;
   font-family: 'JetBrains Mono', 'Courier New', monospace;
-  width: max-content;
+  width: 260px;
 }
 
 /* Header */
