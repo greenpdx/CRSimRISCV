@@ -8,7 +8,7 @@
       <!-- regWrite → Register File -->
       <ControlLine
         net-id="ctrl_reg_write"
-        :points="[{ x: 334, y: 105 }, { x: 334, y: 466 }]"
+        :points="[{ x: 334, y: 105 }, { x: 334, y: 353 }]"
         :asserted="cpu.controlStates['ctrl_reg_write']?.asserted ?? false"
         :show-label="true"
         :phase="wbPhase"
@@ -53,7 +53,7 @@
       <!-- aluOp → ALU Control -->
       <ControlLine
         net-id="ctrl_alu_op"
-        :points="[{ x: 853, y: 105 }, { x: 853, y: 327 }]"
+        :points="[{ x: 853, y: 105 }, { x: 853, y: 403 }]"
         :asserted="busVal('ctrl_alu_op') !== 0"
         :show-label="true"
         phase="execute"
@@ -62,7 +62,7 @@
       <!-- wbSel → WB Sel MUX -->
       <ControlLine
         net-id="ctrl_wb_sel"
-        :points="[{ x: 955, y: 105 }, { x: 955, y: 390 }]"
+        :points="[{ x: 955, y: 105 }, { x: 955, y: 288 }]"
         :asserted="busVal('ctrl_wb_sel') !== 0"
         :show-label="true"
         :phase="wbPhase"
@@ -194,7 +194,7 @@
       <BusLine
         net-id="alu_control"
         :points="[
-          { x: 850, y: 397 },
+          { x: 850, y: 473 },
           { x: 850, y: 495 },
         ]"
         :bits="4"
@@ -222,9 +222,9 @@
       <BusLine
         net-id="write_data"
         :points="[
-          { x: 899, y: 435 },
-          { x: 410, y: 435 },
-          { x: 410, y: 466 },
+          { x: 899, y: 337 },
+          { x: 410, y: 337 },
+          { x: 410, y: 353 },
         ]"
         :bits="32"
         :value="busVal('write_data')"
@@ -252,7 +252,7 @@
         net-id="alu_result_vert_lower"
         :points="[
           { x: 1060, y: 545 },
-          { x: 1060, y: 415 },
+          { x: 1060, y: 310 },
         ]"
         :bits="32"
         :value="busVal('alu_result')"
@@ -265,8 +265,8 @@
       <BusLine
         net-id="alu_result_to_wb"
         :points="[
-          { x: 1060, y: 415 },
-          { x: 1011, y: 415 },
+          { x: 1060, y: 310 },
+          { x: 1011, y: 310 },
         ]"
         :bits="32"
         :value="busVal('alu_result')"
@@ -279,7 +279,7 @@
       <BusLine
         net-id="alu_result_vert_upper"
         :points="[
-          { x: 1060, y: 415 },
+          { x: 1060, y: 310 },
           { x: 1060, y: 228 },
         ]"
         :bits="32"
@@ -308,8 +308,8 @@
         net-id="mem_read_data"
         :points="[
           { x: 1159, y: 100 },
-          { x: 1159, y: 435 },
-          { x: 1011, y: 435 },
+          { x: 1159, y: 330 },
+          { x: 1011, y: 330 },
         ]"
         :bits="32"
         :value="busVal('mem_read_data')"
@@ -325,8 +325,8 @@
           { x: 624, y: 180 },
           { x: 624, y: 260 },
           { x: 1035, y: 260 },
-          { x: 1035, y: 455 },
-          { x: 1011, y: 455 },
+          { x: 1035, y: 350 },
+          { x: 1011, y: 350 },
         ]"
         :bits="32"
         :value="busVal('pc_adder_result')"
@@ -357,7 +357,7 @@
       <BusLine
         net-id="alu_result_ls"
         :points="[
-          { x: 1060, y: 415 },
+          { x: 1060, y: 310 },
           { x: 1060, y: 40 },
           { x: 1079, y: 40 },
         ]"
@@ -480,7 +480,7 @@
           { x: 280, y: 287 },
           { x: 280, y: 313 },
           { x: 820, y: 313 },
-          { x: 820, y: 327 },
+          { x: 820, y: 403 },
         ]"
         :bits="32"
         :value="busVal('instr')"
@@ -586,7 +586,7 @@
     </div>
 
     <!-- ── ALU Control ── -->
-    <div class="cpu-block" :style="px(803, 327)">
+    <div class="cpu-block" :style="px(803, 403)">
       <AluControlUnit
         :alu-op="aluOp"
         :funct3="funct3"
@@ -597,10 +597,15 @@
     </div>
 
     <!-- ── Register File ── -->
-    <div class="cpu-block" :style="px(258, 466)">
+    <div class="cpu-block" :style="px(258, 353)">
       <RegisterFile
         :registers="cpu.registers"
       />
+    </div>
+
+    <!-- ── CSR Registers (stub) ── -->
+    <div class="cpu-block" :style="px(258, 680)">
+      <CsrUnit />
     </div>
 
     <!-- ── MUX ALU Src B ── -->
@@ -626,7 +631,7 @@
     </div>
 
     <!-- ── MUX Write-Back ── -->
-    <div class="cpu-block" :style="px(899, 390)">
+    <div class="cpu-block" :style="px(899, 288)">
       <MuxTrapezoid
         label="WB Sel"
         output-label="write data"
@@ -782,6 +787,7 @@ import ImmGenerator from './ImmGenerator.vue'
 import LoadStore from './LoadStore.vue'
 import IoBlock from './IoBlock.vue'
 import MuxTrapezoid from './MuxTrapezoid.vue'
+import CsrUnit from './CsrUnit.vue'
 import BusLine from './BusLine.vue'
 import ControlLine from './ControlLine.vue'
 import InstrPopup from './InstrPopup.vue'
