@@ -2,10 +2,13 @@
   <div class="ls" :class="{ 'ls--active': op !== 'idle' }">
     <div class="ls__box">
 
-      <!-- Left side: inputs -->
+      <!-- Left side: addr, load data, store data (bottom) -->
       <div class="ls__left">
         <div class="ls__port">
           <span class="ls__port-label">addr</span>
+        </div>
+        <div class="ls__port">
+          <span class="ls__port-label">load data</span>
         </div>
         <div class="ls__port">
           <span class="ls__port-label">store data</span>
@@ -22,18 +25,13 @@
       <!-- Right side: memory/IO interface -->
       <div class="ls__right">
         <div class="ls__port">
-          <span class="ls__port-label">Memory</span>
+          <span class="ls__port-label">I/O</span>
         </div>
         <div class="ls__port">
-          <span class="ls__port-label">I/O</span>
+          <span class="ls__port-label">Memory</span>
         </div>
       </div>
 
-    </div>
-
-    <!-- Bottom: load data output -->
-    <div class="ls__bottom">
-      <span class="ls__port-label">load data</span>
     </div>
   </div>
 </template>

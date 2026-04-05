@@ -326,7 +326,56 @@ fn encode_instruction(
         return Err("jalr requires 2 or 3 operands".into());
     }
 
+    // CSR instructions: csrXX rd, csr, rs1  OR  csrXXi rd, csr, uimm
+    match mnemonic.as_str() {
+        "csrrw" | "csrrs" | "csrrc" | "csrrwi" | "csrrsi" | "csrrci" => {
+            let rd = parse_reg(&operands, 0)?;
+            let csr_addr = resolve_csr(&operands, 1)?;
+            let is_imm = mnemonic.ends_with('i');
+            let funct3 = match mnemonic.as_str() {
+                "csrrw"  => 0b001,
+                "csrrs"  => 0b010,
+                "csrrc"  => 0b011,
+                "csrrwi" => 0b101,
+                "csrrsi" => 0b110,
+                "csrrci" => 0b111,
+                _ => unreachable!(),
+            };
+            let rs1_or_uimm = if is_imm {
+                resolve_imm(&operands, 2, current_addr, labels)? as u32 & 0x1F
+            } else {
+                parse_reg(&operands, 2)?
+            };
+            // CSR encoding: I-type with csr addr in imm[11:0], rs1/uimm in rs1 field
+            return Ok(encode_i(0b1110011, rd, funct3, rs1_or_uimm, csr_addr as i32));
+        }
+        _ => {}
+    }
+
     Err(format!("unknown instruction '{}'", mnemonic))
+}
+
+/// Resolve CSR name or numeric address
+fn resolve_csr(operands: &[&str], idx: usize) -> Result<u32, String> {
+    let s = operands.get(idx).ok_or("missing CSR operand")?.trim();
+    // Try known CSR names
+    match s.to_lowercase().as_str() {
+        "cycle"     => return Ok(0xC00),
+        "time"      => return Ok(0xC01),
+        "instret"   => return Ok(0xC02),
+        "mstatus"   => return Ok(0x300),
+        "mtvec"     => return Ok(0x305),
+        "mepc"      => return Ok(0x341),
+        "mcause"    => return Ok(0x342),
+        "mvendorid" => return Ok(0xF11),
+        "mimpid"    => return Ok(0xF13),
+        _ => {}
+    }
+    // Try as numeric
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        return u32::from_str_radix(hex, 16).map_err(|_| format!("invalid CSR address '{}'", s));
+    }
+    s.parse::<u32>().map_err(|_| format!("unknown CSR '{}'", s))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

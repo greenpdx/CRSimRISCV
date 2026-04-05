@@ -59,6 +59,9 @@ interface InstrContext {
   memReadData: number
   wbData: number
   pcPlus4: number
+  csrAddr: number
+  csrOldVal: number
+  csrOp: number
 }
 
 export const useCpuPhases = defineStore('cpuPhases', () => {
@@ -82,6 +85,8 @@ export const useCpuPhases = defineStore('cpuPhases', () => {
     cpu.clearActiveFlags()
     cpu.clearBusStates()
     cpu.cycleCount++
+    cpu.csrIncrementCycle()
+    cpu.csrIncrementInstret()
 
     const instr = cpu.romRead(cpu.pc)
     cpu.lastInstr = instr
@@ -103,8 +108,9 @@ export const useCpuPhases = defineStore('cpuPhases', () => {
       rs2Num: (instr >> 20) & 0x1f,
       funct7b30: (instr >> 30) & 0x1,
       entry: undefined,
-      sig: { regWrite: false, aluSrc: false, aluOp: 0, memRead: false, memWrite: false, wbSel: 0, pcSel: 0, immSel: 5 },
+      sig: { regWrite: false, aluSrc: false, aluOp: 0, memRead: false, memWrite: false, wbSel: 0, pcSel: 0, immSel: 5, csrOp: 0 },
       isLui: false,
+      csrAddr: 0, csrOldVal: 0, csrOp: 0,
       immediate: 0,
       rs1Val: 0, rs2Val: 0,
       aluB: 0, aluCtrlCode: 0,
@@ -123,12 +129,23 @@ export const useCpuPhases = defineStore('cpuPhases', () => {
 
     if (!entry) {
       // Unknown opcode — treat as NOP
-      ctx.sig = { regWrite: false, aluSrc: false, aluOp: 0, memRead: false, memWrite: false, wbSel: 0, pcSel: 0, immSel: 5 }
+      ctx.sig = { regWrite: false, aluSrc: false, aluOp: 0, memRead: false, memWrite: false, wbSel: 0, pcSel: 0, immSel: 5, csrOp: 0 }
       return
     }
 
-    ctx.sig = entry.signals
+    ctx.sig = { ...entry.signals }
     ctx.isLui = ctx.opcode === 0b0110111
+
+    // CSR: derive csrOp from funct3 for SYSTEM opcode
+    if (ctx.opcode === 0b1110011) {
+      const f3 = ctx.funct3 & 0x7
+      // funct3: 001=CSRRW, 010=CSRRS, 011=CSRRC, 101=CSRRWI, 110=CSRRSI, 111=CSRRCI
+      if (f3 === 1 || f3 === 5) ctx.sig.csrOp = 1       // RW
+      else if (f3 === 2 || f3 === 6) ctx.sig.csrOp = 2   // RS (set)
+      else if (f3 === 3 || f3 === 7) ctx.sig.csrOp = 3   // RC (clear)
+      ctx.csrAddr = (ctx.instr >>> 20) & 0xFFF
+      ctx.csrOp = ctx.sig.csrOp
+    }
 
     cpu.setCtrl('ctrl_reg_write', ctx.sig.regWrite)
     cpu.setCtrl('ctrl_alu_src', ctx.sig.aluSrc)
@@ -196,6 +213,14 @@ export const useCpuPhases = defineStore('cpuPhases', () => {
     ctx.flags = flags
     cpu.setBus('alu_result', result)
     cpu.setCtrl('zero_flag', flags.zero)
+
+    // CSR: read old value and write new value
+    if (ctx.csrOp !== 0) {
+      // For immediate variants (funct3 >= 5), use rs1 field as 5-bit zero-extended immediate
+      const csrSrcVal = (ctx.funct3 >= 5) ? ctx.rs1Num : ctx.rs1Val
+      ctx.csrOldVal = cpu.csrOp(ctx.csrAddr, csrSrcVal, ctx.csrOp)
+      cpu.setBus('csr_read_data', ctx.csrOldVal)
+    }
   }
 
   function phaseMemWb() {
@@ -237,6 +262,7 @@ export const useCpuPhases = defineStore('cpuPhases', () => {
       case 0: ctx.wbData = ctx.aluResult;    break
       case 1: ctx.wbData = ctx.memReadData;  break
       case 2: ctx.wbData = ctx.pcPlus4;      break
+      case 3: ctx.wbData = ctx.csrOldVal;    break  // CSR read value
     }
     cpu.setBus('write_data', ctx.wbData >>> 0)
 

@@ -38,8 +38,9 @@ export interface ControlSignals {
   aluOp:     0 | 1 | 2     // 2-bit
   memRead:   boolean
   memWrite:  boolean
-  wbSel:     0 | 1 | 2     // 2-bit: 0=ALU, 1=Mem, 2=PC+4
+  wbSel:     0 | 1 | 2 | 3 // 2-bit: 0=ALU, 1=Mem, 2=PC+4, 3=CSR
   pcSel:     0 | 1 | 2     // 2-bit: 0=PC+4, 1=PC+imm, 2=(rs1+imm)&~1
+  csrOp:     0 | 1 | 2 | 3 // 0=none, 1=RW, 2=RS(set), 3=RC(clear)
   immSel:    0|1|2|3|4|5   // 3-bit immediate format selector
 }
 
@@ -62,7 +63,7 @@ export const OPCODE_TABLE: OpcodeEntry[] = [
     signals: {
       regWrite: true,  aluSrc: false, aluOp: 2,
       memRead:  false, memWrite: false,
-      wbSel: 0, pcSel: 0, immSel: 5,
+      wbSel: 0, pcSel: 0, immSel: 5, csrOp: 0,
     },
   },
   {
@@ -72,7 +73,7 @@ export const OPCODE_TABLE: OpcodeEntry[] = [
     signals: {
       regWrite: true,  aluSrc: true,  aluOp: 2,
       memRead:  false, memWrite: false,
-      wbSel: 0, pcSel: 0, immSel: 0,
+      wbSel: 0, pcSel: 0, immSel: 0, csrOp: 0,
     },
   },
   {
@@ -82,7 +83,7 @@ export const OPCODE_TABLE: OpcodeEntry[] = [
     signals: {
       regWrite: true,  aluSrc: true,  aluOp: 0,
       memRead:  true,  memWrite: false,
-      wbSel: 1, pcSel: 0, immSel: 0,
+      wbSel: 1, pcSel: 0, immSel: 0, csrOp: 0,
     },
   },
   {
@@ -92,7 +93,7 @@ export const OPCODE_TABLE: OpcodeEntry[] = [
     signals: {
       regWrite: false, aluSrc: true,  aluOp: 0,
       memRead:  false, memWrite: true,
-      wbSel: 0, pcSel: 0, immSel: 1,
+      wbSel: 0, pcSel: 0, immSel: 1, csrOp: 0,
     },
   },
   {
@@ -103,7 +104,7 @@ export const OPCODE_TABLE: OpcodeEntry[] = [
     signals: {
       regWrite: false, aluSrc: false, aluOp: 1,
       memRead:  false, memWrite: false,
-      wbSel: 0, pcSel: 1, immSel: 2,
+      wbSel: 0, pcSel: 1, immSel: 2, csrOp: 0,
     },
   },
   {
@@ -113,7 +114,7 @@ export const OPCODE_TABLE: OpcodeEntry[] = [
     signals: {
       regWrite: true,  aluSrc: true,  aluOp: 2,
       memRead:  false, memWrite: false,
-      wbSel: 0, pcSel: 0, immSel: 3,
+      wbSel: 0, pcSel: 0, immSel: 3, csrOp: 0,
     },
   },
   {
@@ -123,7 +124,7 @@ export const OPCODE_TABLE: OpcodeEntry[] = [
     signals: {
       regWrite: true,  aluSrc: true,  aluOp: 0,
       memRead:  false, memWrite: false,
-      wbSel: 0, pcSel: 0, immSel: 3,
+      wbSel: 0, pcSel: 0, immSel: 3, csrOp: 0,
     },
   },
   {
@@ -134,7 +135,7 @@ export const OPCODE_TABLE: OpcodeEntry[] = [
     signals: {
       regWrite: true,  aluSrc: true,  aluOp: 0,
       memRead:  false, memWrite: false,
-      wbSel: 2, pcSel: 1, immSel: 4,
+      wbSel: 2, pcSel: 1, immSel: 4, csrOp: 0,
     },
   },
   {
@@ -145,7 +146,19 @@ export const OPCODE_TABLE: OpcodeEntry[] = [
     signals: {
       regWrite: true,  aluSrc: true,  aluOp: 0,
       memRead:  false, memWrite: false,
-      wbSel: 2, pcSel: 2, immSel: 0,
+      wbSel: 2, pcSel: 2, immSel: 0, csrOp: 0,
+    },
+  },
+  {
+    // CSR: Zicsr extension — funct3 determines CSR operation type
+    // csrOp is set dynamically from funct3 in the decoder/phase logic
+    opcode: 0b1110011, opcodeBin: '1110011', name: 'CSR',
+    instrs: ['CSRRW','CSRRS','CSRRC','CSRRWI','CSRRSI','CSRRCI'],
+    immFormat: 'none',
+    signals: {
+      regWrite: true,  aluSrc: false, aluOp: 0,
+      memRead:  false, memWrite: false,
+      wbSel: 3, pcSel: 0, immSel: 5, csrOp: 0,  // csrOp derived from funct3 at runtime
     },
   },
 ]

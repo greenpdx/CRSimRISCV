@@ -81,6 +81,50 @@ export const useCpuState = defineStore('cpu', () => {
   const ioData        = ref<number>(0x00000000)
   const ioOp          = ref<'idle' | 'read' | 'write'>('idle')
 
+  // ── CSR Registers (Zicsr extension) ─────────────────────────────────────────
+  const csrRegisters = ref<Record<number, number>>({
+    0xC00: 0,  // cycle
+    0xC01: 0,  // time (alias for cycle)
+    0xC02: 0,  // instret
+    0x300: 0,  // mstatus
+    0x305: 0,  // mtvec
+    0x341: 0,  // mepc
+    0x342: 0,  // mcause
+    0xF11: 0,  // mvendorid (read-only)
+    0xF13: 0,  // mimpid (read-only)
+  })
+
+  const CSR_READ_ONLY = new Set([0xC00, 0xC01, 0xC02, 0xF11, 0xF13])
+
+  function csrRead(addr: number): number {
+    if (addr === 0xC01) return csrRegisters.value[0xC00] ?? 0 // time = cycle
+    return csrRegisters.value[addr] ?? 0
+  }
+
+  function csrWrite(addr: number, value: number) {
+    if (CSR_READ_ONLY.has(addr)) return // don't write read-only CSRs
+    csrRegisters.value[addr] = value >>> 0
+  }
+
+  /** Execute a CSR operation: returns old value, writes new value */
+  function csrOp(addr: number, rs1Val: number, op: number): number {
+    const old = csrRead(addr)
+    switch (op) {
+      case 1: csrWrite(addr, rs1Val); break              // CSRRW: write rs1
+      case 2: csrWrite(addr, old | rs1Val); break         // CSRRS: set bits
+      case 3: csrWrite(addr, old & ~rs1Val); break        // CSRRC: clear bits
+    }
+    return old
+  }
+
+  function csrIncrementCycle() {
+    csrRegisters.value[0xC00] = ((csrRegisters.value[0xC00] ?? 0) + 1) >>> 0
+  }
+
+  function csrIncrementInstret() {
+    csrRegisters.value[0xC02] = ((csrRegisters.value[0xC02] ?? 0) + 1) >>> 0
+  }
+
   // ── Bus and control signal states ──────────────────────────────────────────
   const busStates     = ref<Record<string, BusState>>(mkBusStates())
   const controlStates = ref<Record<string, ControlSignalState>>(mkControlStates())
@@ -291,6 +335,7 @@ export const useCpuState = defineStore('cpu', () => {
       case 0: wbData = aluResult;   break   // ALU result
       case 1: wbData = memReadData; break   // Memory read
       case 2: wbData = pcPlus4;     break   // PC+4 (JAL/JALR)
+      case 3: wbData = 0;           break   // CSR (handled in phased execution)
     }
     setBus('write_data', wbData >>> 0)
 
@@ -427,6 +472,7 @@ export const useCpuState = defineStore('cpu', () => {
         cycleCount: cycleCount.value,
         halted: halted.value,
         lastInstr: lastInstr.value,
+        csrRegisters: { ...csrRegisters.value },
         phase: phaseData?.phase ?? 'idle',
         phaseIndex: phaseData?.phaseIndex ?? -1,
       }
@@ -464,6 +510,11 @@ export const useCpuState = defineStore('cpu', () => {
       if (state.cycleCount !== undefined) cycleCount.value = state.cycleCount
       if (state.halted !== undefined) halted.value = state.halted
       if (state.lastInstr !== undefined) lastInstr.value = state.lastInstr
+      if (state.csrRegisters) {
+        for (const [k, v] of Object.entries(state.csrRegisters)) {
+          csrRegisters.value[Number(k)] = v as number
+        }
+      }
 
       return {
         restored: true,
@@ -519,6 +570,12 @@ export const useCpuState = defineStore('cpu', () => {
     ramRead,
     ramWrite,
     isIoAddress,
+    csrRegisters,
+    csrRead,
+    csrWrite,
+    csrOp,
+    csrIncrementCycle,
+    csrIncrementInstret,
     saveState,
     restoreState,
     clearSavedState,

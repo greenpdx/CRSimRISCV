@@ -218,4 +218,28 @@ export const INSTR_GROUPS: InstrGroup[] = [
     ],
     example: 'J LOOP',
   },
+
+  // ── CSR (Zicsr extension) ──
+  {
+    label: 'CSRRW/CSRRS/CSRRC',
+    operands: 'RD, CSR, RS1',
+    format: 'CSR (I-type)',
+    variants: [
+      { mnemonic: 'CSRRW', description: 'Read the CSR into RD, then write the value of RS1 into the CSR. Atomic read-modify-write for control/status registers' },
+      { mnemonic: 'CSRRS', description: 'Read the CSR into RD, then SET bits in the CSR that are set in RS1. Bits in the CSR that are 0 in RS1 are unchanged' },
+      { mnemonic: 'CSRRC', description: 'Read the CSR into RD, then CLEAR bits in the CSR that are set in RS1. Bits in the CSR that are 0 in RS1 are unchanged' },
+    ],
+    example: 'CSRRS X3, CYCLE, X0',
+  },
+  {
+    label: 'CSRRWI/CSRRSI/CSRRCI',
+    operands: 'RD, CSR, UIMM',
+    format: 'CSR (I-type)',
+    variants: [
+      { mnemonic: 'CSRRWI', description: 'Read the CSR into RD, then write the 5-bit zero-extended immediate UIMM into the CSR' },
+      { mnemonic: 'CSRRSI', description: 'Read the CSR into RD, then SET bits in the CSR using the 5-bit immediate UIMM as a mask' },
+      { mnemonic: 'CSRRCI', description: 'Read the CSR into RD, then CLEAR bits in the CSR using the 5-bit immediate UIMM as a mask' },
+    ],
+    example: 'CSRRSI X3, MSTATUS, 1',
+  },
 ]

@@ -383,6 +383,13 @@ export const RV32I_NETLIST: Netlist = {
       to:   [{ componentId: 'mux_wb', portName: 'in1'       }],
     },
 
+    // ── CSR read data (Zicsr) ─────────────────────────────────────────────
+    {
+      id: 'csr_read_data', bits: 32,
+      from: { componentId: 'decoder', portName: 'pc_sel' }, // placeholder source
+      to:   [{ componentId: 'mux_wb', portName: 'in3' }],
+    },
+
     // ── Write-back to register file ────────────────────────────────────────
     {
       id: 'write_data', bits: 32,

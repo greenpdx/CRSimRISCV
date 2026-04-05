@@ -237,8 +237,8 @@
       <BusLine
         net-id="alu_result_horiz"
         :points="[
-          { x: 936, y: 545 },
-          { x: 1060, y: 545 },
+          { x: 936, y: 555 },
+          { x: 1060, y: 555 },
         ]"
         :bits="32"
         :value="busVal('alu_result')"
@@ -307,8 +307,9 @@
       <BusLine
         net-id="mem_read_data"
         :points="[
-          { x: 1159, y: 100 },
-          { x: 1159, y: 330 },
+          { x: 1280, y: 585 },
+          { x: 1100, y: 585 },
+          { x: 1100, y: 330 },
           { x: 1011, y: 330 },
         ]"
         :bits="32"
@@ -335,10 +336,26 @@
         :phase="wbSel === 2 ? 'memwb' : 'idle'"
         />
 
+      <!-- CSR read data → WB Sel input 3 (only when Zicsr enabled) -->
+      <BusLine
+        v-if="config.enableCsr"
+        net-id="csr_read_data"
+        :points="[
+          { x: 1150, y: 246 },
+          { x: 1150, y: 388 },
+          { x: 1011, y: 388 },
+        ]"
+        :bits="32"
+        :value="busVal('csr_read_data')"
+        :state="busActive('csr_read_data') ? 'active' : 'idle'"
+        :show-label="false"
+        :phase="wbSel === 3 ? 'memwb' : 'idle'"
+        />
+
       <!-- ctrl_mem_read → LoadStore -->
       <ControlLine
         net-id="ctrl_mem_read"
-        :points="[{ x: 1003, y: 75 }, { x: 1079, y: 75 }]"
+        :points="[{ x: 1003, y: 75 }, { x: 1270, y: 75 }, { x: 1270, y: 545 }, { x: 1280, y: 545 }]"
         :asserted="cpu.controlStates['ctrl_mem_read']?.asserted ?? false"
         :show-label="true"
         :phase="memPhase"
@@ -347,7 +364,7 @@
       <!-- ctrl_mem_write → LoadStore -->
       <ControlLine
         net-id="ctrl_mem_write"
-        :points="[{ x: 1003, y: 82 }, { x: 1079, y: 82 }]"
+        :points="[{ x: 1003, y: 82 }, { x: 1260, y: 82 }, { x: 1260, y: 555 }, { x: 1280, y: 555 }]"
         :asserted="cpu.controlStates['ctrl_mem_write']?.asserted ?? false"
         :show-label="true"
         :phase="memPhase"
@@ -358,8 +375,8 @@
         net-id="alu_result_ls"
         :points="[
           { x: 1060, y: 310 },
-          { x: 1060, y: 40 },
-          { x: 1079, y: 40 },
+          { x: 1060, y: 555 },
+          { x: 1280, y: 555 },
         ]"
         :bits="32"
         :value="busVal('alu_result')"
@@ -373,10 +390,8 @@
         net-id="rs2_data_ls"
         :points="[
           { x: 540, y: 548 },
-          { x: 540, y: 624 },
-          { x: 1075, y: 624 },
-          { x: 1075, y: 65 },
-          { x: 1079, y: 65 },
+          { x: 540, y: 620 },
+          { x: 1280, y: 620 },
         ]"
         :bits="32"
         :value="busVal('rs2_data')"
@@ -389,8 +404,10 @@
       <BusLine
         net-id="ls_addr_ram"
         :points="[
-          { x: 1220, y: 35 },
-          { x: 1280, y: 35 },
+          { x: 1420, y: 620 },
+          { x: 1526, y: 620 },
+          { x: 1526, y: 75 },
+          { x: 1450, y: 75 },
         ]"
         :bits="32"
         :value="busVal('alu_result')"
@@ -403,8 +420,10 @@
       <BusLine
         net-id="ls_data_ram"
         :points="[
-          { x: 1220, y: 55 },
-          { x: 1280, y: 55 },
+          { x: 1420, y: 600 },
+          { x: 1516, y: 600 },
+          { x: 1516, y: 85 },
+          { x: 1450, y: 85 },
         ]"
         :bits="32"
         :value="busVal('rs2_data')"
@@ -417,10 +436,10 @@
       <BusLine
         net-id="ls_addr_io"
         :points="[
-          { x: 1220, y: 70 },
-          { x: 1260, y: 70 },
-          { x: 1260, y: 470 },
-          { x: 1280, y: 470 },
+          { x: 1420, y: 570 },
+          { x: 1506, y: 570 },
+          { x: 1506, y: 450 },
+          { x: 1470, y: 450 },
         ]"
         :bits="32"
         :value="busVal('alu_result')"
@@ -433,10 +452,10 @@
       <BusLine
         net-id="ls_data_io"
         :points="[
-          { x: 1220, y: 85 },
-          { x: 1250, y: 85 },
-          { x: 1250, y: 485 },
-          { x: 1280, y: 485 },
+          { x: 1420, y: 555 },
+          { x: 1496, y: 555 },
+          { x: 1496, y: 460 },
+          { x: 1470, y: 460 },
         ]"
         :bits="32"
         :value="busVal('rs2_data')"
@@ -603,8 +622,8 @@
       />
     </div>
 
-    <!-- ── CSR Registers (stub) ── -->
-    <div class="cpu-block" :style="px(258, 680)">
+    <!-- ── CSR Registers (only when Zicsr enabled) ── -->
+    <div v-if="config.enableCsr" class="cpu-block" :style="px(1073, 100)">
       <CsrUnit />
     </div>
 
@@ -642,7 +661,7 @@
     </div>
 
     <!-- ── Load / Store ── -->
-    <div class="cpu-block" :style="px(1079, 20)">
+    <div class="cpu-block" :style="px(1280, 540)">
       <LoadStore
         :op="loadStoreOp"
         :address="busVal('alu_result')"
@@ -664,7 +683,7 @@
     </div>
 
     <!-- ── I/O Block (below RAM) ── -->
-    <div class="cpu-block" :style="px(1280, 460)">
+    <div class="cpu-block" :style="px(1280, 434)">
       <IoBlock
         :base-address="cpu.ioBaseAddress"
         :address="busVal('alu_result')"
@@ -727,6 +746,7 @@
           <button class="modal__close" @click="showConfig = false">X</button>
         </div>
         <div class="modal__body">
+          <div class="modal__section">General</div>
           <div class="modal__row">
             <label class="modal__label">I/O Base Address</label>
             <input class="modal__input" v-model="configIoBase" placeholder="0x40020000" />
@@ -745,6 +765,15 @@
               <option value="8">8 registers</option>
               <option value="32">32 registers</option>
             </select>
+          </div>
+
+          <div class="modal__section">Extensions</div>
+          <div class="modal__row">
+            <label class="modal__label">Zicsr (CSR registers)</label>
+            <label class="modal__toggle">
+              <input type="checkbox" v-model="config.enableCsr" />
+              <span>{{ config.enableCsr ? 'Enabled' : 'Disabled' }}</span>
+            </label>
           </div>
         </div>
         <div class="modal__footer">
@@ -773,6 +802,7 @@
 import { computed, ref } from 'vue'
 import { useCpuState } from '../stores/cpuState'
 import { useCpuPhases } from '../stores/cpuPhases'
+import { useCpuConfig } from '../stores/cpuConfig'
 import type { ImmSel } from '../data/immData'
 
 import RomBlock from './RomBlock.vue'
@@ -797,6 +827,7 @@ import InstrPopup from './InstrPopup.vue'
 const cpu = useCpuState()
 
 const phases = useCpuPhases()
+const config = useCpuConfig()
 const instrPopup = ref<InstanceType<typeof InstrPopup> | null>(null)
 
 function showInstrPopup(asm: string, event: MouseEvent) {
@@ -1101,11 +1132,17 @@ const muxAluSrcInputs = computed(() => [
   { name: 'imm',  value: busVal('immediate'), bits: 32 },
 ])
 
-const muxWbInputs = computed(() => [
-  { name: 'ALU',    value: busVal('alu_result'),       bits: 32 },
-  { name: 'Mem',    value: busVal('mem_read_data'),    bits: 32 },
-  { name: 'PC+4',   value: busVal('pc_adder_result'),  bits: 32 },
-])
+const muxWbInputs = computed(() => {
+  const inputs = [
+    { name: 'ALU',  value: busVal('alu_result'),       bits: 32 },
+    { name: 'Mem',  value: busVal('mem_read_data'),    bits: 32 },
+    { name: 'PC+4', value: busVal('pc_adder_result'),  bits: 32 },
+  ]
+  if (config.enableCsr) {
+    inputs.push({ name: 'CSR', value: busVal('csr_read_data'), bits: 32 })
+  }
+  return inputs
+})
 
 // ── Load / Store derived state ───────────────────────────────────────────────
 
@@ -1373,6 +1410,34 @@ const ramLastValue = computed(() => {
   color: #8fc;
 }
 .modal__btn--apply:hover { background: #1a3a2a; }
+
+.modal__section {
+  font-size: 11px;
+  font-weight: 700;
+  color: #888;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding-top: 8px;
+  border-top: 1px solid #333;
+}
+.modal__section:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.modal__toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #ccc;
+  cursor: pointer;
+}
+.modal__toggle input[type="checkbox"] {
+  accent-color: #0099cc;
+  width: 16px;
+  height: 16px;
+}
 
 .clock-phase {
   font-size: 12px;
