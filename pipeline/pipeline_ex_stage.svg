@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="850" height="650" viewBox="0 0 850 650" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    text { font-family: 'JetBrains Mono', monospace; }
+    .comp { fill: #fff; stroke: #333; stroke-width: 1.5; }
+    .mux { fill: #f5f5f5; stroke: #444; stroke-width: 1.5; }
+    .out-box { fill: #fff8f0; stroke: #cc8800; stroke-width: 1.5; }
+    .fb-box { fill: #fff0f0; stroke: #cc2222; stroke-width: 1.5; }
+  </style>
+  <defs>
+    <marker id="arr" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0,0 7,2.5 0,5" fill="#333"/>
+    </marker>
+    <marker id="arr-a" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0,0 7,2.5 0,5" fill="#cc8800"/>
+    </marker>
+    <marker id="arr-r" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0,0 7,2.5 0,5" fill="#cc2222"/>
+    </marker>
+    <marker id="arr-g" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0,0 7,2.5 0,5" fill="#009977"/>
+    </marker>
+  </defs>
+
+  <!-- ID/EX register (input, left) -->
+  <rect x="10" y="30" width="20" height="570" rx="2" fill="#e8e8e8" stroke="#666" stroke-width="1"/>
+  <text x="20" y="315" text-anchor="middle" font-size="8" fill="#666" transform="rotate(-90 20 315)">ID / EX</text>
+
+  <!-- Stage background -->
+  <rect x="50" y="30" width="600" height="570" rx="8" fill="#fff5cc" fill-opacity="0.12" stroke="#cc8800" stroke-width="2"/>
+  <text x="350" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#cc8800">EXECUTE (EX)</text>
+
+  <!-- EX/MEM register (output, right) -->
+  <rect x="670" y="30" width="20" height="570" rx="2" fill="#e8e8e8" stroke="#666" stroke-width="1"/>
+  <text x="680" y="315" text-anchor="middle" font-size="8" fill="#666" transform="rotate(-90 680 315)">EX / MEM</text>
+
+  <!-- ═══ LEFT: Inputs from ID/EX ═══ -->
+
+  <line x1="30" y1="60" x2="80" y2="60" stroke="#009977" stroke-width="1.5" marker-end="url(#arr-g)"/>
+  <text x="35" y="53" font-size="7" fill="#009977">pc [31:0]</text>
+
+  <line x1="30" y1="95" x2="80" y2="95" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-a)"/>
+  <text x="35" y="88" font-size="7" fill="#cc8800">rs1_val [31:0]</text>
+
+  <line x1="30" y1="130" x2="80" y2="130" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-a)"/>
+  <text x="35" y="123" font-size="7" fill="#cc8800">rs2_val [31:0]</text>
+
+  <line x1="30" y1="170" x2="80" y2="170" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-a)"/>
+  <text x="35" y="163" font-size="7" fill="#cc8800">imm [31:0]</text>
+
+  <line x1="30" y1="220" x2="80" y2="220" stroke="#cc2222" stroke-width="1.5" marker-end="url(#arr-r)"/>
+  <text x="35" y="213" font-size="7" fill="#cc2222">alu_op [13:0]</text>
+
+  <line x1="30" y1="260" x2="80" y2="260" stroke="#cc2222" stroke-width="1.5" marker-end="url(#arr-r)"/>
+  <text x="35" y="253" font-size="7" fill="#cc2222">opcode [10:0]</text>
+
+  <line x1="30" y1="310" x2="80" y2="310" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="35" y="303" font-size="7" fill="#333">funct3 [2:0]</text>
+
+  <line x1="30" y1="350" x2="80" y2="350" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="35" y="343" font-size="7" fill="#333">rd_addr [4:0]</text>
+
+  <line x1="30" y1="380" x2="80" y2="380" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="35" y="373" font-size="7" fill="#333">rs1_addr [4:0]</text>
+
+  <line x1="30" y1="410" x2="80" y2="410" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="35" y="403" font-size="7" fill="#333">exception [3:0]</text>
+
+  <!-- ═══ CENTER: Processing ═══ -->
+
+  <!-- MUX B (rs2/imm → ALU B) -->
+  <polygon points="120,115 190,115 200,155 110,155" class="mux" stroke-linejoin="round"/>
+  <text x="155" y="132" text-anchor="middle" font-size="9" font-weight="bold" fill="#333">MUX B</text>
+  <text x="155" y="148" text-anchor="middle" font-size="7" fill="#888">rs2 / imm</text>
+
+  <!-- rs2 → MUX B -->
+  <path d="M 80,130 L 110,130" fill="none" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-a)"/>
+  <!-- imm → MUX B -->
+  <path d="M 80,170 L 95,170 L 95,145 L 110,145" fill="none" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-a)"/>
+
+  <!-- ALU (rs1 direct as A, MUX B as B) -->
+  <rect x="230" y="55" width="160" height="110" rx="3" class="comp"/>
+  <text x="310" y="80" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">ALU</text>
+  <text x="310" y="100" text-anchor="middle" font-size="8" fill="#888">ADD SUB SLT SLTU</text>
+  <text x="310" y="113" text-anchor="middle" font-size="8" fill="#888">XOR OR AND SLL SRL SRA</text>
+  <text x="310" y="126" text-anchor="middle" font-size="8" fill="#888">EQ NEQ GE GEU</text>
+  <text x="310" y="153" text-anchor="middle" font-size="7" fill="#333">y = rs1 op B</text>
+
+  <!-- rs1 → ALU A (direct, no MUX) -->
+  <path d="M 80,95 L 210,95 L 210,80 L 230,80" fill="none" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-a)"/>
+  <text x="218" y="73" font-size="7" fill="#cc8800">A (rs1)</text>
+
+  <!-- MUX B → ALU B -->
+  <path d="M 200,135 L 215,135 L 215,120 L 230,120" fill="none" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-a)"/>
+  <text x="218" y="128" font-size="7" fill="#cc8800">B</text>
+
+  <!-- alu_op → ALU -->
+  <path d="M 80,220 L 210,220 L 210,165 L 230,165" fill="none" stroke="#cc2222" stroke-width="1" marker-end="url(#arr-r)"/>
+
+  <!-- Branch Logic -->
+  <rect x="230" y="200" width="160" height="50" rx="3" class="comp"/>
+  <text x="310" y="223" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">Branch Logic</text>
+  <text x="310" y="240" text-anchor="middle" font-size="7" fill="#888">if branch && y[0] → taken</text>
+
+  <!-- ALU y[0] → Branch Logic -->
+  <path d="M 390,100 L 410,100 L 410,220 L 390,220" fill="none" stroke="#333" stroke-width="1" marker-end="url(#arr)"/>
+  <text x="415" y="160" font-size="6" fill="#888" transform="rotate(-90 415 160)">y[0] result</text>
+
+  <!-- opcode → Branch Logic -->
+  <path d="M 80,260 L 200,260 L 200,230 L 230,230" fill="none" stroke="#cc2222" stroke-width="1" marker-end="url(#arr-r)"/>
+
+  <!-- JALR Target (rs1 + imm) -->
+  <rect x="230" y="280" width="160" height="50" rx="3" class="comp"/>
+  <text x="310" y="302" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">JALR Target</text>
+  <text x="310" y="320" text-anchor="middle" font-size="7" fill="#888">jalr_target = (rs1 + imm) &amp; ~1</text>
+
+  <!-- rs1 → JALR -->
+  <path d="M 210,95 L 210,290 L 230,290" fill="none" stroke="#cc8800" stroke-width="1" stroke-dasharray="3,2"/>
+  <!-- imm → JALR -->
+  <path d="M 95,170 L 95,310 L 230,310" fill="none" stroke="#cc8800" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <!-- RD Value MUX -->
+  <polygon points="230,370 340,370 350,430 220,430" class="mux" stroke-linejoin="round"/>
+  <text x="285" y="392" text-anchor="middle" font-size="9" font-weight="bold" fill="#333">RD MUX</text>
+  <text x="285" y="408" text-anchor="middle" font-size="7" fill="#888">ALU (R/I) / imm (LUI)</text>
+  <text x="285" y="420" text-anchor="middle" font-size="7" fill="#888">PC+4 (JAL/JALR)</text>
+
+  <!-- ALU y → RD MUX -->
+  <path d="M 390,90 L 405,90 L 405,378 L 350,378" fill="none" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-a)"/>
+  <text x="400" y="240" font-size="7" fill="#cc8800" transform="rotate(-90 400 240)">alu_result</text>
+
+  <!-- imm → RD MUX (LUI) -->
+  <path d="M 95,170 L 88,170 L 88,410 L 220,410" fill="none" stroke="#cc8800" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="150" y="406" font-size="6" fill="#cc8800">imm (LUI)</text>
+
+  <!-- PC+4 → RD MUX -->
+  <path d="M 80,60 L 85,60 L 85,420 L 220,420" fill="none" stroke="#009977" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="150" y="418" font-size="6" fill="#009977">PC+4 (JAL/JALR)</text>
+
+  <!-- Write Control -->
+  <rect x="230" y="460" width="130" height="40" rx="3" class="comp"/>
+  <text x="295" y="482" text-anchor="middle" font-size="9" font-weight="bold" fill="#333">Write Control</text>
+  <text x="295" y="495" text-anchor="middle" font-size="7" fill="#888">wr_rd, rd_valid</text>
+
+  <!-- Exception passthrough -->
+  <rect x="230" y="520" width="130" height="35" rx="3" class="comp"/>
+  <text x="295" y="542" text-anchor="middle" font-size="9" font-weight="bold" fill="#333">Exception</text>
+
+  <!-- ═══ RIGHT: Outputs ═══ -->
+
+  <!-- → EX/MEM outputs -->
+  <rect x="555" y="50" width="100" height="230" rx="5" class="out-box"/>
+  <text x="605" y="68" text-anchor="middle" font-size="9" font-weight="bold" fill="#cc8800">→ EX/MEM</text>
+  <text x="565" y="88" font-size="7" fill="#333">pc [31:0]</text>
+  <text x="565" y="103" font-size="7" fill="#333">alu_result [31:0]</text>
+  <text x="565" y="118" font-size="7" fill="#333">rs1_val [31:0]</text>
+  <text x="565" y="133" font-size="7" fill="#333">rs2_val [31:0]</text>
+  <text x="565" y="148" font-size="7" fill="#333">rd_addr [4:0]</text>
+  <text x="565" y="163" font-size="7" fill="#333">rd_val [31:0]</text>
+  <text x="565" y="178" font-size="7" fill="#333">wr_rd</text>
+  <text x="565" y="193" font-size="7" fill="#333">rd_valid</text>
+  <text x="565" y="208" font-size="7" fill="#333">opcode [10:0]</text>
+  <text x="565" y="223" font-size="7" fill="#333">funct3 [2:0]</text>
+  <text x="565" y="238" font-size="7" fill="#333">rs1_addr [4:0]</text>
+  <text x="565" y="253" font-size="7" fill="#333">imm [11:0]</text>
+  <text x="565" y="268" font-size="7" fill="#333">exception [3:0]</text>
+
+  <!-- RD MUX → rd_val -->
+  <path d="M 350,400 L 530,400 L 530,163 L 555,163" fill="none" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-a)"/>
+
+  <!-- ALU → alu_result -->
+  <path d="M 530,100 L 530,103 L 555,103" fill="none" stroke="#cc8800" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <!-- Output to EX/MEM register -->
+  <line x1="655" y1="160" x2="670" y2="160" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-a)"/>
+
+  <!-- → IF feedback: JALR target only (branch target comes from ID now) -->
+  <rect x="555" y="310" width="100" height="70" rx="5" class="fb-box"/>
+  <text x="605" y="328" text-anchor="middle" font-size="9" font-weight="bold" fill="#cc2222">→ IF (feedback)</text>
+  <text x="565" y="348" font-size="7" fill="#333">JALR_target [31:0]</text>
+  <text x="565" y="363" font-size="7" fill="#333">change_pc (JALR)</text>
+  <text x="565" y="375" font-size="7" fill="#888">+ branch taken/flush</text>
+
+  <!-- JALR → feedback -->
+  <path d="M 390,305 L 530,305 L 530,348 L 555,348" fill="none" stroke="#cc2222" stroke-width="1.5" marker-end="url(#arr-r)"/>
+
+  <!-- Branch Logic → flush/taken to IF -->
+  <path d="M 390,225 L 540,225 L 540,363 L 555,363" fill="none" stroke="#cc2222" stroke-width="1.5" marker-end="url(#arr-r)"/>
+
+  <!-- Output to IF -->
+  <line x1="655" y1="345" x2="670" y2="345" stroke="#cc2222" stroke-width="1.5" marker-end="url(#arr-r)"/>
+
+  <!-- → FWD outputs -->
+  <rect x="555" y="400" width="100" height="60" rx="5" class="fb-box"/>
+  <text x="605" y="418" text-anchor="middle" font-size="9" font-weight="bold" fill="#cc2222">→ FWD (to ID)</text>
+  <text x="565" y="438" font-size="7" fill="#333">rd_addr, wr_rd</text>
+  <text x="565" y="453" font-size="7" fill="#333">rd_valid, rd_val</text>
+
+  <!-- Pipeline control -->
+  <rect x="555" y="480" width="100" height="45" rx="3" fill="#f0f0f0" stroke="#666" stroke-width="1"/>
+  <text x="605" y="498" text-anchor="middle" font-size="8" font-weight="bold" fill="#666">Pipeline Ctrl</text>
+  <text x="565" y="515" font-size="7" fill="#666">stall, flush</text>
+
+</svg>

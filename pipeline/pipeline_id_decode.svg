@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="900" height="500" viewBox="0 0 900 500" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    text { font-family: 'JetBrains Mono', monospace; }
+    .field { fill: #fff; stroke: #333; stroke-width: 1.5; }
+    .section { fill: #fafafa; stroke: #999; stroke-width: 1; stroke-dasharray: 4,2; }
+    .out-box { fill: #f0f8ff; stroke: #0066cc; stroke-width: 1.5; }
+  </style>
+  <defs>
+    <marker id="arr" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0,0 7,2.5 0,5" fill="#333"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="450" y="18" text-anchor="middle" font-size="14" font-weight="bold" fill="#cc2222">DECODER (Detail) — Left to Right Flow</text>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- Column 1: Instruction Field Extraction     -->
+  <!-- (left side, vertical stack of 6 fields)   -->
+  <!-- ═══════════════════════════════════════════ -->
+  <rect x="20" y="30" width="110" height="440" rx="5" class="section"/>
+  <text x="75" y="48" text-anchor="middle" font-size="9" font-weight="bold" fill="#666">INST [31:0]</text>
+
+  <!-- Input arrow -->
+  <line x1="0" y1="250" x2="20" y2="250" stroke="#0099cc" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="3" y="242" font-size="8" font-weight="bold" fill="#0099cc">inst</text>
+  <text x="3" y="262" font-size="7" fill="#0099cc">from IF/ID</text>
+
+  <rect x="30" y="58" width="90" height="32" rx="3" class="field"/>
+  <text x="75" y="73" text-anchor="middle" font-size="8" font-weight="bold" fill="#333">funct7</text>
+  <text x="75" y="85" text-anchor="middle" font-size="6" fill="#888">[31:25] 7b</text>
+
+  <rect x="30" y="98" width="90" height="32" rx="3" class="field"/>
+  <text x="75" y="113" text-anchor="middle" font-size="8" font-weight="bold" fill="#333">rs2</text>
+  <text x="75" y="125" text-anchor="middle" font-size="6" fill="#888">[24:20] 5b</text>
+
+  <rect x="30" y="138" width="90" height="32" rx="3" class="field"/>
+  <text x="75" y="153" text-anchor="middle" font-size="8" font-weight="bold" fill="#333">rs1</text>
+  <text x="75" y="165" text-anchor="middle" font-size="6" fill="#888">[19:15] 5b</text>
+
+  <rect x="30" y="178" width="90" height="32" rx="3" class="field"/>
+  <text x="75" y="193" text-anchor="middle" font-size="8" font-weight="bold" fill="#333">funct3</text>
+  <text x="75" y="205" text-anchor="middle" font-size="6" fill="#888">[14:12] 3b</text>
+
+  <rect x="30" y="218" width="90" height="32" rx="3" class="field"/>
+  <text x="75" y="233" text-anchor="middle" font-size="8" font-weight="bold" fill="#333">rd</text>
+  <text x="75" y="245" text-anchor="middle" font-size="6" fill="#888">[11:7] 5b</text>
+
+  <rect x="30" y="258" width="90" height="32" rx="3" class="field"/>
+  <text x="75" y="273" text-anchor="middle" font-size="8" font-weight="bold" fill="#333">opcode</text>
+  <text x="75" y="285" text-anchor="middle" font-size="6" fill="#888">[6:0] 7b</text>
+
+  <!-- Imm bits span (all fields feed imm) -->
+  <rect x="30" y="310" width="90" height="32" rx="3" fill="#fff8f0" stroke="#cc8800" stroke-width="1"/>
+  <text x="75" y="325" text-anchor="middle" font-size="8" font-weight="bold" fill="#cc8800">imm bits</text>
+  <text x="75" y="337" text-anchor="middle" font-size="6" fill="#cc8800">scattered</text>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- Column 2: Secondary Decode (3 blocks)     -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <!-- Connecting lines from fields → decoders -->
+  <!-- funct7+funct3+opcode → ALU Op Decode -->
+  <line x1="120" y1="74" x2="160" y2="74" stroke="#999" stroke-width="1"/>
+  <line x1="120" y1="194" x2="145" y2="194" stroke="#999" stroke-width="1"/>
+  <path d="M 145,194 L 145,90 L 160,90" fill="none" stroke="#999" stroke-width="1"/>
+  <line x1="120" y1="274" x2="140" y2="274" stroke="#999" stroke-width="1"/>
+  <path d="M 140,274 L 140,105 L 160,105" fill="none" stroke="#999" stroke-width="1"/>
+
+  <!-- opcode → Opcode Decode -->
+  <path d="M 120,274 L 140,274 L 140,230 L 160,230" fill="none" stroke="#999" stroke-width="1"/>
+
+  <!-- all fields → Imm Decode -->
+  <line x1="120" y1="326" x2="160" y2="350" stroke="#999" stroke-width="1"/>
+
+  <!-- ALU Operation Decode -->
+  <rect x="160" y="55" width="160" height="70" rx="3" class="field"/>
+  <text x="240" y="80" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">ALU Op</text>
+  <text x="240" y="95" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">Decode</text>
+  <text x="240" y="112" text-anchor="middle" font-size="7" fill="#888">funct7 + funct3 + opcode</text>
+
+  <!-- Opcode Type Decode -->
+  <rect x="160" y="195" width="160" height="55" rx="3" class="field"/>
+  <text x="240" y="218" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">Opcode</text>
+  <text x="240" y="233" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">Decode</text>
+  <text x="240" y="245" text-anchor="middle" font-size="7" fill="#888">opcode[6:0]</text>
+
+  <!-- Immediate Decode -->
+  <rect x="160" y="320" width="160" height="55" rx="3" class="field"/>
+  <text x="240" y="343" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">Imm</text>
+  <text x="240" y="358" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">Decode</text>
+  <text x="240" y="370" text-anchor="middle" font-size="7" fill="#888">format → sign-extend</text>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- Column 3: Output Groups                   -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <!-- Lines from decoders → outputs -->
+  <line x1="320" y1="90" x2="370" y2="90" stroke="#999" stroke-width="1"/>
+  <line x1="320" y1="222" x2="370" y2="222" stroke="#999" stroke-width="1"/>
+  <line x1="320" y1="347" x2="370" y2="347" stroke="#999" stroke-width="1"/>
+
+  <!-- ALU Operations output box -->
+  <rect x="370" y="30" width="200" height="150" rx="5" class="out-box"/>
+  <text x="470" y="48" text-anchor="middle" font-size="9" font-weight="bold" fill="#0066cc">ALU Operations (14)</text>
+
+  <text x="385" y="68" font-size="8" fill="#333">ADD</text>
+  <text x="430" y="68" font-size="8" fill="#333">SUB</text>
+  <text x="480" y="68" font-size="8" fill="#333">SLT</text>
+  <text x="530" y="68" font-size="8" fill="#333">SLTU</text>
+  <text x="385" y="85" font-size="8" fill="#333">XOR</text>
+  <text x="430" y="85" font-size="8" fill="#333">OR</text>
+  <text x="480" y="85" font-size="8" fill="#333">AND</text>
+  <text x="385" y="102" font-size="8" fill="#333">SLL</text>
+  <text x="430" y="102" font-size="8" fill="#333">SRL</text>
+  <text x="480" y="102" font-size="8" fill="#333">SRA</text>
+  <line x1="375" y1="112" x2="565" y2="112" stroke="#ddd" stroke-width="0.5"/>
+  <text x="470" y="126" text-anchor="middle" font-size="8" font-weight="bold" fill="#cc8800">Branch Compare</text>
+  <text x="385" y="143" font-size="8" fill="#333">EQ</text>
+  <text x="430" y="143" font-size="8" fill="#333">NEQ</text>
+  <text x="480" y="143" font-size="8" fill="#333">GE</text>
+  <text x="530" y="143" font-size="8" fill="#333">GEU</text>
+  <text x="470" y="170" text-anchor="middle" font-size="7" fill="#888">14 one-hot → EX ALU</text>
+
+  <!-- Opcode Types output box -->
+  <rect x="370" y="195" width="200" height="125" rx="5" class="out-box"/>
+  <text x="470" y="213" text-anchor="middle" font-size="9" font-weight="bold" fill="#0066cc">Opcode Types (11)</text>
+  <text x="385" y="233" font-size="8" fill="#333">R-type</text>
+  <text x="450" y="233" font-size="8" fill="#333">I-type</text>
+  <text x="520" y="233" font-size="8" fill="#333">Load</text>
+  <text x="385" y="250" font-size="8" fill="#333">Store</text>
+  <text x="450" y="250" font-size="8" fill="#333">Branch</text>
+  <text x="520" y="250" font-size="8" fill="#333">JAL</text>
+  <text x="385" y="267" font-size="8" fill="#333">JALR</text>
+  <text x="450" y="267" font-size="8" fill="#333">LUI</text>
+  <text x="520" y="267" font-size="8" fill="#333">AUIPC</text>
+  <text x="385" y="284" font-size="8" fill="#333">SYSTEM</text>
+  <text x="450" y="284" font-size="8" fill="#333">FENCE</text>
+  <text x="470" y="310" text-anchor="middle" font-size="7" fill="#888">11 flags → control EX/MEM/WB</text>
+
+  <!-- Immediate output box -->
+  <rect x="370" y="335" width="200" height="45" rx="5" class="out-box"/>
+  <text x="470" y="355" text-anchor="middle" font-size="9" font-weight="bold" fill="#0066cc">imm [31:0]</text>
+  <text x="470" y="370" text-anchor="middle" font-size="7" fill="#888">sign-extended (I/S/B/U/J)</text>
+
+  <!-- Register addresses (direct passthrough) -->
+  <rect x="370" y="395" width="200" height="55" rx="5" class="out-box"/>
+  <text x="470" y="413" text-anchor="middle" font-size="9" font-weight="bold" fill="#0066cc">Register Addresses</text>
+  <text x="385" y="433" font-size="8" fill="#333">rs1 [4:0]</text>
+  <text x="455" y="433" font-size="8" fill="#333">rs2 [4:0]</text>
+  <text x="525" y="433" font-size="8" fill="#333">rd [4:0]</text>
+  <text x="470" y="445" text-anchor="middle" font-size="7" fill="#888">+ funct3 [2:0]</text>
+
+  <!-- Direct passthrough lines for register addresses -->
+  <path d="M 120,114 L 148,114 L 148,420 L 370,420" fill="none" stroke="#cc8800" stroke-width="1" stroke-dasharray="3,2"/>
+  <path d="M 120,154 L 152,154 L 152,425 L 370,425" fill="none" stroke="#cc8800" stroke-width="1" stroke-dasharray="3,2"/>
+  <path d="M 120,234 L 156,234 L 156,430 L 370,430" fill="none" stroke="#cc8800" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <!-- Exceptions output box -->
+  <rect x="600" y="195" width="130" height="65" rx="5" class="out-box"/>
+  <text x="665" y="213" text-anchor="middle" font-size="9" font-weight="bold" fill="#0066cc">Exceptions</text>
+  <text x="615" y="233" font-size="8" fill="#333">ILLEGAL</text>
+  <text x="685" y="233" font-size="8" fill="#333">ECALL</text>
+  <text x="615" y="250" font-size="8" fill="#333">EBREAK</text>
+  <text x="685" y="250" font-size="8" fill="#333">MRET</text>
+  <line x1="570" y1="222" x2="600" y2="222" stroke="#999" stroke-width="1"/>
+
+  <!-- Output arrows to right (→ ID/EX) -->
+  <line x1="570" y1="90" x2="600" y2="90" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="570" y1="257" x2="600" y2="257" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="570" y1="357" x2="600" y2="357" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="570" y1="420" x2="600" y2="420" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="730" y1="227" x2="760" y2="227" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <text x="610" y="85" font-size="7" fill="#888">→ ID/EX</text>
+  <text x="610" y="252" font-size="7" fill="#888">→ ID/EX</text>
+  <text x="610" y="352" font-size="7" fill="#888">→ ID/EX</text>
+  <text x="610" y="415" font-size="7" fill="#888">→ ID/EX</text>
+  <text x="770" y="222" font-size="7" fill="#888">→ ID/EX</text>
+
+  <!-- Summary -->
+  <text x="450" y="490" text-anchor="middle" font-size="9" font-weight="bold" fill="#333">inst [31:0] → 6 fields → 3 decoders → ALU ops + opcode types + imm + addrs + exceptions → ID/EX</text>
+
+</svg>

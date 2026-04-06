@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1600" height="700" viewBox="0 0 1600 700" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    text { font-family: 'JetBrains Mono', monospace; }
+    .stage-bg { fill-opacity: 0.08; stroke-width: 2; }
+    .stage-label { font-size: 14px; font-weight: bold; fill: #333; text-anchor: middle; }
+    .pipe-reg { fill: #f0f0f0; stroke: #666; stroke-width: 1.5; }
+    .pipe-label { font-size: 9px; fill: #666; text-anchor: middle; }
+    .comp { fill: #ffffff; stroke: #333; stroke-width: 1.5; rx: 3; }
+    .comp-label { font-size: 10px; fill: #333; text-anchor: middle; font-weight: 600; }
+    .ext { fill: #f8f8ff; stroke: #0099cc; stroke-width: 1.5; rx: 3; }
+    .ext-label { font-size: 10px; fill: #0099cc; text-anchor: middle; font-weight: 600; }
+  </style>
+
+  <!-- ═══ Stage backgrounds ═══ -->
+
+  <!-- Stage 1: FETCH -->
+  <rect x="20" y="40" width="200" height="560" class="stage-bg" fill="#cce5ff" stroke="#0066cc" rx="8"/>
+  <text x="120" y="30" class="stage-label" fill="#0066cc">FETCH</text>
+
+  <!-- IF/ID Pipeline Register -->
+  <rect x="230" y="40" width="30" height="560" class="pipe-reg"/>
+  <text x="245" y="320" class="pipe-label" transform="rotate(-90 245 320)">IF / ID</text>
+
+  <!-- Stage 2: DECODE -->
+  <rect x="270" y="40" width="260" height="560" class="stage-bg" fill="#ffe0e0" stroke="#cc2222" rx="8"/>
+  <text x="400" y="30" class="stage-label" fill="#cc2222">DECODE</text>
+
+  <!-- ID/EX Pipeline Register -->
+  <rect x="540" y="40" width="30" height="560" class="pipe-reg"/>
+  <text x="555" y="320" class="pipe-label" transform="rotate(-90 555 320)">ID / EX</text>
+
+  <!-- Stage 3: EXECUTE -->
+  <rect x="580" y="40" width="240" height="560" class="stage-bg" fill="#fff5cc" stroke="#cc8800" rx="8"/>
+  <text x="700" y="30" class="stage-label" fill="#cc8800">EXECUTE</text>
+
+  <!-- EX/MEM Pipeline Register -->
+  <rect x="830" y="40" width="30" height="560" class="pipe-reg"/>
+  <text x="845" y="320" class="pipe-label" transform="rotate(-90 845 320)">EX / MEM</text>
+
+  <!-- Stage 4: MEMORY ACCESS -->
+  <rect x="870" y="40" width="240" height="560" class="stage-bg" fill="#e0ffe0" stroke="#009900" rx="8"/>
+  <text x="990" y="30" class="stage-label" fill="#009900">MEMORY ACCESS</text>
+
+  <!-- MEM/WB Pipeline Register -->
+  <rect x="1120" y="40" width="30" height="560" class="pipe-reg"/>
+  <text x="1135" y="320" class="pipe-label" transform="rotate(-90 1135 320)">MEM / WB</text>
+
+  <!-- Stage 5: WRITEBACK -->
+  <rect x="1160" y="40" width="180" height="560" class="stage-bg" fill="#e0ffff" stroke="#009999" rx="8"/>
+  <text x="1250" y="30" class="stage-label" fill="#009999">WRITEBACK</text>
+
+  <!-- ═══ Stage 1: FETCH components ═══ -->
+
+  <rect x="40" y="80" width="160" height="50" class="comp"/>
+  <text x="120" y="110" class="comp-label">PC MUX</text>
+
+  <rect x="40" y="160" width="160" height="50" class="comp"/>
+  <text x="120" y="190" class="comp-label">PC Register</text>
+
+  <rect x="40" y="240" width="160" height="50" class="comp"/>
+  <text x="120" y="270" class="comp-label">+4 Adder</text>
+
+  <!-- ═══ Stage 2: DECODE components ═══ -->
+
+  <rect x="290" y="60" width="220" height="70" class="comp"/>
+  <text x="400" y="95" class="comp-label">Decoder</text>
+  <text x="400" y="115" style="font-size:8px; fill:#888; text-anchor:middle;">(opcode, control signals)</text>
+
+  <rect x="290" y="150" width="220" height="50" class="comp"/>
+  <text x="400" y="180" class="comp-label">Immediate Generator</text>
+
+  <rect x="290" y="220" width="220" height="80" class="comp"/>
+  <text x="400" y="255" class="comp-label">Register File</text>
+  <text x="400" y="275" style="font-size:8px; fill:#888; text-anchor:middle;">(32 x 32-bit, rs1/rs2 read)</text>
+  <text x="400" y="290" style="font-size:8px; fill:#888; text-anchor:middle;">(rd write from WB)</text>
+
+  <rect x="290" y="320" width="220" height="70" class="comp"/>
+  <text x="400" y="350" class="comp-label">Forwarding Unit</text>
+  <text x="400" y="370" style="font-size:8px; fill:#888; text-anchor:middle;">(hazard detection)</text>
+
+  <!-- ═══ Stage 3: EXECUTE components ═══ -->
+
+  <rect x="600" y="60" width="200" height="45" class="comp"/>
+  <text x="700" y="88" class="comp-label">Operand A MUX</text>
+
+  <rect x="600" y="120" width="200" height="45" class="comp"/>
+  <text x="700" y="148" class="comp-label">Operand B MUX</text>
+
+  <rect x="600" y="185" width="200" height="80" class="comp"/>
+  <text x="700" y="220" class="comp-label">ALU</text>
+  <text x="700" y="240" style="font-size:8px; fill:#888; text-anchor:middle;">(ADD, SUB, AND, OR, XOR,</text>
+  <text x="700" y="252" style="font-size:8px; fill:#888; text-anchor:middle;">SLL, SRL, SRA, SLT, SLTU)</text>
+
+  <rect x="600" y="285" width="200" height="50" class="comp"/>
+  <text x="700" y="315" class="comp-label">Branch Comparator</text>
+
+  <rect x="600" y="355" width="200" height="50" class="comp"/>
+  <text x="700" y="385" class="comp-label">PC Calculator</text>
+
+  <rect x="600" y="425" width="200" height="50" class="comp"/>
+  <text x="700" y="455" class="comp-label">RD Value MUX</text>
+
+  <!-- ═══ Stage 4: MEMORY ACCESS components ═══ -->
+
+  <rect x="890" y="60" width="200" height="50" class="comp"/>
+  <text x="990" y="90" class="comp-label">Addr Generator</text>
+
+  <rect x="890" y="130" width="200" height="50" class="comp"/>
+  <text x="990" y="160" class="comp-label">Store Data Aligner</text>
+
+  <rect x="890" y="200" width="200" height="50" class="comp"/>
+  <text x="990" y="230" class="comp-label">Load Data Aligner</text>
+
+  <rect x="890" y="270" width="200" height="60" class="comp"/>
+  <text x="990" y="298" class="comp-label">Memory Interface</text>
+  <text x="990" y="318" style="font-size:8px; fill:#888; text-anchor:middle;">(Wishbone bus)</text>
+
+  <rect x="890" y="360" width="200" height="70" class="comp"/>
+  <text x="990" y="390" class="comp-label">CSR Unit</text>
+  <text x="990" y="410" style="font-size:8px; fill:#888; text-anchor:middle;">(Zicsr extension)</text>
+
+  <!-- ═══ Stage 5: WRITEBACK components ═══ -->
+
+  <rect x="1180" y="100" width="140" height="60" class="comp"/>
+  <text x="1250" y="130" class="comp-label">WB MUX</text>
+  <text x="1250" y="148" style="font-size:8px; fill:#888; text-anchor:middle;">(ALU / Load / CSR)</text>
+
+  <rect x="1180" y="200" width="140" height="60" class="comp"/>
+  <text x="1250" y="230" class="comp-label">Trap Handler</text>
+  <text x="1250" y="248" style="font-size:8px; fill:#888; text-anchor:middle;">(mret, exceptions)</text>
+
+  <!-- ═══ External blocks ═══ -->
+
+  <rect x="40" y="500" width="160" height="80" class="ext"/>
+  <text x="120" y="535" class="ext-label">ROM</text>
+  <text x="120" y="555" style="font-size:8px; fill:#0099cc; text-anchor:middle;">(Instruction Memory)</text>
+
+  <rect x="890" y="480" width="200" height="80" class="ext"/>
+  <text x="990" y="515" class="ext-label">RAM / I/O</text>
+  <text x="990" y="535" style="font-size:8px; fill:#0099cc; text-anchor:middle;">(Data Memory)</text>
+
+  <!-- ═══ Feedback arrows (labeled, no routing yet) ═══ -->
+
+  <!-- EX → IF: branch target -->
+  <text x="400" y="640" style="font-size:9px; fill:#cc8800; font-weight:bold;">← branch_target (EX → IF)</text>
+  <line x1="700" y1="630" x2="120" y2="630" stroke="#cc8800" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrow-amber)"/>
+
+  <!-- WB → IF: trap -->
+  <text x="700" y="665" style="font-size:9px; fill:#009999; font-weight:bold;">← trap_pc (WB → IF)</text>
+  <line x1="1250" y1="655" x2="120" y2="655" stroke="#009999" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrow-teal)"/>
+
+  <!-- WB → ID: register writeback -->
+  <text x="700" y="690" style="font-size:9px; fill:#cc2222; font-weight:bold;">← wb_rd (WB → RegFile in ID)</text>
+  <line x1="1250" y1="680" x2="400" y2="680" stroke="#cc2222" stroke-width="1.5" stroke-dasharray="6,3" marker-end="url(#arrow-red)"/>
+
+  <!-- Arrow markers -->
+  <defs>
+    <marker id="arrow-amber" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <polygon points="0,0 6,3 0,6" fill="#cc8800"/>
+    </marker>
+    <marker id="arrow-teal" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <polygon points="0,0 6,3 0,6" fill="#009999"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <polygon points="0,0 6,3 0,6" fill="#cc2222"/>
+    </marker>
+  </defs>
+
+</svg>

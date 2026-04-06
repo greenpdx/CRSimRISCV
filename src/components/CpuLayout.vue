@@ -696,6 +696,7 @@
     <div class="clock-bar">
       <!-- Editor (new tab) -->
       <button class="clock-btn clock-btn--edit" @click="openEditor">Edit</button>
+      <button class="clock-btn clock-btn--edit" @click="emit('switch-pipeline')">Pipeline</button>
 
       <span class="clock-divider">|</span>
 
@@ -858,6 +859,7 @@ const configRegMode = ref('8')
 
 const emit = defineEmits<{
   'switch-tab': []
+  'switch-pipeline': []
 }>()
 
 function openEditor() {

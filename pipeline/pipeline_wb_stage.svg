@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="650" height="550" viewBox="0 0 650 550" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    text { font-family: 'JetBrains Mono', monospace; }
+    .comp { fill: #fff; stroke: #333; stroke-width: 1.5; }
+    .mux { fill: #f5f5f5; stroke: #444; stroke-width: 1.5; }
+    .fb-box { fill: #fff0f0; stroke: #cc2222; stroke-width: 1.5; }
+    .fb-box-g { fill: #f0fff0; stroke: #009977; stroke-width: 1.5; }
+  </style>
+  <defs>
+    <marker id="arr" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0,0 7,2.5 0,5" fill="#333"/>
+    </marker>
+    <marker id="arr-a" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0,0 7,2.5 0,5" fill="#cc8800"/>
+    </marker>
+    <marker id="arr-r" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0,0 7,2.5 0,5" fill="#cc2222"/>
+    </marker>
+    <marker id="arr-g" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0,0 7,2.5 0,5" fill="#009977"/>
+    </marker>
+    <marker id="arr-t" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0,0 7,2.5 0,5" fill="#009999"/>
+    </marker>
+  </defs>
+
+  <!-- MEM/WB register (input, left) -->
+  <rect x="10" y="30" width="20" height="470" rx="2" fill="#e8e8e8" stroke="#666" stroke-width="1"/>
+  <text x="20" y="265" text-anchor="middle" font-size="8" fill="#666" transform="rotate(-90 20 265)">MEM / WB</text>
+
+  <!-- Stage background -->
+  <rect x="50" y="30" width="350" height="470" rx="8" fill="#e0ffff" fill-opacity="0.12" stroke="#009999" stroke-width="2"/>
+  <text x="225" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#009999">WRITEBACK (WB)</text>
+
+  <!-- ═══ LEFT: Inputs from MEM/WB ═══ -->
+
+  <line x1="30" y1="60" x2="70" y2="60" stroke="#009977" stroke-width="1.5" marker-end="url(#arr-g)"/>
+  <text x="35" y="53" font-size="7" fill="#009977">pc [31:0]</text>
+
+  <line x1="30" y1="95" x2="70" y2="95" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="35" y="88" font-size="7" fill="#333">rd_addr [4:0]</text>
+
+  <line x1="30" y1="125" x2="70" y2="125" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-a)"/>
+  <text x="35" y="118" font-size="7" fill="#cc8800">rd_val [31:0]</text>
+  <text x="35" y="132" font-size="6" fill="#888">(ALU result)</text>
+
+  <line x1="30" y1="165" x2="70" y2="165" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="35" y="158" font-size="7" fill="#333">wr_rd</text>
+
+  <line x1="30" y1="200" x2="70" y2="200" stroke="#0099cc" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="35" y="193" font-size="7" fill="#0099cc">data_load [31:0]</text>
+  <text x="35" y="207" font-size="6" fill="#888">(from memory)</text>
+
+  <line x1="30" y1="240" x2="70" y2="240" stroke="#009977" stroke-width="1.5" marker-end="url(#arr-g)"/>
+  <text x="35" y="233" font-size="7" fill="#009977">csr_out [31:0]</text>
+  <text x="35" y="247" font-size="6" fill="#888">(CSR read value)</text>
+
+  <line x1="30" y1="280" x2="70" y2="280" stroke="#cc2222" stroke-width="1.5" marker-end="url(#arr-r)"/>
+  <text x="35" y="273" font-size="7" fill="#cc2222">opcode [10:0]</text>
+
+  <line x1="30" y1="310" x2="70" y2="310" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="35" y="303" font-size="7" fill="#333">funct3 [2:0]</text>
+
+  <line x1="30" y1="340" x2="70" y2="340" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="35" y="333" font-size="7" fill="#333">exception [3:0]</text>
+
+  <!-- ═══ CENTER: Components ═══ -->
+
+  <!-- WB MUX (selects final rd value) -->
+  <polygon points="100,80 220,80 230,180 90,180" class="mux" stroke-linejoin="round"/>
+  <text x="160" y="110" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">WB MUX</text>
+  <text x="160" y="130" text-anchor="middle" font-size="7" fill="#888">0: ALU result (R/I/LUI/AUIPC)</text>
+  <text x="160" y="143" text-anchor="middle" font-size="7" fill="#888">1: data_load (Load)</text>
+  <text x="160" y="156" text-anchor="middle" font-size="7" fill="#888">2: csr_out (CSR)</text>
+  <text x="160" y="172" text-anchor="middle" font-size="7" fill="#333">sel = opcode</text>
+
+  <!-- rd_val (ALU) → WB MUX input 0 -->
+  <path d="M 70,125 L 85,125 L 85,100 L 90,100" fill="none" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-a)"/>
+  <text x="77" y="95" font-size="6" fill="#cc8800">ALU</text>
+
+  <!-- data_load → WB MUX input 1 -->
+  <path d="M 70,200 L 82,200 L 82,130 L 90,130" fill="none" stroke="#0099cc" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="77" y="140" font-size="6" fill="#0099cc">Load</text>
+
+  <!-- csr_out → WB MUX input 2 -->
+  <path d="M 70,240 L 78,240 L 78,160 L 90,160" fill="none" stroke="#009977" stroke-width="1.5" marker-end="url(#arr-g)"/>
+  <text x="77" y="165" font-size="6" fill="#009977">CSR</text>
+
+  <!-- opcode → WB MUX select -->
+  <path d="M 70,280 L 75,280 L 75,175 L 90,175" fill="none" stroke="#cc2222" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <!-- Trap Handler -->
+  <rect x="100" y="230" width="170" height="80" rx="3" class="comp"/>
+  <text x="185" y="255" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Trap Handler</text>
+  <text x="185" y="275" text-anchor="middle" font-size="7" fill="#888">exception → go_to_trap</text>
+  <text x="185" y="288" text-anchor="middle" font-size="7" fill="#888">mret → return_from_trap</text>
+  <text x="185" y="301" text-anchor="middle" font-size="7" fill="#888">selects mtvec or mepc</text>
+
+  <!-- exception → Trap Handler -->
+  <path d="M 70,340 L 85,340 L 85,290 L 100,290" fill="none" stroke="#333" stroke-width="1" marker-end="url(#arr)"/>
+
+  <!-- pc → Trap Handler (for mepc save) -->
+  <path d="M 70,60 L 88,60 L 88,250 L 100,250" fill="none" stroke="#009977" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <!-- ═══ RIGHT: Outputs (all feedback, going left) ═══ -->
+
+  <!-- → RegFile in ID stage (register writeback) -->
+  <rect x="420" y="50" width="120" height="85" rx="5" class="fb-box-g"/>
+  <text x="480" y="68" text-anchor="middle" font-size="9" font-weight="bold" fill="#009977">→ RegFile (ID)</text>
+  <text x="430" y="88" font-size="7" fill="#333">wb_rd [31:0]</text>
+  <text x="430" y="103" font-size="7" fill="#333">wb_rd_addr [4:0]</text>
+  <text x="430" y="118" font-size="7" fill="#333">wb_wr_rd</text>
+  <text x="430" y="130" font-size="7" fill="#888">← feedback to ID</text>
+
+  <!-- WB MUX output → wb_rd -->
+  <path d="M 230,130 L 350,130 L 350,88 L 420,88" fill="none" stroke="#cc8800" stroke-width="2" marker-end="url(#arr-a)"/>
+  <text x="290" y="122" font-size="7" fill="#cc8800">wb_rd (final value)</text>
+
+  <!-- rd_addr passthrough → wb_rd_addr -->
+  <path d="M 70,95 L 88,95 L 88,40 L 380,40 L 380,103 L 420,103" fill="none" stroke="#333" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <!-- wr_rd passthrough → wb_wr_rd -->
+  <path d="M 70,165 L 92,165 L 92,36 L 385,36 L 385,118 L 420,118" fill="none" stroke="#333" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <!-- → IF stage (trap PC) -->
+  <rect x="420" y="160" width="120" height="75" rx="5" class="fb-box"/>
+  <text x="480" y="178" text-anchor="middle" font-size="9" font-weight="bold" fill="#cc2222">→ IF (trap)</text>
+  <text x="430" y="198" font-size="7" fill="#333">trap_pc [31:0]</text>
+  <text x="430" y="213" font-size="7" fill="#333">change_pc</text>
+  <text x="430" y="228" font-size="7" fill="#888">← feedback to IF MUX</text>
+
+  <!-- Trap Handler → trap_pc -->
+  <path d="M 270,270 L 360,270 L 360,198 L 420,198" fill="none" stroke="#cc2222" stroke-width="2" marker-end="url(#arr-r)"/>
+
+  <!-- → FWD unit in ID -->
+  <rect x="420" y="260" width="120" height="55" rx="5" class="fb-box"/>
+  <text x="480" y="278" text-anchor="middle" font-size="9" font-weight="bold" fill="#cc2222">→ FWD (ID)</text>
+  <text x="430" y="298" font-size="7" fill="#333">rd_addr, wr_rd</text>
+  <text x="430" y="310" font-size="7" fill="#333">wb_rd [31:0]</text>
+
+  <!-- Pipeline control -->
+  <rect x="420" y="340" width="120" height="50" rx="3" fill="#f0f0f0" stroke="#666" stroke-width="1"/>
+  <text x="480" y="358" text-anchor="middle" font-size="8" font-weight="bold" fill="#666">Pipeline Ctrl</text>
+  <text x="430" y="375" font-size="7" fill="#666">stall_wb</text>
+  <text x="430" y="388" font-size="7" fill="#666">flush_all (trap)</text>
+
+  <!-- ═══ Note: no pipeline register on right ═══ -->
+  <text x="560" y="440" text-anchor="middle" font-size="9" fill="#999">No next stage —</text>
+  <text x="560" y="455" text-anchor="middle" font-size="9" fill="#999">all outputs are</text>
+  <text x="560" y="470" text-anchor="middle" font-size="9" fill="#999">feedback to earlier</text>
+  <text x="560" y="485" text-anchor="middle" font-size="9" fill="#999">stages (IF, ID)</text>
+
+</svg>

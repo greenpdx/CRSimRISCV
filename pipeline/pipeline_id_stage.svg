@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="600" height="700" viewBox="0 0 600 700" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    text { font-family: 'JetBrains Mono', monospace; }
+  </style>
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0,0 8,3 0,6" fill="#333"/>
+    </marker>
+    <marker id="arr-red" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0,0 8,3 0,6" fill="#cc2222"/>
+    </marker>
+    <marker id="arr-amber" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0,0 8,3 0,6" fill="#cc8800"/>
+    </marker>
+    <marker id="arr-green" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0,0 8,3 0,6" fill="#009977"/>
+    </marker>
+  </defs>
+
+  <!-- IF/ID pipeline register (input, left) -->
+  <rect x="10" y="30" width="20" height="580" rx="2" fill="#e8e8e8" stroke="#666" stroke-width="1"/>
+  <text x="20" y="320" text-anchor="middle" font-size="8" fill="#666" transform="rotate(-90 20 320)">IF / ID</text>
+
+  <!-- Stage background -->
+  <rect x="50" y="30" width="400" height="580" rx="8" fill="#ffe0e0" fill-opacity="0.12" stroke="#cc2222" stroke-width="2"/>
+  <text x="250" y="22" text-anchor="middle" font-size="14" font-weight="bold" fill="#cc2222">DECODE (ID)</text>
+
+  <!-- ID/EX pipeline register (output, right) -->
+  <rect x="470" y="30" width="20" height="580" rx="2" fill="#e8e8e8" stroke="#666" stroke-width="1"/>
+  <text x="480" y="320" text-anchor="middle" font-size="8" fill="#666" transform="rotate(-90 480 320)">ID / EX</text>
+
+  <!-- ═══ Inputs from IF/ID ═══ -->
+  <line x1="30" y1="80" x2="70" y2="80" stroke="#0099cc" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="40" y="73" font-size="8" fill="#0099cc">inst</text>
+
+  <line x1="30" y1="120" x2="70" y2="120" stroke="#009977" stroke-width="2" marker-end="url(#arr-green)"/>
+  <text x="40" y="113" font-size="8" fill="#009977">pc</text>
+
+  <!-- ═══ Decoder ═══ -->
+  <rect x="70" y="55" width="180" height="90" rx="3" fill="#fff" stroke="#333" stroke-width="1.5"/>
+  <text x="160" y="80" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Decoder</text>
+  <text x="160" y="95" text-anchor="middle" font-size="8" fill="#888">opcode, funct3</text>
+  <text x="160" y="108" text-anchor="middle" font-size="8" fill="#888">rs1/rs2/rd addr</text>
+  <text x="160" y="121" text-anchor="middle" font-size="8" fill="#888">control signals</text>
+
+  <!-- ═══ Immediate Generator ═══ -->
+  <rect x="70" y="165" width="180" height="45" rx="3" fill="#fff" stroke="#333" stroke-width="1.5"/>
+  <text x="160" y="187" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Imm Generator</text>
+  <text x="160" y="202" text-anchor="middle" font-size="8" fill="#888">I/S/B/U/J formats</text>
+
+  <!-- Decoder → ImmGen -->
+  <line x1="160" y1="145" x2="160" y2="165" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ═══ Register File ═══ -->
+  <rect x="270" y="55" width="160" height="110" rx="3" fill="#fff" stroke="#333" stroke-width="1.5"/>
+  <text x="350" y="80" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Base Register</text>
+  <text x="350" y="98" text-anchor="middle" font-size="8" fill="#888">(Register File)</text>
+  <text x="350" y="113" text-anchor="middle" font-size="8" fill="#888">rs1 read, rs2 read</text>
+  <text x="350" y="128" text-anchor="middle" font-size="8" fill="#888">rd write (from WB)</text>
+
+  <!-- Decoder → RegFile (rs1/rs2 addr) -->
+  <line x1="250" y1="85" x2="270" y2="85" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="255" y="78" font-size="7" fill="#888">rs1,rs2 addr</text>
+
+  <!-- ═══ Branch Target Adder (NEW) ═══ -->
+  <rect x="70" y="230" width="180" height="55" rx="3" fill="#fff" stroke="#009977" stroke-width="2"/>
+  <text x="160" y="255" text-anchor="middle" font-size="10" font-weight="bold" fill="#009977">Branch Target Adder</text>
+  <text x="160" y="273" text-anchor="middle" font-size="7" fill="#009977">branch_target = PC + imm</text>
+
+  <!-- PC → Branch Target Adder -->
+  <path d="M 55,120 L 55,248 L 70,248" fill="none" stroke="#009977" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="58" y="200" font-size="7" fill="#009977" transform="rotate(-90 58 200)">pc</text>
+
+  <!-- ImmGen → Branch Target Adder -->
+  <line x1="160" y1="210" x2="160" y2="230" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-amber)"/>
+  <text x="168" y="222" font-size="7" fill="#cc8800">imm</text>
+
+  <!-- ═══ Forwarding Unit ═══ -->
+  <rect x="120" y="380" width="220" height="60" rx="3" fill="#fff" stroke="#333" stroke-width="1.5"/>
+  <text x="230" y="405" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">Forwarding Unit</text>
+  <text x="230" y="422" text-anchor="middle" font-size="8" fill="#888">hazard detection, operand fwd</text>
+
+  <!-- RegFile → FWD unit -->
+  <path d="M 350,165 L 350,310 L 280,310 L 280,380" fill="none" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-amber)"/>
+  <text x="290" y="340" font-size="7" fill="#cc8800">rs1_orig</text>
+  <text x="290" y="352" font-size="7" fill="#cc8800">rs2_orig</text>
+
+  <!-- ═══ Outputs to ID/EX (right) ═══ -->
+
+  <!-- RegFile → rs1_val, rs2_val -->
+  <path d="M 430,90" fill="none"/>
+  <line x1="430" y1="90" x2="470" y2="90" stroke="#cc8800" stroke-width="2" marker-end="url(#arr-amber)"/>
+  <text x="510" y="88" font-size="8" fill="#cc8800">rs1_val</text>
+
+  <line x1="430" y1="120" x2="470" y2="120" stroke="#cc8800" stroke-width="2" marker-end="url(#arr-amber)"/>
+  <text x="510" y="118" font-size="8" fill="#cc8800">rs2_val</text>
+
+  <!-- FWD override (dashed) -->
+  <path d="M 340,410 L 440,410 L 440,105 L 470,105" fill="none" stroke="#cc8800" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-amber)"/>
+  <text x="448" y="260" font-size="7" fill="#cc8800" transform="rotate(-90 448 260)">fwd override</text>
+
+  <!-- ImmGen → imm output -->
+  <path d="M 250,187 L 260,187 L 260,160 L 470,160" fill="none" stroke="#cc8800" stroke-width="2" marker-end="url(#arr-amber)"/>
+  <text x="510" y="158" font-size="8" fill="#cc8800">imm</text>
+
+  <!-- Decoder → control signals -->
+  <path d="M 250,100 L 260,100 L 260,200 L 470,200" fill="none" stroke="#cc2222" stroke-width="1.5" marker-end="url(#arr-red)"/>
+  <text x="510" y="195" font-size="8" fill="#cc2222">alu_op</text>
+  <text x="510" y="208" font-size="8" fill="#cc2222">opcode</text>
+  <text x="510" y="221" font-size="8" fill="#cc2222">funct3</text>
+
+  <!-- rd_addr, pc, rs1/rs2 addr passthrough -->
+  <line x1="260" y1="240" x2="470" y2="240" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="510" y="243" font-size="8" fill="#333">rd_addr</text>
+
+  <line x1="260" y1="260" x2="470" y2="260" stroke="#009977" stroke-width="1.5" marker-end="url(#arr-green)"/>
+  <text x="510" y="263" font-size="8" fill="#009977">pc</text>
+
+  <line x1="260" y1="280" x2="470" y2="280" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="510" y="278" font-size="8" fill="#333">rs1_addr</text>
+  <text x="510" y="291" font-size="8" fill="#333">rs2_addr</text>
+
+  <line x1="260" y1="310" x2="470" y2="310" stroke="#333" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="510" y="313" font-size="8" fill="#333">exception</text>
+
+  <!-- ═══ Branch Target → feedback to IF (left, going down and out) ═══ -->
+  <path d="M 70,265 L 55,265 L 55,510 L 10,510" fill="none" stroke="#009977" stroke-width="2" marker-end="url(#arr-green)"/>
+  <text x="25" y="500" font-size="8" font-weight="bold" fill="#009977">branch_target</text>
+  <text x="25" y="515" font-size="7" fill="#009977">[31:0] → IF MUX</text>
+  <text x="25" y="528" font-size="7" fill="#009977">(1-cycle feedback)</text>
+
+  <!-- ═══ Feedback inputs (bottom) ═══ -->
+
+  <!-- WB → RegFile writeback -->
+  <path d="M 400,650 L 400,580 L 380,580 L 380,165" fill="none" stroke="#009999" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="408" y="640" font-size="8" font-weight="bold" fill="#009999">wb_rd [31:0]</text>
+  <text x="408" y="653" font-size="7" fill="#009999">wb_rd_addr, wb_wr_rd</text>
+  <text x="408" y="666" font-size="7" fill="#009999">(from WB stage)</text>
+
+  <!-- EX/MEM → FWD unit -->
+  <path d="M 230,650 L 230,440" fill="none" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-amber)"/>
+  <text x="140" y="490" font-size="7" fill="#cc8800">alu_rd_addr, alu_rd</text>
+  <text x="140" y="503" font-size="7" fill="#cc8800">alu_wr_rd, alu_rd_valid</text>
+  <text x="140" y="516" font-size="7" fill="#cc8800">(from EX/MEM)</text>
+
+  <!-- MEM/WB → FWD unit -->
+  <path d="M 280,650 L 280,440" fill="none" stroke="#cc8800" stroke-width="1.5" marker-end="url(#arr-amber)"/>
+  <text x="285" y="490" font-size="7" fill="#cc8800">mem_rd_addr</text>
+  <text x="285" y="503" font-size="7" fill="#cc8800">mem_wr_rd, wb_rd</text>
+  <text x="285" y="516" font-size="7" fill="#cc8800">(from MEM/WB)</text>
+
+  <!-- force_stall output -->
+  <path d="M 120,420 L 80,420 L 80,650" fill="none" stroke="#666" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="70" y="530" font-size="7" fill="#666" transform="rotate(-90 70 530)">force_stall</text>
+
+  <!-- stall/flush -->
+  <line x1="100" y1="650" x2="100" y2="590" stroke="#666" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="100" y="663" text-anchor="middle" font-size="8" fill="#666">stall / flush</text>
+
+</svg>

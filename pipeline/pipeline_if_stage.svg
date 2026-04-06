@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="500" height="650" viewBox="0 0 500 650" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    text { font-family: 'JetBrains Mono', monospace; }
+  </style>
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0,0 8,3 0,6" fill="#333"/>
+    </marker>
+    <marker id="arr-green" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0,0 8,3 0,6" fill="#009977"/>
+    </marker>
+    <marker id="arr-blue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0,0 8,3 0,6" fill="#0099cc"/>
+    </marker>
+  </defs>
+
+  <!-- ROM (external, above IF stage) -->
+  <rect x="100" y="20" width="140" height="55" rx="3" fill="#f0f8ff" stroke="#0099cc" stroke-width="1.5"/>
+  <text x="170" y="45" text-anchor="middle" font-size="11" font-weight="bold" fill="#0099cc">ROM</text>
+  <text x="170" y="62" text-anchor="middle" font-size="8" fill="#0099cc">Instr Memory</text>
+
+  <!-- IF Stage background -->
+  <rect x="40" y="100" width="280" height="390" rx="8" fill="#cce5ff" fill-opacity="0.15" stroke="#0066cc" stroke-width="2"/>
+  <text x="180" y="94" text-anchor="middle" font-size="14" font-weight="bold" fill="#0066cc">FETCH (IF)</text>
+
+  <!-- +4 Adder — left side -->
+  <rect x="60" y="250" width="70" height="45" rx="3" fill="#fff" stroke="#333" stroke-width="1.5"/>
+  <text x="95" y="270" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">+4</text>
+  <text x="95" y="285" text-anchor="middle" font-size="8" fill="#888">Adder</text>
+
+  <!-- PC Register — center -->
+  <rect x="140" y="180" width="100" height="50" rx="3" fill="#fff" stroke="#333" stroke-width="1.5"/>
+  <text x="190" y="202" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">PC</text>
+  <text x="190" y="218" text-anchor="middle" font-size="8" fill="#888">Register</text>
+
+  <!-- PC MUX — bottom, trapezoid, 4 inputs on bottom -->
+  <polygon points="145,400 235,400 265,460 115,460" fill="#f5f5f5" stroke="#444" stroke-width="1.5" stroke-linejoin="round"/>
+  <text x="190" y="425" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">MUX</text>
+  <text x="190" y="442" text-anchor="middle" font-size="8" fill="#888">PC Sel</text>
+
+  <!-- MUX input labels (4 inputs) -->
+  <text x="130" y="475" text-anchor="middle" font-size="7" fill="#009977">0:PC+4</text>
+  <text x="170" y="475" text-anchor="middle" font-size="7" fill="#cc8800">1:branch</text>
+  <text x="215" y="475" text-anchor="middle" font-size="7" fill="#cc8800">2:JALR</text>
+  <text x="255" y="475" text-anchor="middle" font-size="7" fill="#cc2222">3:trap</text>
+
+  <!-- ═══ Internal connections ═══ -->
+
+  <!-- MUX output (top) → PC Register -->
+  <line x1="190" y1="400" x2="190" y2="230" stroke="#009977" stroke-width="2" marker-end="url(#arr-green)"/>
+
+  <!-- PC Register → up to ROM (pc_addr) -->
+  <line x1="190" y1="180" x2="190" y2="75" stroke="#0099cc" stroke-width="2" marker-end="url(#arr-blue)"/>
+  <text x="198" y="140" font-size="8" fill="#0099cc">pc_addr</text>
+
+  <!-- PC → left-down to +4 Adder -->
+  <path d="M 140,215 L 120,215 L 120,250" fill="none" stroke="#009977" stroke-width="2" marker-end="url(#arr-green)"/>
+
+  <!-- +4 Adder output → down then right to MUX input 0 -->
+  <path d="M 95,295 L 95,340 L 135,340 L 135,460" fill="none" stroke="#009977" stroke-width="2" marker-end="url(#arr-green)"/>
+
+  <!-- ROM → inst goes right to IF/ID -->
+  <path d="M 240,50 L 280,50 L 280,150 L 400,150" fill="none" stroke="#0099cc" stroke-width="2" marker-end="url(#arr-blue)"/>
+  <text x="340" y="143" text-anchor="middle" font-size="9" font-weight="bold" fill="#0099cc">inst [31:0]</text>
+
+  <!-- PC → right to IF/ID (pc value) -->
+  <line x1="240" y1="205" x2="400" y2="205" stroke="#009977" stroke-width="2" marker-end="url(#arr-green)"/>
+  <text x="340" y="198" text-anchor="middle" font-size="9" font-weight="bold" fill="#009977">pc [31:0]</text>
+
+  <!-- IF/ID pipeline register bar -->
+  <rect x="400" y="100" width="20" height="390" rx="2" fill="#e8e8e8" stroke="#666" stroke-width="1"/>
+  <text x="410" y="300" text-anchor="middle" font-size="8" fill="#666" transform="rotate(-90 410 300)">IF / ID</text>
+
+  <!-- ═══ Inputs from later stages (bottom) ═══ -->
+
+  <!-- MUX input 1: branch_target from ID -->
+  <line x1="170" y1="530" x2="170" y2="460" stroke="#cc8800" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="170" y="548" text-anchor="middle" font-size="8" font-weight="bold" fill="#cc8800">branch_target</text>
+  <text x="170" y="560" text-anchor="middle" font-size="7" fill="#cc8800">[31:0] from ID</text>
+
+  <!-- MUX input 2: JALR_target from EX -->
+  <line x1="215" y1="530" x2="215" y2="460" stroke="#cc8800" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="215" y="548" text-anchor="middle" font-size="8" font-weight="bold" fill="#cc8800">JALR_target</text>
+  <text x="215" y="560" text-anchor="middle" font-size="7" fill="#cc8800">[31:0] from EX</text>
+
+  <!-- MUX input 3: trap_pc from WB -->
+  <line x1="255" y1="530" x2="255" y2="460" stroke="#cc2222" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="275" y="548" text-anchor="middle" font-size="8" font-weight="bold" fill="#cc2222">trap_pc</text>
+  <text x="275" y="560" text-anchor="middle" font-size="7" fill="#cc2222">[31:0] from WB</text>
+
+  <!-- stall/flush -->
+  <line x1="70" y1="530" x2="70" y2="470" stroke="#666" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="70" y="548" text-anchor="middle" font-size="8" fill="#666">stall</text>
+  <text x="70" y="560" text-anchor="middle" font-size="8" fill="#666">flush</text>
+
+  <!-- PC fork dot -->
+  <circle cx="120" cy="215" r="3" fill="#009977"/>
+
+</svg>
