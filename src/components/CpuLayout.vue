@@ -737,6 +737,35 @@
       <span class="clock-phase">{{ phases.phaseLabel }}</span>
       <span class="clock-label">Cycle: {{ cpu.cycleCount }}</span>
       <span class="clock-label">PC: 0x{{ (cpu.pc >>> 0).toString(16).padStart(8, '0') }}</span>
+
+      <span class="clock-divider">|</span>
+
+      <!-- Trap feature toggle -->
+      <label class="clock-label" style="cursor:pointer;">
+        <input type="checkbox" v-model="cpu.trapsEnabled" />
+        Traps
+      </label>
+
+      <!-- Visible only when traps enabled -->
+      <template v-if="cpu.trapsEnabled">
+        <span class="clock-label" :class="'mode-' + cpu.privMode"
+              style="padding:.15rem .4rem; border-radius:3px; background:#222;">
+          mode: {{ cpu.privMode }}
+        </span>
+        <span v-if="cpu.trapDepth > 0" class="clock-label"
+              style="padding:.15rem .4rem; border-radius:3px; background:#a02020; color:#fff;">
+          IN_TRAP
+        </span>
+        <button class="clock-btn" @click="cpu.raiseIrq('mti')">MTI</button>
+        <button class="clock-btn" @click="cpu.raiseIrq('mei')">MEI</button>
+        <button class="clock-btn" @click="cpu.raiseIrq('sei')">SEI</button>
+        <button class="clock-btn" @click="cpu.clearIrqs()">Clr IRQ</button>
+      </template>
+
+      <span class="clock-divider">|</span>
+
+      <!-- Micro-step visualizer launcher (separate Vue view) -->
+      <button class="clock-btn clock-btn--edit" @click="emit('switch-microstep')">μStep</button>
     </div>
 
     <!-- Config Modal -->
@@ -860,6 +889,7 @@ const configRegMode = ref('8')
 const emit = defineEmits<{
   'switch-tab': []
   'switch-pipeline': []
+  'switch-microstep': []
 }>()
 
 function openEditor() {
