@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CPU Sim — wasm demo</title>
+<style>
+  html, body { height:100%; }
+  body { font-family: 'JetBrains Mono', ui-monospace, monospace; background:#1e1e1e; color:#ddd; padding:1.2rem; font-size:13px; display:flex; flex-direction:column; box-sizing:border-box; }
+  h1 { color:#4ec3d5; margin:0 0 .8rem; font-size:1.15rem; }
+  h3 { color:#cc8800; margin:0 0 .4rem; font-size:.95rem; }
+  button { background:#2aacbe; color:#000; border:0; padding:.45rem .9rem; margin-right:.4rem; cursor:pointer; font:inherit; border-radius:4px; }
+  button:hover { background:#4ec3d5; }
+  button.alt { background:#cc8800; }
+  button.alt:hover { background:#e6a31a; }
+  .grid { display:grid; grid-template-columns: 1.1fr 1fr .8fr .8fr 1.1fr; gap:.6rem; margin-top:.8rem; flex:1; min-height:0; }
+  .col   { display:flex; flex-direction:column; gap:.6rem; min-height:0; }
+  .pane { background:#111; padding:.6rem .75rem; border:1px solid #333; border-radius:4px; overflow:auto; display:flex; flex-direction:column; min-height:0; }
+  .pane.short { flex: 0 0 auto; }
+  .pane.grow  { flex: 1; min-height: 0; }
+  .pane.fit   { flex: 0 0 auto; overflow: visible; }
+  .priv-strip { display:flex; gap:.6rem; align-items:stretch; margin-top:.4rem; }
+  .priv-strip > .pane { flex:1; padding:.4rem .6rem; }
+  .pane h3 { position:sticky; top:0; background:#111; padding-top:0; }
+  .pane > table { flex:1; }
+  .mode-M { background:#009977 !important; }
+  .mode-S { background:#0099cc !important; }
+  .mode-U { background:#666     !important; }
+  .trap-on  { background:#cc2222 !important; }
+  .trap-off { background:#444    !important; }
+  table { border-collapse:collapse; width:100%; }
+  td { padding:2px 6px; border-bottom:1px solid #222; vertical-align:top; }
+  td.name  { color:#0099cc; }
+  td.val   { text-align:right; font-variant-numeric: tabular-nums; }
+  td.dim   { color:#555; text-align:right; }
+  /* active (driver firing this phase)            = bright green
+     consumed (control sampled / mem-cell touched) = yellow
+     held    (last driven by some earlier phase)   = red */
+  tr.active   td.val { color:#00ff66; font-weight:bold; }
+  tr.consumed td.val { color:#ffff00; font-weight:bold; }
+  tr.held     td.val { color:#e05050; }
+  tr.active   td.name { color:#4ec3d5; }
+  tr.consumed td.name { color:#e6e63a; }
+  tr.held     td.name { color:#a06060; }
+  .phase-banner { background:#cc2222; color:#fff; padding:.3rem .6rem; border-radius:3px; display:inline-block; margin-left:.4rem; font-variant-numeric: tabular-nums; white-space: pre; }
+  .phase-idle   { background:#444; }
+  /* fixed-width title pills */
+  .title-row { display:flex; align-items:center; gap:.4rem; }
+  .pill-class    { background:#009977; min-width:5.5rem; text-align:center; }
+  .pill-mnemonic { background:#cc8800; min-width:5rem;   text-align:center; }
+  .pill-operands { background:#222; color:#cce; min-width:14rem; text-align:left; padding-left:.6rem; border:1px solid #333; }
+  .pill-phase    { background:#cc2222; min-width:6rem;   text-align:center; }
+  .section-hdr { color:#009977; border-bottom:1px solid #333; padding-bottom:2px; margin:.5rem 0 .25rem; font-weight:bold; }
+  .section-hdr:first-child { margin-top:0; }
+</style>
+</head>
+<body>
+  <h1 class="title-row">
+    <span style="margin-right:.6rem;">RV32I micro-step</span>
+    <span id="mode-banner"   class="phase-banner mode-M" style="min-width:2rem; text-align:center;">M</span>
+    <span id="trap-banner"   class="phase-banner trap-off" style="min-width:3.5rem; text-align:center;">—</span>
+    <span id="op-banner"     class="phase-banner pill-class    phase-idle">—</span>
+    <span id="mnem-banner"   class="phase-banner pill-mnemonic phase-idle">—</span>
+    <span id="ops-banner"    class="phase-banner pill-operands phase-idle">—</span>
+    <span id="phase-banner"  class="phase-banner pill-phase    phase-idle">idle</span>
+  </h1>
+  <div>
+    <button id="micro" class="alt">Micro Step (1 phase)</button>
+    <button id="step">Full Step (whole instr)</button>
+    <button id="run10">Run 10</button>
+    <button id="reset">Reset</button>
+    <button id="poke">Poke x3 = 0xDEAD</button>
+    <span style="margin:0 .8rem; color:#666;">|</span>
+    <button id="irq-mti">Trigger MTI</button>
+    <button id="irq-mei">Trigger MEI</button>
+    <button id="irq-sei">Trigger SEI</button>
+    <button id="irq-clear">Clear IRQ</button>
+    <span style="margin-left:1rem; color:#666;">cycle: <span id="cycle">0</span></span>
+  </div>
+
+  <div class="grid">
+    <div class="col">
+      <div class="pane short">
+        <h3>Privilege &amp; Traps</h3>
+        <table id="priv-tbl"></table>
+        <h3 style="margin-top:.5rem;">Last trap</h3>
+        <pre id="trap-log" style="margin:0; padding:.25rem .4rem; background:#0a0a0a; border-radius:3px; color:#cce; font-size:11px;">—</pre>
+      </div>
+      <div class="pane grow">
+        <h3>Components</h3>
+        <table id="comp-tbl"></table>
+        <h3 style="margin-top:.8rem;">Control signals</h3>
+        <table id="ctrl-tbl"></table>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="pane fit">
+        <h3>Buses</h3>
+        <table id="bus-tbl"></table>
+      </div>
+      <div class="pane grow">
+        <h3>CSRs</h3>
+        <table id="csr-tbl"></table>
+      </div>
+    </div>
+
+    <div class="pane">
+      <h3>Registers (non-zero)</h3>
+      <table id="reg-tbl"></table>
+    </div>
+
+    <div class="pane">
+      <h3>RAM @ 0x10000</h3>
+      <table id="ram-tbl"></table>
+    </div>
+
+    <div class="pane">
+      <h3>ROM @ 0x00000</h3>
+      <table id="rom-tbl"></table>
+    </div>
+  </div>
+
+<script type="module">
+  import init, { JsCpuState } from './pkg/cpu_sim.js';
+  await init();
+  const cpu = new JsCpuState();
+
+  // Default program — exercises M-mode setup, ECALL→trap→MRET, drop to U,
+  // ECALL from U → trap to M → MRET back to U, then spin.
+  // ROM layout:
+  //   0x00..0x3c  M-mode setup, ECALL, mode-switch sequence
+  //   0x60..0x70  U-mode user code (after MRET)
+  //   0x80..0x94  trap handler (entered via mtvec=0x80)
+  const program = new Uint32Array(64);
+  program.fill(0x00000013); // NOPs
+  // ── M-mode setup ───────────────────────────────────────────────────
+  program[0x00 / 4] = 0x00700093; // addi x1, x0, 7         t0 marker
+  program[0x04 / 4] = 0x00500113; // addi x2, x0, 5         sp marker
+  program[0x08 / 4] = 0x002081B3; // add  x3, x1, x2        gp = 12
+  program[0x0c / 4] = 0x08000213; // addi x4, x0, 0x80      tp = 0x80 (mtvec target)
+  program[0x10 / 4] = 0x30521073; // csrrw x0, mtvec, x4
+  program[0x14 / 4] = 0x30046073; // csrrsi x0, mstatus, 8  set mstatus.MIE
+  program[0x18 / 4] = 0x08000293; // addi x5, x0, 0x80      MTI bit
+  program[0x1c / 4] = 0x30429073; // csrrw x0, mie, x5      enable MTI
+  // ── ECALL from M (cause=11) → traps to mtvec=0x80 ──────────────────
+  program[0x20 / 4] = 0x00000073; // ecall
+  // After handler returns (mret jumps to mepc+4 = 0x24)
+  program[0x24 / 4] = 0x0AA00313; // addi x6, x0, 0xAA      post-handler M marker
+  // ── Drop to U mode: clear mstatus.MPP, set mepc to 0x60, mret ──────
+  program[0x28 / 4] = 0x000023B7; // lui  x7, 0x2           t2 = 0x2000
+  program[0x2c / 4] = 0x80038393; // addi x7, x7, -0x800    t2 = 0x1800 (MPP mask)
+  program[0x30 / 4] = 0x3003B073; // csrrc x0, mstatus, x7  clear MPP
+  program[0x34 / 4] = 0x06000413; // addi x8, x0, 0x60      user code addr
+  program[0x38 / 4] = 0x34141073; // csrrw x0, mepc, x8
+  program[0x3c / 4] = 0x30200073; // mret                   → U mode at 0x60
+  // ── User code (U mode) ─────────────────────────────────────────────
+  program[0x60 / 4] = 0x05500493; // addi x9, x0, 0x55      s1 = 0x55 (user marker)
+  program[0x64 / 4] = 0x06400513; // addi x10, x0, 100      a0 = 100
+  program[0x68 / 4] = 0x00000073; // ecall (from U → cause=8 → traps to M)
+  // After handler returns (mret bumps mepc by 4)
+  program[0x6c / 4] = 0x0BB00593; // addi x11, x0, 0xBB     a1 = 0xBB
+  program[0x70 / 4] = 0x0000006F; // jal  x0, 0             infinite loop
+  // ── Trap handler at 0x80 ───────────────────────────────────────────
+  program[0x80 / 4] = 0x00100613; // addi x12, x0, 1        a2 = 1 (in handler)
+  program[0x84 / 4] = 0x342026F3; // csrrs x13, mcause, x0  read mcause
+  program[0x88 / 4] = 0x34102773; // csrrs x14, mepc, x0    read mepc
+  program[0x8c / 4] = 0x00470713; // addi x14, x14, 4       advance past ecall
+  program[0x90 / 4] = 0x34171073; // csrrw x0, mepc, x14    write back
+  program[0x94 / 4] = 0x30200073; // mret                   return
+  cpu.load_program(program);
+
+  const REG_NAMES = ['zero','ra','sp','gp','tp','t0','t1','t2','s0','s1',
+    'a0','a1','a2','a3','a4','a5','a6','a7','s2','s3','s4','s5','s6','s7',
+    's8','s9','s10','s11','t3','t4','t5','t6'];
+  const hex = (n, w=8) => '0x' + (n>>>0).toString(16).padStart(w, '0');
+
+  // rows: [name, val, extra?, tooltip?]
+  function fillTable(id, rows, activeSet, consumedSet, editor) {
+    const esc = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;')
+                              .replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const html = rows.map((row, i) => {
+      const [name, val, extra, tip] = row;
+      const tipAttr = tip ? ` title="${esc(tip)}"` : '';
+      if (val === null || val === undefined) {
+        const x = extra ? `<td class="dim" style="text-align:left;">${extra}</td>` : '';
+        return `<tr class="held" data-i="${i}"${tipAttr}><td class="name">${name}</td><td class="dim">—</td>${x}</tr>`;
+      }
+      const v = (typeof val === 'number') ? hex(val) : val;
+      let cls = 'held';
+      if (activeSet && activeSet.has(name))          cls = 'active';
+      else if (consumedSet && consumedSet.has(name)) cls = 'consumed';
+      const x = extra !== undefined ? `<td class="dim" style="text-align:left; padding-left:10px;">${extra}</td>` : '';
+      return `<tr class="${cls}" data-i="${i}"${tipAttr}><td class="name">${name}</td><td class="val">${v}</td>${x}</tr>`;
+    }).join('');
+    const tbl = document.getElementById(id);
+    tbl.innerHTML = html;
+    if (editor) {
+      tbl.querySelectorAll('tr').forEach(tr => {
+        tr.style.cursor = 'pointer';
+        // Append edit hint to whatever tooltip already exists.
+        tr.title = (tr.title ? tr.title + '\n\n' : '') + '(double-click to edit)';
+        tr.ondblclick = () => {
+          const i = Number(tr.dataset.i);
+          const row = rows[i];
+          const cur = (typeof row[1] === 'number') ? hex(row[1]) : (row[1] ?? '0');
+          const v = window.prompt(`new value for ${row[0]} (hex or dec)`, cur);
+          if (v === null) return;
+          const n = v.startsWith('0x') ? parseInt(v.slice(2), 16) : Number(v);
+          if (Number.isNaN(n)) return;
+          editor(i, n >>> 0);
+          render();
+        };
+      });
+    }
+  }
+
+  // Disassembler now lives in Rust at sim/src/disasm/. Both forms below
+  // call into wasm via cpu.disasm(instr) → { class, mnemonic, operands }.
+  const disasmFull = (instr) => cpu.disasm(instr >>> 0);
+  function disasm(instr) {
+    if (instr === 0) return '';
+    const d = disasmFull(instr);
+    return `${d.mnemonic.padEnd(6)} ${d.operands}`;
+  }
+
+  function render() {
+    const m = cpu.micro_state();
+    const phase = m.current ?? 'idle';
+    const banner = document.getElementById('phase-banner');
+    banner.textContent = phase;
+    banner.className = 'phase-banner' + (phase === 'idle' ? ' phase-idle' : '');
+
+    // Title pills — decode the current instruction word once it's been fetched.
+    const instrEntry = m.buses.find(b => b.name === 'instr');
+    const instrVal   = instrEntry ? instrEntry.value : null;
+    const opPill   = document.getElementById('op-banner');
+    const mnemPill = document.getElementById('mnem-banner');
+    const opsPill  = document.getElementById('ops-banner');
+    if (instrVal != null) {
+      const d = disasmFull(instrVal >>> 0);
+      opPill.textContent   = d.class;
+      mnemPill.textContent = d.mnemonic;
+      opsPill.textContent  = d.operands || ' ';
+      opPill.classList.remove('phase-idle');
+      mnemPill.classList.remove('phase-idle');
+      opsPill.classList.remove('phase-idle');
+    } else {
+      opPill.textContent = mnemPill.textContent = opsPill.textContent = '—';
+      opPill.classList.add('phase-idle');
+      mnemPill.classList.add('phase-idle');
+      opsPill.classList.add('phase-idle');
+    }
+
+    document.getElementById('cycle').textContent = cpu.cycle;
+
+    // Privilege mode pill
+    const mode = cpu.priv_mode;
+    const modeBanner = document.getElementById('mode-banner');
+    modeBanner.textContent = mode;
+    modeBanner.className = 'phase-banner mode-' + mode;
+
+    // Trap pill
+    const trap = cpu.last_trap();
+    const trapBanner = document.getElementById('trap-banner');
+    if (m.current === 'IrqCheck' && trap && trap.cycle === Number(cpu.cycle)) {
+      trapBanner.textContent = trap.is_interrupt ? 'IRQ' : 'EXC';
+      trapBanner.className = 'phase-banner trap-on';
+    } else if (mode !== 'M' || (trap && trap.cycle === Number(cpu.cycle))) {
+      trapBanner.textContent = trap ? 'IN_TRAP' : '—';
+      trapBanner.className = 'phase-banner ' + (trap ? 'trap-on' : 'trap-off');
+    } else {
+      trapBanner.textContent = '—';
+      trapBanner.className = 'phase-banner trap-off';
+    }
+
+    const active   = new Set(m.active);
+    const consumed = new Set(m.consumed);
+    fillTable('comp-tbl', m.components.map(c => [c.name, c.value]), active, consumed);
+    fillTable('bus-tbl',  m.buses.map(b => [b.name, b.value]),     active, consumed);
+    fillTable('ctrl-tbl', m.controls.map(c => [c.name, c.value]), active, consumed);
+
+    // Build "consumed" sets keyed on the same row name strings the table uses.
+    const regAccessed = new Set((m.reg_access ?? []).map(i => `x${i.toString().padStart(2,' ')} ${REG_NAMES[i].padEnd(4)}`));
+    const ramAccessed = new Set((m.ram_access ?? []).map(a => hex(a)));
+    const romAccessed = new Set(m.rom_access != null ? [hex(m.rom_access)] : []);
+
+    const regs = cpu.registers();
+    fillTable('reg-tbl', Array.from({length:32}, (_, i) =>
+      [`x${i.toString().padStart(2,' ')} ${REG_NAMES[i].padEnd(4)}`, regs[i]]),
+      null, regAccessed,
+      (i, v) => cpu.poke_register(i, v));
+
+    const ram = cpu.ram();
+    fillTable('ram-tbl', Array.from({length: ram.length}, (_, i) =>
+      [hex(0x10000 + i*4), ram[i]]),
+      null, ramAccessed,
+      (i, v) => cpu.poke_ram(0x10000 + i*4, v));
+
+    const rom = cpu.rom();
+    fillTable('rom-tbl', Array.from({length: rom.length}, (_, i) => {
+        const w = rom[i];
+        const d = w === 0 ? null : disasmFull(w);
+        const tip = d ? `${d.mnemonic}${d.operands ? ' ' + d.operands : ''}\n${d.desc || ''}`.trim() : null;
+        return [hex(i*4), w, w === 0 ? '' : `${d.mnemonic.padEnd(6)} ${d.operands}`, tip];
+      }),
+      null, romAccessed,
+      (i, v) => cpu.poke_rom(i*4, v));
+
+    // ── Privilege & trap pane ─────────────────────────────────────────
+    const trapInfo = cpu.last_trap();
+    fillTable('priv-tbl', [
+      ['mode',         mode],
+      ['in trap',      trapInfo ? 'yes' : 'no'],
+      ['pending IRQ',  cpu.csr_snapshot().find(c => c.addr === 0x344)?.value ?? 0],
+    ]);
+
+    const csrs = cpu.csr_snapshot();
+    const interesting = new Set([0x300,0x302,0x303,0x304,0x305,0x340,0x341,0x342,0x343,0x344,
+                                 0x100,0x104,0x105,0x140,0x141,0x142,0x143,0x144]);
+    const csrRowsRaw = csrs.filter(c => interesting.has(c.addr));
+    const csrRows = csrRowsRaw.map(c => [
+      `${c.name}(0x${c.addr.toString(16).padStart(3,'0')})`,
+      c.value,
+      undefined,
+      c.desc || undefined,
+    ]);
+    fillTable('csr-tbl', csrRows, null, null,
+      (i, v) => cpu.csr_write(csrRowsRaw[i].addr, v));
+
+    const tlog = document.getElementById('trap-log');
+    if (trapInfo) {
+      tlog.textContent = `cycle ${trapInfo.cycle}  ${trapInfo.from}→${trapInfo.to}  `
+        + `${trapInfo.is_interrupt ? 'irq' : 'exc'} cause=${trapInfo.cause}  `
+        + `epc=${hex(trapInfo.epc)}`;
+    } else {
+      tlog.textContent = '—';
+    }
+  }
+
+  document.getElementById('micro').onclick = () => { cpu.micro_step(); render(); };
+  document.getElementById('step').onclick  = () => { for (let i=0;i<10;i++) cpu.micro_step(); render(); };
+  document.getElementById('run10').onclick = () => {
+    for (let i=0;i<10*10;i++) cpu.micro_step();
+    render();
+  };
+  document.getElementById('reset').onclick = () => {
+    cpu.reset(); cpu.load_program(program); render();
+  };
+  document.getElementById('poke').onclick  = () => { cpu.poke_register(3, 0xdead); render(); };
+  document.getElementById('irq-mti').onclick   = () => { cpu.raise_irq('mti'); render(); };
+  document.getElementById('irq-mei').onclick   = () => { cpu.raise_irq('mei'); render(); };
+  document.getElementById('irq-sei').onclick   = () => { cpu.raise_irq('sei'); render(); };
+  document.getElementById('irq-clear').onclick = () => { cpu.clear_irq(); render(); };
+
+  render();
+</script>
+</body>
+</html>
