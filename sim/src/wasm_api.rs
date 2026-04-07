@@ -91,6 +91,7 @@ impl JsCpuState {
     #[wasm_bindgen(getter)] pub fn priv_mode(&self) -> String {
         self.inner.priv_mode().as_str().to_string()
     }
+    #[wasm_bindgen(getter)] pub fn in_trap(&self) -> bool { self.inner.in_trap() }
 
     pub fn raise_irq(&mut self, kind: &str) {
         let mask = match kind {

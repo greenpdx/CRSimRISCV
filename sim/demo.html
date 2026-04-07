@@ -68,7 +68,6 @@
     <button id="step">Full Step (whole instr)</button>
     <button id="run10">Run 10</button>
     <button id="reset">Reset</button>
-    <button id="poke">Poke x3 = 0xDEAD</button>
     <span style="margin:0 .8rem; color:#666;">|</span>
     <button id="irq-mti">Trigger MTI</button>
     <button id="irq-mei">Trigger MEI</button>
@@ -259,15 +258,16 @@
     modeBanner.textContent = mode;
     modeBanner.className = 'phase-banner mode-' + mode;
 
-    // Trap pill
+    // Trap pill: distinguishes "trap firing right now" from "inside a handler"
     const trap = cpu.last_trap();
     const trapBanner = document.getElementById('trap-banner');
-    if (m.current === 'IrqCheck' && trap && trap.cycle === Number(cpu.cycle)) {
+    const justFired = trap && trap.cycle === Number(cpu.cycle);
+    if (justFired) {
       trapBanner.textContent = trap.is_interrupt ? 'IRQ' : 'EXC';
       trapBanner.className = 'phase-banner trap-on';
-    } else if (mode !== 'M' || (trap && trap.cycle === Number(cpu.cycle))) {
-      trapBanner.textContent = trap ? 'IN_TRAP' : '—';
-      trapBanner.className = 'phase-banner ' + (trap ? 'trap-on' : 'trap-off');
+    } else if (cpu.in_trap) {
+      trapBanner.textContent = 'IN_TRAP';
+      trapBanner.className = 'phase-banner trap-on';
     } else {
       trapBanner.textContent = '—';
       trapBanner.className = 'phase-banner trap-off';
@@ -310,7 +310,7 @@
     const trapInfo = cpu.last_trap();
     fillTable('priv-tbl', [
       ['mode',         mode],
-      ['in trap',      trapInfo ? 'yes' : 'no'],
+      ['in trap',      cpu.in_trap ? 'yes' : 'no'],
       ['pending IRQ',  cpu.csr_snapshot().find(c => c.addr === 0x344)?.value ?? 0],
     ]);
 
@@ -346,7 +346,6 @@
   document.getElementById('reset').onclick = () => {
     cpu.reset(); cpu.load_program(program); render();
   };
-  document.getElementById('poke').onclick  = () => { cpu.poke_register(3, 0xdead); render(); };
   document.getElementById('irq-mti').onclick   = () => { cpu.raise_irq('mti'); render(); };
   document.getElementById('irq-mei').onclick   = () => { cpu.raise_irq('mei'); render(); };
   document.getElementById('irq-sei').onclick   = () => { cpu.raise_irq('sei'); render(); };

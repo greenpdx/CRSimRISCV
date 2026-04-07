@@ -49,6 +49,10 @@ pub struct CpuState {
     /// External IRQ inputs ORed into mip at the start of each IrqCheck.
     pub pending_irq: u32,
     pub last_trap: Option<TrapInfo>,
+    /// Number of traps currently active (bumped on take_trap, decremented on
+    /// mret/sret). `in_trap = trap_depth > 0` is the visualizer's "we are
+    /// currently inside a handler" indicator.
+    pub trap_depth: u32,
 }
 
 impl Default for CpuState {
@@ -71,6 +75,7 @@ impl Default for CpuState {
             csrs: CsrFile::new(),
             pending_irq: 0,
             last_trap: None,
+            trap_depth: 0,
         }
     }
 }
@@ -457,6 +462,7 @@ impl CpuState {
             self.last_trap = Some(info);
             self.pc = new_pc;
             self.priv_mode = new_mode;
+            self.trap_depth = self.trap_depth.saturating_add(1);
             self.micro.trap_taken = true;
         } else {
             self.micro.trap_taken = false;
@@ -625,6 +631,7 @@ impl CpuState {
                 self.priv_mode = new_mode;
                 self.pc = epc;
                 self.micro.next_pc = Some(epc);
+                self.trap_depth = self.trap_depth.saturating_sub(1);
                 self.cycle_count += 1;
                 return;
             }
@@ -634,6 +641,7 @@ impl CpuState {
                 self.priv_mode = new_mode;
                 self.pc = epc;
                 self.micro.next_pc = Some(epc);
+                self.trap_depth = self.trap_depth.saturating_sub(1);
                 self.cycle_count += 1;
                 return;
             }
@@ -655,6 +663,7 @@ impl CpuState {
                 self.last_trap = Some(info);
                 self.pc = new_pc;
                 self.priv_mode = new_mode;
+                self.trap_depth = self.trap_depth.saturating_add(1);
                 self.micro.next_pc = Some(new_pc);
                 self.micro.trap_taken = true;
                 self.cycle_count += 1;
@@ -699,8 +708,11 @@ impl CpuState {
         self.last_trap = Some(info);
         self.pc = new_pc;
         self.priv_mode = new_mode;
+        self.trap_depth = self.trap_depth.saturating_add(1);
         self.micro.next_pc = Some(new_pc);
         self.micro.trap_taken = true;
         self.cycle_count += 1;
     }
+
+    pub fn in_trap(&self) -> bool { self.trap_depth > 0 }
 }
