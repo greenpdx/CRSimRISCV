@@ -16,7 +16,7 @@
     <div class="drag-layout__resize drag-layout__resize--t" @mousedown.prevent="startFrameResize('t', $event)" />
 
     <!-- SVG layer for bus wires -->
-    <svg class="drag-layout__svg" :width="frameW + 200" :height="frameH + 200" :viewBox="`-200 -200 ${frameW + 400} ${frameH + 400}`" style="left: -200px; top: -200px;">
+    <svg ref="svgEl" class="drag-layout__svg" :width="frameW + 400" :height="frameH + 400" :viewBox="`-200 -200 ${frameW + 400} ${frameH + 400}`" style="left: -200px; top: -200px;">
       <g v-for="bus in buses" :key="bus.id">
         <!-- Wire segments -->
         <polyline
@@ -54,24 +54,34 @@
           font-size="8" :fill="bus.color || '#cc8800'" font-family="JetBrains Mono, monospace"
         >{{ bus.id }}</text>
       </g>
-    </svg>
 
-    <!-- Draggable components -->
-    <div
-      v-for="comp in components"
-      :key="comp.id"
-      class="drag-layout__comp"
-      :class="{ 'drag-layout__comp--dragging': dragTarget?.type === 'comp' && dragTarget.compId === comp.id }"
-      :style="{ left: comp.x + 'px', top: comp.y + 'px' }"
-      @mousedown.prevent="startCompDrag(comp.id, $event)"
-    >
-      <div class="drag-layout__comp-label">{{ comp.label }}</div>
-      <div class="drag-layout__comp-id">{{ comp.id }}</div>
-      <slot :name="comp.id" />
-    </div>
+      <!-- Draggable components: HTML inside the SVG via foreignObject so the
+           single CTM-based getLocalPos works for both bus points and comps. -->
+      <foreignObject
+        v-for="comp in components"
+        :key="comp.id"
+        :x="comp.x"
+        :y="comp.y"
+        :width="comp.width ?? 200"
+        :height="comp.height ?? 120"
+        style="overflow: visible;"
+      >
+        <div
+          xmlns="http://www.w3.org/1999/xhtml"
+          class="drag-layout__comp"
+          :class="{ 'drag-layout__comp--dragging': dragTarget?.type === 'comp' && dragTarget.compId === comp.id }"
+          @mousedown.prevent="startCompDrag(comp.id, $event)"
+        >
+          <div class="drag-layout__comp-label">{{ comp.label }}</div>
+          <div class="drag-layout__comp-id">{{ comp.id }}</div>
+          <slot :name="comp.id" />
+        </div>
+      </foreignObject>
+    </svg>
 
     <!-- Toolbar -->
     <div class="drag-layout__toolbar">
+      <button class="drag-layout__back" @click="emit('back')">← CpuLayout</button>
       <button @click="exportPositions">Export JSON</button>
       <button @click="addBus">+ Bus</button>
       <span class="drag-layout__info">
@@ -110,6 +120,10 @@ interface CompPos {
   label: string
   x: number
   y: number
+  /** Optional foreignObject width in SVG user-space units (default 200). */
+  width?: number
+  /** Optional foreignObject height in SVG user-space units (default 120). */
+  height?: number
 }
 
 interface BusPoint { x: number; y: number }
@@ -127,7 +141,12 @@ const props = defineProps<{
   initFrameH?: number
 }>()
 
+const emit = defineEmits<{
+  back: []
+}>()
+
 const layoutEl = ref<HTMLElement | null>(null)
+const svgEl = ref<SVGSVGElement | null>(null)
 
 const SNAP_THRESHOLD = 8  // px — snap to H/V within this tolerance
 
@@ -160,7 +179,15 @@ function startCompDrag(id: string, e: MouseEvent) {
   contextMenu.value = null
   const comp = components.find(c => c.id === id)
   if (!comp) return
-  dragTarget.value = { type: 'comp', compId: id, offsetX: e.offsetX, offsetY: e.offsetY }
+  // Capture the offset from cursor to component origin in SVG user-space
+  // so the component stays under the cursor where it was grabbed.
+  const { x, y } = getLocalPos(e)
+  dragTarget.value = {
+    type: 'comp',
+    compId: id,
+    offsetX: x - comp.x,
+    offsetY: y - comp.y,
+  }
 }
 
 function startBusDrag(busId: string, pointIdx: number, e: MouseEvent) {
@@ -170,7 +197,20 @@ function startBusDrag(busId: string, pointIdx: number, e: MouseEvent) {
     return
   }
   contextMenu.value = null
-  dragTarget.value = { type: 'buspoint', busId, pointIdx, offsetX: 0, offsetY: 0 }
+  const bus = buses.find(b => b.id === busId)
+  if (!bus) return
+  const pt = bus.points[pointIdx]
+  if (!pt) return
+  // Capture the offset from cursor to point center in SVG user-space
+  // so the point stays "under the cursor" relative to where it was grabbed.
+  const { x, y } = getLocalPos(e)
+  dragTarget.value = {
+    type: 'buspoint',
+    busId,
+    pointIdx,
+    offsetX: x - pt.x,
+    offsetY: y - pt.y,
+  }
 }
 
 function startFrameResize(edge: string, e: MouseEvent) {
@@ -183,10 +223,19 @@ function startFrameMove(e: MouseEvent) {
   dragTarget.value = { type: 'framemove', offsetX: e.clientX - frameX.value, offsetY: e.clientY - frameY.value }
 }
 
+/** Convert screen-space click coordinates to SVG user-space coordinates.
+ *  Uses the SVG element's getScreenCTM() so it's correct regardless of how
+ *  the SVG is sized, scrolled, scaled, or transformed by CSS. */
 function getLocalPos(e: MouseEvent): { x: number; y: number } {
-  if (!layoutEl.value) return { x: 0, y: 0 }
-  const rect = layoutEl.value.getBoundingClientRect()
-  return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  const svg = svgEl.value
+  if (!svg) return { x: 0, y: 0 }
+  const pt = svg.createSVGPoint()
+  pt.x = e.clientX
+  pt.y = e.clientY
+  const ctm = svg.getScreenCTM()
+  if (!ctm) return { x: 0, y: 0 }
+  const local = pt.matrixTransform(ctm.inverse())
+  return { x: local.x, y: local.y }
 }
 
 function onMouseMove(e: MouseEvent) {
@@ -203,8 +252,8 @@ function onMouseMove(e: MouseEvent) {
     const bus = buses.find(b => b.id === dragTarget.value!.busId)
     if (bus && dragTarget.value.pointIdx !== undefined) {
       const pi = dragTarget.value.pointIdx
-      let nx = Math.round(x)
-      let ny = Math.round(y)
+      let nx = Math.round(x - dragTarget.value.offsetX)
+      let ny = Math.round(y - dragTarget.value.offsetY)
 
       // Snap to horizontal/vertical alignment with adjacent points
       const prev = bus.points[pi - 1]
@@ -352,8 +401,8 @@ function exportPositions() {
 .drag-layout__handle:active { cursor: grabbing; }
 
 .drag-layout__comp {
-  position: absolute;
-  z-index: 10;
+  /* Position is now controlled by the parent foreignObject (SVG x/y).
+     Keep cursor + visual styling. */
   cursor: grab;
   border: 1px dashed transparent;
   padding: 2px;

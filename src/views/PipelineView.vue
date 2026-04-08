@@ -5,7 +5,7 @@
       <button class="pipeline-view__btn" @click="emit('switch-tab')">Back to CPU</button>
     </div>
     <div class="pipeline-view__body">
-      <PipelineIfStage />
+      <PipelineIfStage @back="emit('switch-tab')" />
     </div>
   </div>
 </template>

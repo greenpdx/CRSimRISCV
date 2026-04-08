@@ -250,3 +250,240 @@ fn phase_name(p: Phase) -> &'static str {
         Phase::PcUpdate => "PcUpdate",
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// JsPipelineState — wasm wrapper around the 5-stage pipeline simulator.
+// ─────────────────────────────────────────────────────────────────────────
+
+use crate::sim::pipeline::{
+    self, ControlBits, ExMa, ForwardSrc, IdEx, IfId, MaWb, PipelineState, Stage,
+};
+
+#[wasm_bindgen]
+pub struct JsPipelineState {
+    inner: PipelineState,
+}
+
+#[derive(Serialize)]
+struct CtrlJson {
+    reg_write: bool,
+    alu_src:   bool,
+    alu_op:    u8,
+    mem_read:  bool,
+    mem_write: bool,
+    wb_sel:    u8,
+    pc_sel:    u8,
+    branch:    bool,
+    jump:      bool,
+}
+impl From<&ControlBits> for CtrlJson {
+    fn from(c: &ControlBits) -> Self {
+        Self {
+            reg_write: c.reg_write, alu_src: c.alu_src, alu_op: c.alu_op,
+            mem_read:  c.mem_read,  mem_write: c.mem_write, wb_sel: c.wb_sel,
+            pc_sel: c.pc_sel, branch: c.branch, jump: c.jump,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct IfIdJson {
+    valid: bool, pc: u32, instr: u32, pc_plus4: u32,
+}
+impl From<&IfId> for IfIdJson {
+    fn from(r: &IfId) -> Self {
+        Self { valid: r.valid, pc: r.pc, instr: r.instr, pc_plus4: r.pc_plus4 }
+    }
+}
+
+#[derive(Serialize)]
+struct IdExJson {
+    valid: bool, pc: u32, pc_plus4: u32, instr: u32,
+    rs1_data: u32, rs2_data: u32, imm: u32,
+    rs1_num: u8, rs2_num: u8, rd_num: u8,
+    funct3: u8, funct7b30: u8, opcode: u8,
+    ctrl: CtrlJson,
+}
+impl From<&IdEx> for IdExJson {
+    fn from(r: &IdEx) -> Self {
+        Self {
+            valid: r.valid, pc: r.pc, pc_plus4: r.pc_plus4, instr: r.instr,
+            rs1_data: r.rs1_data, rs2_data: r.rs2_data, imm: r.imm,
+            rs1_num: r.rs1_num, rs2_num: r.rs2_num, rd_num: r.rd_num,
+            funct3: r.funct3, funct7b30: r.funct7b30, opcode: r.opcode,
+            ctrl: (&r.ctrl).into(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct ExMaJson {
+    valid: bool, instr: u32,
+    alu_result: u32, rs2_data: u32, pc_plus4: u32,
+    rd_num: u8, funct3: u8,
+    branch_taken: bool, branch_target: u32,
+    ctrl: CtrlJson,
+}
+impl From<&ExMa> for ExMaJson {
+    fn from(r: &ExMa) -> Self {
+        Self {
+            valid: r.valid, instr: r.instr,
+            alu_result: r.alu_result, rs2_data: r.rs2_data,
+            pc_plus4: r.pc_plus4, rd_num: r.rd_num, funct3: r.funct3,
+            branch_taken: r.branch_taken, branch_target: r.branch_target,
+            ctrl: (&r.ctrl).into(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct MaWbJson {
+    valid: bool, instr: u32,
+    alu_result: u32, mem_data: u32, pc_plus4: u32,
+    rd_num: u8, ctrl: CtrlJson,
+}
+impl From<&MaWb> for MaWbJson {
+    fn from(r: &MaWb) -> Self {
+        Self {
+            valid: r.valid, instr: r.instr,
+            alu_result: r.alu_result, mem_data: r.mem_data,
+            pc_plus4: r.pc_plus4, rd_num: r.rd_num,
+            ctrl: (&r.ctrl).into(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct HazardJson { stall: bool, flush: bool }
+#[derive(Serialize)]
+struct ForwardJson { a: String, b: String }
+
+#[derive(Serialize)]
+struct ActiveComponentsJson {
+    #[serde(rename = "IF")] if_: Vec<&'static str>,
+    #[serde(rename = "ID")] id:  Vec<&'static str>,
+    #[serde(rename = "EX")] ex:  Vec<&'static str>,
+    #[serde(rename = "MA")] ma:  Vec<&'static str>,
+    #[serde(rename = "WB")] wb:  Vec<&'static str>,
+}
+
+#[derive(Serialize)]
+struct PipelineSnapshot {
+    cycle: u64,
+    pc: u32,
+    halted: bool,
+    registers: Vec<u32>,
+    if_id: IfIdJson,
+    id_ex: IdExJson,
+    ex_ma: ExMaJson,
+    ma_wb: MaWbJson,
+    last_wb: MaWbJson,
+    hazard: HazardJson,
+    forward: ForwardJson,
+    active_components: ActiveComponentsJson,
+}
+
+fn forward_name(s: ForwardSrc) -> &'static str {
+    match s {
+        ForwardSrc::Regfile => "regfile",
+        ForwardSrc::ExMa    => "ex_ma",
+        ForwardSrc::MaWb    => "ma_wb",
+    }
+}
+
+#[wasm_bindgen]
+impl JsPipelineState {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self { Self { inner: PipelineState::new() } }
+
+    pub fn reset(&mut self) { self.inner.reset(); }
+
+    pub fn load_program(&mut self, words: &[u32]) {
+        self.inner.load_program(words);
+    }
+
+    pub fn step(&mut self) { self.inner.step(); }
+
+    // ── Scalar getters ─────────────────────────────────────────────────
+    #[wasm_bindgen(getter)] pub fn pc(&self) -> u32 { self.inner.pc }
+    #[wasm_bindgen(getter)] pub fn cycle(&self) -> u64 { self.inner.cycle_count }
+    #[wasm_bindgen(getter)] pub fn halted(&self) -> bool { self.inner.halted }
+    #[wasm_bindgen(getter)] pub fn last_stall(&self) -> bool { self.inner.last_stall }
+    #[wasm_bindgen(getter)] pub fn last_flush(&self) -> bool { self.inner.last_flush }
+    #[wasm_bindgen(getter)] pub fn last_forward_a(&self) -> String {
+        forward_name(self.inner.last_forward_a).to_string()
+    }
+    #[wasm_bindgen(getter)] pub fn last_forward_b(&self) -> String {
+        forward_name(self.inner.last_forward_b).to_string()
+    }
+
+    // ── Storage accessors ──────────────────────────────────────────────
+    pub fn read_register(&self, idx: u8) -> u32 { self.inner.read_register(idx) }
+    pub fn registers(&self) -> Vec<u32> { self.inner.registers.to_vec() }
+    pub fn ram(&self) -> Vec<u32> { self.inner.ram.clone() }
+    pub fn rom(&self) -> Vec<u32> { self.inner.rom.clone() }
+
+    // ── Pipeline-register snapshots ────────────────────────────────────
+    pub fn if_id(&self) -> JsValue {
+        let j: IfIdJson = (&self.inner.if_id).into();
+        serde_wasm_bindgen::to_value(&j).unwrap_or(JsValue::NULL)
+    }
+    pub fn id_ex(&self) -> JsValue {
+        let j: IdExJson = (&self.inner.id_ex).into();
+        serde_wasm_bindgen::to_value(&j).unwrap_or(JsValue::NULL)
+    }
+    pub fn ex_ma(&self) -> JsValue {
+        let j: ExMaJson = (&self.inner.ex_ma).into();
+        serde_wasm_bindgen::to_value(&j).unwrap_or(JsValue::NULL)
+    }
+    pub fn ma_wb(&self) -> JsValue {
+        let j: MaWbJson = (&self.inner.ma_wb).into();
+        serde_wasm_bindgen::to_value(&j).unwrap_or(JsValue::NULL)
+    }
+    pub fn last_wb(&self) -> JsValue {
+        let j: MaWbJson = (&self.inner.last_wb).into();
+        serde_wasm_bindgen::to_value(&j).unwrap_or(JsValue::NULL)
+    }
+
+    /// One-call full snapshot for the Vue UI.
+    pub fn snapshot(&self) -> JsValue {
+        let active = ActiveComponentsJson {
+            if_: pipeline::active_components(&self.inner, Stage::IF),
+            id:  pipeline::active_components(&self.inner, Stage::ID),
+            ex:  pipeline::active_components(&self.inner, Stage::EX),
+            ma:  pipeline::active_components(&self.inner, Stage::MA),
+            wb:  pipeline::active_components(&self.inner, Stage::WB),
+        };
+        let snap = PipelineSnapshot {
+            cycle: self.inner.cycle_count,
+            pc: self.inner.pc,
+            halted: self.inner.halted,
+            registers: self.inner.registers.to_vec(),
+            if_id: (&self.inner.if_id).into(),
+            id_ex: (&self.inner.id_ex).into(),
+            ex_ma: (&self.inner.ex_ma).into(),
+            ma_wb: (&self.inner.ma_wb).into(),
+            last_wb: (&self.inner.last_wb).into(),
+            hazard: HazardJson { stall: self.inner.last_stall, flush: self.inner.last_flush },
+            forward: ForwardJson {
+                a: forward_name(self.inner.last_forward_a).into(),
+                b: forward_name(self.inner.last_forward_b).into(),
+            },
+            active_components: active,
+        };
+        serde_wasm_bindgen::to_value(&snap).unwrap_or(JsValue::NULL)
+    }
+
+    // ── Live debugger pokes ────────────────────────────────────────────
+    pub fn poke_register(&mut self, idx: u8, val: u32) {
+        let i = idx as usize & 0x1f;
+        if i != 0 { self.inner.registers[i] = val; }
+    }
+    pub fn poke_ram(&mut self, byte_addr: u32, val: u32) {
+        self.inner.ram_write(byte_addr, val);
+    }
+    pub fn poke_rom(&mut self, byte_addr: u32, val: u32) {
+        let idx = (byte_addr >> 2) as usize;
+        if idx < self.inner.rom.len() { self.inner.rom[idx] = val; }
+    }
+}

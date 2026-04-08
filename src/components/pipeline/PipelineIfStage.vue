@@ -4,6 +4,7 @@
     :init-buses="initBuses"
     :init-frame-w="550"
     :init-frame-h="600"
+    @back="emit('back')"
   >
     <!-- Slot for each component — matched by comp.id -->
     <template #rom>
@@ -42,6 +43,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import DraggableLayout from './DraggableLayout.vue'
+
+const emit = defineEmits<{
+  back: []
+}>()
 import RomBlock from '../RomBlock.vue'
 import PcRegister from '../PcRegister.vue'
 import PcAdder from '../PcAdder.vue'

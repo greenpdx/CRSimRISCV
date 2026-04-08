@@ -40,6 +40,7 @@ pub mod sim {
     pub mod micro;
     pub mod trap;
     pub mod cpu_state;
+    pub mod pipeline;
 }
 
 pub mod verify {

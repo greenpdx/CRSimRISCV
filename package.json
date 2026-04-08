@@ -17,7 +17,8 @@
     "format": "prettier --write --experimental-cli src/",
     "wasm:build": "cd sim && wasm-pack build --target web -- --features wasm",
     "wasm:copy":  "rm -rf src/wasm && cp -r sim/pkg src/wasm",
-    "wasm":       "npm run wasm:build && npm run wasm:copy"
+    "wasm":       "npm run wasm:build && npm run wasm:copy",
+    "test:wasm-pipeline": "node sim/tests/wasm_pipeline.test.mjs"
   },
   "dependencies": {
     "pinia": "^3.0.4",
