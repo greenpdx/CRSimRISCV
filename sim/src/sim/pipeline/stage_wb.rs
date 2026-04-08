@@ -17,6 +17,7 @@ pub fn compute_wb(state: &mut PipelineState, ma_wb: &MaWb) {
         0 => ma_wb.alu_result,
         1 => ma_wb.mem_data,
         2 => ma_wb.pc_plus4,
+        3 => ma_wb.mem_data,  // CSR old value (Zicsr)
         _ => 0,
     };
     state.write_register(ma_wb.rd_num, value);

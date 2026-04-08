@@ -275,6 +275,7 @@ struct CtrlJson {
     pc_sel:    u8,
     branch:    bool,
     jump:      bool,
+    csr_op:    u8,
 }
 impl From<&ControlBits> for CtrlJson {
     fn from(c: &ControlBits) -> Self {
@@ -282,6 +283,7 @@ impl From<&ControlBits> for CtrlJson {
             reg_write: c.reg_write, alu_src: c.alu_src, alu_op: c.alu_op,
             mem_read:  c.mem_read,  mem_write: c.mem_write, wb_sel: c.wb_sel,
             pc_sel: c.pc_sel, branch: c.branch, jump: c.jump,
+            csr_op: c.csr_op,
         }
     }
 }
@@ -303,6 +305,7 @@ struct IdExJson {
     rs1_num: u8, rs2_num: u8, rd_num: u8,
     funct3: u8, funct7b30: u8, opcode: u8,
     ctrl: CtrlJson,
+    csr_addr: u16, csr_uimm: u8, csr_imm_form: bool,
 }
 impl From<&IdEx> for IdExJson {
     fn from(r: &IdEx) -> Self {
@@ -312,6 +315,7 @@ impl From<&IdEx> for IdExJson {
             rs1_num: r.rs1_num, rs2_num: r.rs2_num, rd_num: r.rd_num,
             funct3: r.funct3, funct7b30: r.funct7b30, opcode: r.opcode,
             ctrl: (&r.ctrl).into(),
+            csr_addr: r.csr_addr, csr_uimm: r.csr_uimm, csr_imm_form: r.csr_imm_form,
         }
     }
 }
@@ -323,6 +327,7 @@ struct ExMaJson {
     rd_num: u8, funct3: u8,
     branch_taken: bool, branch_target: u32,
     ctrl: CtrlJson,
+    csr_addr: u16, csr_write_val: u32,
 }
 impl From<&ExMa> for ExMaJson {
     fn from(r: &ExMa) -> Self {
@@ -332,6 +337,7 @@ impl From<&ExMa> for ExMaJson {
             pc_plus4: r.pc_plus4, rd_num: r.rd_num, funct3: r.funct3,
             branch_taken: r.branch_taken, branch_target: r.branch_target,
             ctrl: (&r.ctrl).into(),
+            csr_addr: r.csr_addr, csr_write_val: r.csr_write_val,
         }
     }
 }
@@ -485,5 +491,19 @@ impl JsPipelineState {
     pub fn poke_rom(&mut self, byte_addr: u32, val: u32) {
         let idx = (byte_addr >> 2) as usize;
         if idx < self.inner.rom.len() { self.inner.rom[idx] = val; }
+    }
+
+    // ── Zicsr CSR accessors ────────────────────────────────────────────
+    pub fn csr_read(&self, addr: u16) -> u32 { self.inner.csrs.read(addr) }
+    pub fn poke_csr(&mut self, addr: u16, val: u32) { self.inner.csrs.write(addr, val); }
+    /// Returns a JS array of `{ addr, value }` for every CSR known to the file.
+    pub fn csr_snapshot(&self) -> JsValue {
+        #[derive(Serialize)]
+        struct Entry { addr: u16, value: u32 }
+        let v: Vec<Entry> = crate::sim::pipeline::csr::CsrFile::known_addrs()
+            .iter()
+            .map(|&a| Entry { addr: a, value: self.inner.csrs.read(a) })
+            .collect();
+        serde_wasm_bindgen::to_value(&v).unwrap_or(JsValue::NULL)
     }
 }

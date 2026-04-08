@@ -7,6 +7,7 @@
 //
 
 import { computed, onMounted, ref, shallowRef } from 'vue'
+import MmuIrqDemo from '../components/MmuIrqDemo.vue'
 
 const emit = defineEmits<{ 'switch-cpu': [] }>()
 
@@ -210,6 +211,7 @@ function ctrlPretty(c: CtrlJson): string[] {
 
     <template v-if="ready && snap">
       <div class="main-area">
+      <div class="left-col">
       <!-- Five stage cards in a row (left side) -->
       <div class="stage-row">
         <!-- IF -->
@@ -312,6 +314,8 @@ function ctrlPretty(c: CtrlJson): string[] {
           </ul>
         </div>
       </div>
+      <div class="under-box"><MmuIrqDemo /></div>
+      </div><!-- /left-col -->
 
       <!-- Right side: registers, RAM, ROM -->
       <div class="grid">
@@ -392,12 +396,30 @@ html, body { height: 100%; }
   min-width: 0;
   overflow: hidden;
 }
+.left-col {
+  flex: 2.55;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
 .stage-row {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: .6rem;
-  flex: 2.55;
+  flex: 7;
   min-width: 0;
+  min-height: 0;
+}
+.under-box {
+  flex: 3;
+  min-height: 0;
+  background: #000;
+  border: 1px solid #333;
+  border-radius: 4px;
+  display: flex;
+  overflow: hidden;
 }
 .stage-card {
   background: #111; border: 1px solid #333; border-radius: 4px;

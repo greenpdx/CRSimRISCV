@@ -67,6 +67,7 @@ fn pick_value(src: ForwardSrc, fallback: u32, ex_ma: &ExMa, ma_wb: &MaWb) -> u32
                 0 => ma_wb.alu_result,
                 1 => ma_wb.mem_data,
                 2 => ma_wb.pc_plus4,
+                3 => ma_wb.mem_data,
                 _ => 0,
             }
         }
@@ -123,6 +124,11 @@ pub fn compute_ex(id_ex: &IdEx, ex_ma_in: &ExMa, ma_wb_in: &MaWb) -> ExResult {
         // For JAL, branch_target = PC + imm (already set above).
     }
 
+    // CSR write source: zero-extended uimm for the immediate-form ops,
+    // otherwise the (forwarded) rs1 value.
+    let csr_write_val = if id_ex.csr_imm_form { id_ex.csr_uimm as u32 } else { rs1_val };
+    let csr_src_is_zero = if id_ex.csr_imm_form { id_ex.csr_uimm == 0 } else { id_ex.rs1_num == 0 };
+
     let ex_ma = ExMa {
         valid: true,
         instr: id_ex.instr,
@@ -134,6 +140,11 @@ pub fn compute_ex(id_ex: &IdEx, ex_ma_in: &ExMa, ma_wb_in: &MaWb) -> ExResult {
         branch_taken,
         branch_target,
         ctrl: id_ex.ctrl,
+        csr_addr: id_ex.csr_addr,
+        csr_write_val,
+        csr_src_is_zero,
+        trap_kind: id_ex.trap_kind,
+        trap_pc: id_ex.pc,
     };
 
     ExResult { ex_ma, forward_a: fa, forward_b: fb }

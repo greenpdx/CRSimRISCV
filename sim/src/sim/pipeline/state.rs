@@ -6,6 +6,9 @@
 //!
 //! See `sim/docs/pipeline-plan.md` for the full design discussion.
 
+use super::csr::CsrFile;
+use super::tlb::Tlb;
+
 const ROM_BASE: u32 = 0x0000_0000;
 const RAM_BASE: u32 = 0x0001_0000;
 const IO_BASE:  u32 = 0x4002_0000;
@@ -25,6 +28,8 @@ pub struct ControlBits {
     pub pc_sel:    u8,     // 0=PC+4, 1=PC+imm, 2=(rs1+imm)&~1
     pub branch:    bool,   // is this a conditional branch?
     pub jump:      bool,   // is this an unconditional jump (JAL/JALR)?
+    pub csr_op:    u8,     // 0=none, 1=RW, 2=RS, 3=RC (Zicsr Phase 1)
+    pub is_sfence: bool,   // SFENCE.VMA — flush TLB in MA stage (Phase 4.4)
 }
 
 /// IF/ID pipeline register. Holds an instruction that has been fetched
@@ -35,6 +40,9 @@ pub struct IfId {
     pub pc: u32,
     pub instr: u32,
     pub pc_plus4: u32,
+    /// 0 = none, 6 = instruction page fault (set by IF translation)
+    pub trap_kind: u8,
+    pub trap_value: u32,
 }
 
 impl IfId {
@@ -59,6 +67,15 @@ pub struct IdEx {
     pub funct7b30: u8,
     pub opcode: u8,
     pub ctrl: ControlBits,
+    /// CSR address (instr[31:20]) when ctrl.csr_op != 0.
+    pub csr_addr: u16,
+    /// CSR immediate (rs1 field as zero-extended uimm) for CSRR*I.
+    pub csr_uimm: u8,
+    /// True if this is the immediate-form CSR op (uimm replaces rs1).
+    pub csr_imm_form: bool,
+    /// Synchronous trap / mret kind decoded in ID:
+    /// 0 = none, 1 = illegal_instr, 2 = ecall_m, 3 = ebreak, 4 = mret.
+    pub trap_kind: u8,
 }
 
 impl IdEx {
@@ -79,6 +96,16 @@ pub struct ExMa {
     pub branch_taken: bool,
     pub branch_target: u32,
     pub ctrl: ControlBits,
+    /// CSR address forwarded to MA when ctrl.csr_op != 0.
+    pub csr_addr: u16,
+    /// Value to write into the CSR (rs1_data forwarded, or zero-extended uimm).
+    pub csr_write_val: u32,
+    /// Was rs1 == 0 / uimm == 0? (Determines whether CSR write occurs for RS/RC.)
+    pub csr_src_is_zero: bool,
+    /// Trap/mret kind, propagated from ID. Resolved by `step()` after EX.
+    pub trap_kind: u8,
+    /// PC of the trapping instruction (saved into mepc on sync trap).
+    pub trap_pc: u32,
 }
 
 impl ExMa {
@@ -97,6 +124,10 @@ pub struct MaWb {
     pub pc_plus4: u32,
     pub rd_num: u8,
     pub ctrl: ControlBits,
+    /// Trap kind for an MA-stage page fault (7=load, 8=store).
+    pub trap_kind: u8,
+    pub trap_pc: u32,
+    pub trap_value: u32,
 }
 
 impl MaWb {
@@ -120,6 +151,10 @@ pub struct PipelineState {
     pub rom: Vec<u32>,
     pub ram: Vec<u32>,
     pub io_data: u32,
+    pub csrs: CsrFile,
+    pub tlb: Tlb,
+    /// Current privilege mode: 3=M, 1=S, 0=U. Reset = M.
+    pub priv_mode: u8,
     pub cycle_count: u64,
     pub halted: bool,
 
@@ -140,6 +175,8 @@ pub struct PipelineState {
     pub last_flush: bool,
     pub last_forward_a: ForwardSrc,
     pub last_forward_b: ForwardSrc,
+    /// True if an asynchronous interrupt was taken at the start of this cycle.
+    pub last_trap_taken: bool,
 }
 
 impl Default for PipelineState {
@@ -150,6 +187,9 @@ impl Default for PipelineState {
             rom: vec![0x0000_0013; MEM_WORDS],  // NOPs
             ram: vec![0; MEM_WORDS],
             io_data: 0,
+            csrs: CsrFile::default(),
+            tlb: Tlb::default(),
+            priv_mode: 3,
             cycle_count: 0,
             halted: false,
             if_id: IfId::default(),
@@ -161,6 +201,7 @@ impl Default for PipelineState {
             last_flush: false,
             last_forward_a: ForwardSrc::Regfile,
             last_forward_b: ForwardSrc::Regfile,
+            last_trap_taken: false,
         }
     }
 }
