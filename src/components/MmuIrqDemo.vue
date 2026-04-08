@@ -51,10 +51,24 @@ function makeMmu(): ToyMmu {
     if (i === 5) continue
     ram.set(0x200 + i*2, pte(0x50, PTE_V|PTE_R|PTE_W))
   }
+  // Pre-populate the TLB with two example entries so the strip is
+  // never empty when the demo is first viewed.
+  const tlb = Array.from({ length: 4 }, () => ({ valid: false, vpn: 0, ppn: 0, pte: 0 }))
+  tlb[1] = { valid: true, vpn: 0x01, ppn: 0x50, pte: pte(0x50, PTE_V|PTE_R|PTE_W|PTE_A) }
+  tlb[2] = { valid: true, vpn: 0x12, ppn: 0x30, pte: pte(0x30, PTE_V|PTE_R|PTE_W|PTE_X|PTE_A) }
+  return { satp_ppn: 0x10, ram, tlb }
+}
+
+// Pre-filled walk state showing the result of translating 0x015. Both
+// L1 and L0 PTE rows have meaningful values from the moment the panel
+// loads, so the layout never starts empty.
+function makeInitialWalk(): WalkState {
   return {
-    satp_ppn: 0x10,
-    ram,
-    tlb: Array.from({ length: 4 }, () => ({ valid: false, vpn: 0, ppn: 0, pte: 0 })),
+    vaddr: 0x015, vpn1: 0, vpn0: 1, off: 5,
+    pte1_addr: 0x100, pte1: pte(0x20, PTE_V),
+    pte0_addr: 0x202, pte0: pte(0x50, PTE_V|PTE_R|PTE_W|PTE_A),
+    leaf_level: 0, phys: 0x505, fault_reason: null,
+    step: 'idle', step_index: 0,
   }
 }
 
@@ -82,12 +96,7 @@ interface WalkState {
   step_index: number
 }
 
-const walk = ref<WalkState>({
-  vaddr: 0x015, vpn1: 0, vpn0: 0, off: 0,
-  pte1_addr: 0, pte1: 0, pte0_addr: 0, pte0: 0,
-  leaf_level: null, phys: null, fault_reason: null,
-  step: 'idle', step_index: 0,
-})
+const walk = ref<WalkState>(makeInitialWalk())
 
 const vaddrInput = ref('0x015')
 const vaddrPresets = [
@@ -210,11 +219,7 @@ function walkStep() {
 
 function walkReset() {
   mmu.value = makeMmu()
-  walk.value.step = 'idle'
-  walk.value.step_index = 0
-  walk.value.phys = null
-  walk.value.fault_reason = null
-  walk.value.leaf_level = null
+  walk.value = makeInitialWalk()
 }
 
 // ── IRQ demo state machine ───────────────────────────────────────────
@@ -331,16 +336,16 @@ function flagsList(pte: number) {
 
 const stepHints: Record<WalkStep, string> = {
   idle:           'press Trigger Walk to start',
-  decompose:      'split vaddr into vpn1 | vpn0 | offset',
-  read_root:      'compute L1 PTE address from satp + vpn1',
-  read_l1:        'fetch the L1 PTE from RAM',
-  leaf_or_pointer:'check V; leaf if any of R/W/X set',
-  read_l0:        'fetch the L0 PTE',
-  check_perm:     'check permission bits against access',
-  compose_phys:   'assemble physical = ppn | offset; set A bit',
-  install_tlb:    'cache the translation in the TLB',
-  done:           'translation complete',
-  fault:          'page fault — see reason',
+  decompose:      'split the virtual address: top bits = vpn1 (root index), middle bits = vpn0 (L0 index), low 4 bits = offset within page',
+  read_root:      'compute the L1 PTE address: satp.PPN gives the root table base, add vpn1 × 2 to index it',
+  read_l1:        'fetch the L1 PTE from memory at the computed address',
+  leaf_or_pointer:'inspect the L1 PTE: if V=0 → fault; if any of R/W/X set → leaf (4 MiB superpage); else it points to an L0 table',
+  read_l0:        'fetch the L0 PTE from the L0 table at (next_ppn × 16) + vpn0 × 2',
+  check_perm:     'verify the leaf PTE grants the requested access (R for load, W for store, X for fetch)',
+  compose_phys:   'build the physical address = leaf_ppn × page_size + offset, then hardware sets the Accessed bit',
+  install_tlb:    'cache this vpn → ppn mapping in the TLB so the next access skips the walk',
+  done:           'translation complete — physical address ready',
+  fault:          'page fault — translation failed; trap to handler with the fault cause',
 }
 
 const irqHints: Record<IrqStep, string> = {
@@ -357,81 +362,21 @@ const irqHints: Record<IrqStep, string> = {
 </script>
 
 <template>
-  <div class="demo-root">
-    <!-- ─── IRQ panel ─── -->
-    <section class="panel irq">
-      <header>
-        <h3>IRQ delivery</h3>
-        <div class="controls">
-          <button @click="startIrq">Trigger IRQ</button>
-          <button @click="irqStep" :disabled="!irqActive || irq.step==='done'">Step</button>
-          <button @click="irqReset">Reset</button>
-          <span class="step-num" v-if="irqActive">{{ irq.step_index }}/7</span>
-        </div>
-      </header>
-      <div class="hint">{{ irqHints[irq.step] }}</div>
-
-      <div class="irq-body">
-        <div class="reg-row">
-          <span class="lbl">mip</span>
-          <span class="led" :class="{ on: bit(irq.mip,0) }">S</span>
-          <span class="led" :class="{ on: bit(irq.mip,1) }">T</span>
-          <span class="led" :class="{ on: bit(irq.mip,2) }">E</span>
-        </div>
-        <div class="reg-row">
-          <span class="lbl">mie</span>
-          <span class="led" :class="{ on: bit(irq.mie,0) }">S</span>
-          <span class="led" :class="{ on: bit(irq.mie,1) }">T</span>
-          <span class="led" :class="{ on: bit(irq.mie,2) }">E</span>
-          <span class="gate" :class="{ on: (irq.mip & irq.mie & 7) !== 0 && irq.step !== 'idle' && irq.step !== 'assert_mip' }">AND</span>
-        </div>
-        <div class="reg-row">
-          <span class="lbl">MIE gate</span>
-          <span class="gate" :class="{ on: irq.mstatus_mie }">{{ irq.mstatus_mie ? 'OPEN' : 'CLOSED' }}</span>
-        </div>
-        <div class="csr-grid">
-          <div :class="{ active: irq.step==='capture_epc_cause' || irq.mepc }">
-            <span>mepc</span><b>{{ hex(irq.mepc, 4) }}</b>
-          </div>
-          <div :class="{ active: irq.step==='capture_epc_cause' || irq.mcause }">
-            <span>mcause</span><b>{{ hex(irq.mcause, 8) }}</b>
-          </div>
-          <div :class="{ active: irq.step==='push_status' }">
-            <span>MPIE</span><b>{{ irq.mstatus_mpie ? '1' : '0' }}</b>
-          </div>
-          <div :class="{ active: irq.step==='push_status' }">
-            <span>MPP</span><b>{{ irq.mstatus_mpp }}</b>
-          </div>
-          <div :class="{ active: irq.step==='set_priv' }">
-            <span>priv</span><b>{{ irq.priv === 3 ? 'M' : irq.priv === 1 ? 'S' : 'U' }}</b>
-          </div>
-          <div :class="{ active: irq.step==='redirect_pc' }">
-            <span>pc</span><b>{{ hex(irq.pc, 4) }}</b>
-          </div>
-          <div>
-            <span>mtvec</span><b>{{ hex(irq.mtvec, 4) }}</b>
-          </div>
-        </div>
-      </div>
-    </section>
-
+  <div class="demo-root mmu-only">
     <!-- ─── MMU panel ─── -->
     <section class="panel mmu">
-      <header>
-        <h3>MMU page walk (toy 12-bit / 16-byte pages)</h3>
-        <div class="controls">
-          <input v-model="vaddrInput" class="vaddr-in" />
-          <button @click="startWalk">Trigger Walk</button>
-          <button @click="walkStep" :disabled="!walkActive || walk.step==='done' || walk.step==='fault'">Step</button>
-          <button @click="walkReset">Reset</button>
-          <span class="step-num" v-if="walkActive">{{ walk.step_index }}</span>
-        </div>
-      </header>
-      <div class="presets">
-        <span>presets:</span>
-        <button v-for="p in vaddrPresets" :key="p.v" @click="pickPreset(p.v)">{{ p.label }}</button>
-      </div>
+      <h3>MMU page walk</h3>
       <div class="hint">{{ stepHints[walk.step] }}</div>
+      <div class="controls">
+        <input v-model="vaddrInput" class="vaddr-in" />
+        <button @click="startWalk">Trigger Walk</button>
+        <button @click="walkStep" :disabled="!walkActive || walk.step==='done' || walk.step==='fault'">Step</button>
+        <button @click="walkReset">Reset</button>
+        <span class="step-num" v-if="walkActive">{{ walk.step_index }}</span>
+        <span class="presets-inline">
+          <button v-for="p in vaddrPresets" :key="p.v" @click="pickPreset(p.v)">{{ p.label }}</button>
+        </span>
+      </div>
 
       <div class="mmu-body">
         <div class="vaddr-row" :class="{ active: walk.step==='decompose' }">
@@ -457,8 +402,7 @@ const irqHints: Record<IrqStep, string> = {
           <span v-if="walk.leaf_level === 1" class="badge">leaf</span>
         </div>
 
-        <div class="pte-row" v-if="walk.leaf_level === 0 || walk.pte0_addr"
-             :class="{ active: walk.step==='read_l0' }">
+        <div class="pte-row" :class="{ active: walk.step==='read_l0' }">
           <span class="lbl">L0 PTE @{{ hex(walk.pte0_addr, 3) }}</span>
           <span class="csr-cell">{{ hex(walk.pte0, 4) }}</span>
           <span class="flags">
@@ -467,10 +411,10 @@ const irqHints: Record<IrqStep, string> = {
           <span v-if="walk.leaf_level === 0" class="badge">leaf</span>
         </div>
 
-        <div class="result-row" v-if="walk.phys !== null"
+        <div class="result-row"
              :class="{ active: walk.step==='compose_phys' }">
           <span class="lbl">phys</span>
-          <b>{{ hex(walk.phys, 3) }}</b>
+          <b>{{ walk.phys !== null ? hex(walk.phys, 3) : '' }}</b>
         </div>
 
         <div class="fault-row" v-if="walk.step === 'fault'">
@@ -495,9 +439,10 @@ const irqHints: Record<IrqStep, string> = {
 
 <style scoped>
 .demo-root {
+  flex: 1;
   display: flex;
   gap: .5rem;
-  width: 100%;
+  min-width: 0;
   height: 100%;
   padding: .4rem;
   box-sizing: border-box;
@@ -511,22 +456,22 @@ const irqHints: Record<IrqStep, string> = {
   display: flex;
   flex-direction: column;
   border-radius: 4px;
-  padding: .4rem .55rem;
+  padding: .25rem .5rem;
   overflow: auto;
   min-width: 0;
 }
 .panel.irq { background: #1a0f1f; border: 1px solid #6a3a8a; }
 .panel.mmu { background: #0a1c1c; border: 1px solid #2a8080; }
 
-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .25rem; }
-h3 { margin: 0; font-size: .8rem; }
+header { display: flex; align-items: center; gap: .5rem; margin-bottom: .15rem; flex-wrap: nowrap; }
+h3 { margin: 0; font-size: .8rem; white-space: nowrap; flex-shrink: 0; }
 .irq h3 { color: #c080e0; }
 .mmu h3 { color: #4dd0d0; }
 
-.controls { display: flex; gap: .25rem; align-items: center; margin-left: auto; }
+.controls { display: flex; gap: .25rem; align-items: center; flex-wrap: wrap; }
 .controls button {
   background: #222; color: #ddd; border: 1px solid #555;
-  padding: 1px 6px; font-size: 10px; border-radius: 3px;
+  padding: 3px 10px; font-size: 11px; border-radius: 3px;
   cursor: pointer; font-family: inherit;
 }
 .controls button:disabled { opacity: 0.4; cursor: default; }
@@ -540,21 +485,30 @@ h3 { margin: 0; font-size: .8rem; }
   font-size: 10px; padding: 1px 4px;
 }
 
-.presets { font-size: 10px; color: #888; margin-bottom: .2rem; }
-.presets button {
+.presets-inline { display: inline-flex; gap: 3px; margin-left: .35rem; }
+.presets-inline button {
   background: #112; color: #aaa; border: 1px solid #333;
-  font-size: 10px; padding: 0 4px; margin-left: 3px; cursor: pointer;
-  font-family: inherit;
+  font-size: 10px; padding: 3px 6px; cursor: pointer;
+  font-family: inherit; border-radius: 2px;
 }
 
 .hint {
+  display: block;
+  width: 100%;
   font-size: 10px; color: #aaa; font-style: italic;
-  margin-bottom: .35rem; min-height: 1em;
+  margin-bottom: .2rem;
+  line-height: 1.3;
+  height: calc(3 * 1.3em + 4px);
+  overflow: hidden;
+  border: 1px solid #2a4a4a;
+  border-radius: 3px;
+  padding: 2px 6px;
+  box-sizing: border-box;
 }
 
 .reg-row, .vaddr-row, .pte-row, .result-row, .fault-row, .tlb-row {
   display: flex; align-items: center; gap: .35rem;
-  padding: 2px 0;
+  padding: 1px 0;
 }
 .lbl { color: #888; min-width: 5.5em; font-size: 10px; }
 

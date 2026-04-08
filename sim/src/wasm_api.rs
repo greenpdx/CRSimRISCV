@@ -378,7 +378,13 @@ struct PipelineSnapshot {
     cycle: u64,
     pc: u32,
     halted: bool,
+    priv_mode: u8,
     registers: Vec<u32>,
+    reg_read_mask: u32,
+    reg_write_mask: u32,
+    last_ram_addr: u32,
+    last_ram_kind: u8,
+    last_ram_side: u8,
     if_id: IfIdJson,
     id_ex: IdExJson,
     ex_ma: ExMaJson,
@@ -387,6 +393,14 @@ struct PipelineSnapshot {
     hazard: HazardJson,
     forward: ForwardJson,
     active_components: ActiveComponentsJson,
+    csrs: Vec<CsrEntryJson>,
+}
+
+#[derive(Serialize)]
+struct CsrEntryJson {
+    addr: u16,
+    value: u32,
+    changed: bool,
 }
 
 fn forward_name(s: ForwardSrc) -> &'static str {
@@ -426,8 +440,20 @@ impl JsPipelineState {
     // ── Storage accessors ──────────────────────────────────────────────
     pub fn read_register(&self, idx: u8) -> u32 { self.inner.read_register(idx) }
     pub fn registers(&self) -> Vec<u32> { self.inner.registers.to_vec() }
-    pub fn ram(&self) -> Vec<u32> { self.inner.ram.clone() }
+    /// Returns machine-side RAM (alias kept for back-compat with the
+    /// pre-split visualizer code).
+    pub fn ram(&self) -> Vec<u32> { self.inner.machine_ram.clone() }
+    pub fn machine_ram(&self) -> Vec<u32> { self.inner.machine_ram.clone() }
+    pub fn user_ram(&self) -> Vec<u32> { self.inner.user_ram.clone() }
     pub fn rom(&self) -> Vec<u32> { self.inner.rom.clone() }
+
+    // ── Per-cycle activity (for the visualizer) ────────────────────────
+    #[wasm_bindgen(getter)] pub fn reg_read_mask(&self) -> u32 { self.inner.reg_read_mask }
+    #[wasm_bindgen(getter)] pub fn reg_write_mask(&self) -> u32 { self.inner.reg_write_mask }
+    #[wasm_bindgen(getter)] pub fn last_ram_addr(&self) -> u32 { self.inner.last_ram_addr }
+    #[wasm_bindgen(getter)] pub fn last_ram_kind(&self) -> u8 { self.inner.last_ram_kind }
+    #[wasm_bindgen(getter)] pub fn last_ram_side(&self) -> u8 { self.inner.last_ram_side }
+    #[wasm_bindgen(getter)] pub fn priv_mode(&self) -> u8 { self.inner.priv_mode }
 
     // ── Pipeline-register snapshots ────────────────────────────────────
     pub fn if_id(&self) -> JsValue {
@@ -460,11 +486,26 @@ impl JsPipelineState {
             ma:  pipeline::active_components(&self.inner, Stage::MA),
             wb:  pipeline::active_components(&self.inner, Stage::WB),
         };
+        let csrs: Vec<CsrEntryJson> = crate::sim::pipeline::csr::CsrFile::known_addrs()
+            .iter().enumerate()
+            .map(|(i, &a)| {
+                let v = self.inner.csrs.read(a);
+                let prev = self.inner.last_csr_snapshot.get(i).copied().unwrap_or(0);
+                CsrEntryJson { addr: a, value: v, changed: v != prev }
+            })
+            .collect();
         let snap = PipelineSnapshot {
             cycle: self.inner.cycle_count,
             pc: self.inner.pc,
             halted: self.inner.halted,
+            priv_mode: self.inner.priv_mode,
             registers: self.inner.registers.to_vec(),
+            reg_read_mask: self.inner.reg_read_mask,
+            reg_write_mask: self.inner.reg_write_mask,
+            last_ram_addr: self.inner.last_ram_addr,
+            last_ram_kind: self.inner.last_ram_kind,
+            last_ram_side: self.inner.last_ram_side,
+            csrs,
             if_id: (&self.inner.if_id).into(),
             id_ex: (&self.inner.id_ex).into(),
             ex_ma: (&self.inner.ex_ma).into(),
@@ -486,6 +527,12 @@ impl JsPipelineState {
         if i != 0 { self.inner.registers[i] = val; }
     }
     pub fn poke_ram(&mut self, byte_addr: u32, val: u32) {
+        self.inner.ram_write(byte_addr, val);
+    }
+    pub fn poke_user_ram(&mut self, byte_addr: u32, val: u32) {
+        self.inner.user_ram_write(byte_addr, val);
+    }
+    pub fn poke_machine_ram(&mut self, byte_addr: u32, val: u32) {
         self.inner.ram_write(byte_addr, val);
     }
     pub fn poke_rom(&mut self, byte_addr: u32, val: u32) {

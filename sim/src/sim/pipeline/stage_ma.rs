@@ -54,7 +54,7 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
         let raw = if PipelineState::is_io(vaddr) {
             state.io_data
         } else {
-            state.ram_read(addr)
+            state.priv_ram_read(addr)
         };
         // Apply sign/zero extension based on funct3 (LB/LH/LW/LBU/LHU)
         let byte_off = (addr & 0x3) * 8;
@@ -106,7 +106,7 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
         } else {
             // Sub-word writes are not modeled in the visualizer; treat
             // SB/SH/SW as full word writes for v1.
-            state.ram_write(addr, ex_ma.rs2_data);
+            state.priv_ram_write(addr, ex_ma.rs2_data);
         }
     }
 

@@ -51,7 +51,7 @@ fn pipeline_two_adds_no_hazard() {
 fn pipeline_load_use_stall() {
     let mut cpu = PipelineState::new();
     // Pre-seed RAM[0x10000] = 42 via direct write through the model
-    cpu.ram[0] = 42;
+    cpu.machine_ram[0] = 42;
     cpu.load_program(&[
         0x000102b7, // lui  x5, 0x10            (x5 = 0x10000)
         0x0002a303, // lw   x6, 0(x5)           (x6 = 42)
@@ -623,7 +623,7 @@ fn pipeline_sv32_identity_map_load_succeeds() {
     cpu.csrs.mtvec = 0x80;
     // Use M-mode to set up RAM, then drop to S.
     cpu.ram_write(root + 0*4, pte1);
-    cpu.ram_write(0x10010, 0xdeadbeef);
+    cpu.user_ram_write(0x10010, 0xdeadbeef);
     cpu.priv_mode = 1;
     // lui x6, 0x10 ; lw x5, 0x10(x6)  — virtual = 0x10010
     cpu.load_program(&[
@@ -682,7 +682,7 @@ fn pipeline_sv32_load_sets_a_bit() {
     let root = 0x10000u32;
     cpu.csrs.satp = (1 << 31) | (root >> 12);
     cpu.ram_write(root + 0*4, pte(0, V | R | W | X)); // identity, no A yet
-    cpu.ram_write(0x10010, 0xcafebabe);
+    cpu.user_ram_write(0x10010, 0xcafebabe);
     cpu.priv_mode = 1;
     cpu.load_program(&[
         0x00010337, // lui x6, 0x10
@@ -717,7 +717,7 @@ fn pipeline_sv32_store_sets_a_and_d_bits() {
 fn pipeline_sv32_sum_allows_s_to_access_u_page() {
     let mut cpu = PipelineState::new();
     // Need a second RAM page for the L0 table.
-    cpu.ram.resize(2048, 0);
+    cpu.machine_ram.resize(2048, 0);
     let root = 0x10000u32;
     cpu.csrs.satp = (1 << 31) | (root >> 12);
     // L1[0] = identity superpage covering code (no U).
@@ -726,7 +726,7 @@ fn pipeline_sv32_sum_allows_s_to_access_u_page() {
     cpu.ram_write(root + 1*4, pte(0x11, V));
     // L0[0] (vpn0=0) leaf: vaddr 0x00400000 → phys 0x10000, U/R/W.
     cpu.ram_write(0x11000 + 0*4, pte(0x10, V | R | W | U));
-    cpu.ram_write(0x10010, 0x1234_5678);
+    cpu.user_ram_write(0x10010, 0x1234_5678);
     cpu.csrs.mstatus = 1 << 18; // SUM
     cpu.priv_mode = 1;
     cpu.load_program(&[
@@ -748,7 +748,7 @@ fn pipeline_sv32_mxr_allows_load_from_x_only_page() {
     cpu.ram_write(root + 0*4, pte(0, V | X));
     cpu.csrs.mstatus = 1 << 19; // MXR
     cpu.priv_mode = 1;
-    cpu.ram_write(0x10010, 0xface_d00d);
+    cpu.user_ram_write(0x10010, 0xface_d00d);
     cpu.load_program(&[
         0x00010337, // lui x6, 0x10
         0x01032283, // lw x5, 16(x6)
@@ -777,7 +777,7 @@ fn pipeline_tlb_hit_after_first_walk() {
     let root = 0x10000u32;
     cpu.csrs.satp = (1 << 31) | (root >> 12);
     cpu.ram_write(root + 0*4, pte(0, V | R | W | X));
-    cpu.ram_write(0x10010, 0xa1a2a3a4);
+    cpu.user_ram_write(0x10010, 0xa1a2a3a4);
     cpu.priv_mode = 1;
     cpu.load_program(&[
         0x00010337, // lui x6, 0x10
@@ -815,4 +815,79 @@ fn pipeline_tlb_flushed_on_sfence_vma() {
     for _ in 0..6 { cpu.step(); }
     assert!(cpu.tlb.entries.iter().all(|e| !e.valid),
             "sfence.vma must flush TLB");
+}
+
+#[test]
+fn pipeline_inject_irq_handler_returns() {
+    // Mirror the live MicroStepPipelineView default ROM image:
+    // 0x00 setup mtvec=0x80; demo body; handler at 0x80; mret at 0x8c.
+    let mut cpu = PipelineState::new();
+    let nop = 0x00000013u32;
+    let mut rom = vec![nop; 64];
+    rom[0]  = 0x08000293; // addi t0, x0, 0x80
+    rom[1]  = 0x30529073; // csrrw x0, mtvec, t0
+    rom[2]  = 0x00500293; // addi x5, x0, 5
+    rom[3]  = 0x00128313; // addi x6, x5, 1
+    rom[4]  = 0x000102b7; // lui  x5, 0x10
+    rom[5]  = 0x0062a023; // sw   x6, 0(x5)
+    rom[6]  = 0x0002a383; // lw   x7, 0(x5)
+    rom[7]  = 0x00738433; // add  x8, x7, x7
+    rom[8]  = 0x00540863; // beq  x8, x5, 16
+    rom[9]  = 0x02a00913; // addi s2, x0, 42
+    rom[10] = 0x0000006f; // jal  x0, 0  (spin)
+    rom[32] = 0x34202373; // csrrs x6, mcause, x0
+    rom[33] = 0x34405073; // csrrwi x0, mip, 0
+    rom[34] = 0x00140413; // addi s0, s0, 1
+    rom[35] = 0x30200073; // mret
+    cpu.load_program(&rom);
+
+    // Run setup + a few demo instructions.
+    for _ in 0..10 { cpu.step(); }
+    // Inject IRQ exactly like the Vue button does.
+    cpu.csrs.mstatus |= 1 << 3;     // MIE
+    cpu.csrs.mie     |= 1 << 11;    // MEIE
+    cpu.csrs.mip     |= 1 << 11;    // MEIP
+
+    cpu.step();
+    assert_eq!(cpu.csrs.mcause, 0x8000_000b);
+    let mepc = cpu.csrs.mepc;
+    // Drain the handler — after ~15 cycles mret has resolved in EX
+    // and PC is back near mepc.
+    for _ in 0..15 { cpu.step(); }
+    assert!(cpu.pc < 0x80 && cpu.pc >= mepc && cpu.pc < mepc + 0x40,
+            "pc=0x{:x} should have returned to near mepc=0x{:x}", cpu.pc, mepc);
+}
+
+#[test]
+fn pipeline_irq_handler_stage_trace() {
+    let mut cpu = PipelineState::new();
+    let nop = 0x00000013u32;
+    let mut rom = vec![nop; 64];
+    rom[0] = 0x08000293; rom[1] = 0x30529073;
+    rom[2] = 0x00500293; rom[3] = 0x00128313;
+    rom[4] = 0x000102b7; rom[5] = 0x0062a023;
+    rom[6] = 0x0002a383; rom[7] = 0x00738433;
+    rom[8] = 0x00540863; rom[9] = 0x02a00913;
+    rom[10] = 0x0000006f;
+    rom[32] = 0x34202373; rom[33] = 0x34405073;
+    rom[34] = 0x00140413; rom[35] = 0x30200073;
+    cpu.load_program(&rom);
+    for _ in 0..10 { cpu.step(); }
+
+    // Inject IRQ
+    cpu.csrs.mstatus |= 1 << 3;
+    cpu.csrs.mie     |= 1 << 11;
+    cpu.csrs.mip     |= 1 << 11;
+
+    eprintln!("---- after inject, pc=0x{:x}", cpu.pc);
+    for c in 0..15 {
+        cpu.step();
+        eprintln!("step{:2}: pc=0x{:x}  IF={:08x}({})  ID={:08x}({})  EX={:08x}({})  MA={:08x}({})",
+            c, cpu.pc,
+            cpu.if_id.instr, if cpu.if_id.valid {"v"} else {"-"},
+            cpu.id_ex.instr, if cpu.id_ex.valid {"v"} else {"-"},
+            cpu.ex_ma.instr, if cpu.ex_ma.valid {"v"} else {"-"},
+            cpu.ma_wb.instr, if cpu.ma_wb.valid {"v"} else {"-"},
+        );
+    }
 }

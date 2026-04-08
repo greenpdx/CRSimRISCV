@@ -104,16 +104,27 @@ impl PipelineState {
     pub fn step(&mut self) {
         if self.halted { return; }
 
+        // Snapshot CSRs *before* this cycle's stages run, so the
+        // visualizer can compare and highlight changed CSRs.
+        for (i, &a) in csr::CsrFile::known_addrs().iter().enumerate() {
+            self.last_csr_snapshot[i] = self.csrs.read(a);
+        }
+        // Clear per-cycle activity records (they reflect this cycle).
+        self.reg_read_mask = 0;
+        self.reg_write_mask = 0;
+        self.last_ram_addr = 0;
+        self.last_ram_kind = 0;
+
         // ── 0. Interrupt check (asynchronous trap) ─────────────────
-        // Take pending+enabled interrupts at instruction boundary.
-        // mepc is set to the next-to-fetch PC; in-flight IF/ID and
-        // ID/EX are squashed (their instructions never retire);
-        // EX/MA/WB drain naturally.
+        // Async interrupts redirect PC to mtvec but do NOT squash any
+        // in-flight stages. The instructions currently in IF/ID/EX/
+        // MA/WB drain to completion behind the handler. The IF stage
+        // this very cycle will fetch from mtvec (because PC was just
+        // overwritten), so the handler starts immediately while older
+        // in-flight instructions retire on subsequent cycles.
         self.last_trap_taken = false;
         if self.check_and_take_interrupt() {
             self.last_trap_taken = true;
-            self.if_id = IfId::bubble();
-            self.id_ex = IdEx::bubble();
         }
 
         // Snapshot the inputs each stage will use. We're computing the
@@ -159,6 +170,15 @@ impl PipelineState {
         self.last_stall = stall;
         let new_id_ex_default = stage_id::compute_id(self, &prev_if_id)
             .unwrap_or_else(IdEx::bubble);
+        // Record this cycle's register reads (rs1/rs2 of new ID/EX).
+        if new_id_ex_default.valid {
+            if new_id_ex_default.rs1_num != 0 {
+                self.reg_read_mask |= 1 << new_id_ex_default.rs1_num;
+            }
+            if new_id_ex_default.rs2_num != 0 {
+                self.reg_read_mask |= 1 << new_id_ex_default.rs2_num;
+            }
+        }
 
         // ── 5. IF ───────────────────────────────────────────────────
         // Read the next instruction from ROM at PC.
@@ -210,8 +230,21 @@ impl PipelineState {
                     trap_redirect = Some(self.take_trap(cause, new_ex_ma.trap_pc, mtval));
                 }
             }
-            // Squash the trapping instruction so MA/WB ignore it.
-            new_ex_ma = ExMa::bubble();
+            // The trapping instruction itself must not retire any
+            // architectural side-effects, but we keep the pipeline-
+            // register entry alive so the visualizer can show it
+            // travel through MA and WB. Suppress reg/mem writes and
+            // any CSR side-effect by clearing the relevant control
+            // bits and zeroing rd.
+            new_ex_ma.ctrl.reg_write = false;
+            new_ex_ma.ctrl.mem_read  = false;
+            new_ex_ma.ctrl.mem_write = false;
+            new_ex_ma.ctrl.csr_op    = 0;
+            new_ex_ma.ctrl.is_sfence = false;
+            new_ex_ma.rd_num         = 0;
+            // Clear trap_kind so the next cycle's MA-trap check
+            // doesn't re-fire on this same instruction.
+            new_ex_ma.trap_kind = 0;
         }
 
         // ── 6b. Branch flush ────────────────────────────────────────
@@ -316,10 +349,16 @@ impl PipelineState {
     }
 
     /// Asynchronous interrupt check, called at the top of `step()`.
-    /// If an enabled interrupt is pending, takes the trap and returns
-    /// true (caller squashes IF/ID and ID/EX so the in-flight younger
-    /// instructions never retire). Direct mtvec mode only. Priority:
-    /// MEI (11) > MSI (3) > MTI (7).
+    /// If an enabled interrupt is pending, redirects PC to mtvec and
+    /// records the trap state. We do NOT squash any in-flight stages
+    /// — async interrupts have no urgency, so the instructions
+    /// already in IF/ID/EX/MA/WB drain naturally. The handler simply
+    /// starts fetching at mtvec on this same cycle (the IF stage
+    /// will see the new PC), and the older in-flight instructions
+    /// complete behind it. `mepc` is set to the address that was
+    /// about to be fetched (`self.pc` at trap time) so `mret` resumes
+    /// exactly where the program would have continued.
+    /// Direct mtvec mode only. Priority: MEI (11) > MSI (3) > MTI (7).
     fn check_and_take_interrupt(&mut self) -> bool {
         let mie_global = (self.csrs.mstatus >> 3) & 1 != 0;
         if !mie_global { return false; }
@@ -330,7 +369,6 @@ impl PipelineState {
                     else if pending & (1 << 7) != 0 { 7 }
                     else { return false; };
         let int_cause = 0x8000_0000u32 | cause;
-        // mepc = address of next instruction that *would* have been fetched.
         let epc = self.pc;
         self.pc = self.take_trap(int_cause, epc, 0);
         true
@@ -340,8 +378,14 @@ impl PipelineState {
     pub fn reset(&mut self) {
         self.pc = 0;
         self.registers = [0; 32];
-        for word in self.ram.iter_mut() { *word = 0; }
+        for word in self.machine_ram.iter_mut() { *word = 0; }
+        for word in self.user_ram.iter_mut() { *word = 0; }
         self.io_data = 0;
+        self.reg_read_mask = 0;
+        self.reg_write_mask = 0;
+        self.last_ram_addr = 0;
+        self.last_ram_kind = 0;
+        self.last_ram_side = 0;
         self.csrs = csr::CsrFile::default();
         self.tlb.flush();
         self.priv_mode = 3;

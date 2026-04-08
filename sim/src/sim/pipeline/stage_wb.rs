@@ -21,4 +21,7 @@ pub fn compute_wb(state: &mut PipelineState, ma_wb: &MaWb) {
         _ => 0,
     };
     state.write_register(ma_wb.rd_num, value);
+    if ma_wb.rd_num != 0 {
+        state.reg_write_mask |= 1 << ma_wb.rd_num;
+    }
 }

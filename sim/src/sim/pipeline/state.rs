@@ -149,7 +149,8 @@ pub struct PipelineState {
     pub pc: u32,
     pub registers: [u32; 32],
     pub rom: Vec<u32>,
-    pub ram: Vec<u32>,
+    pub machine_ram: Vec<u32>,
+    pub user_ram: Vec<u32>,
     pub io_data: u32,
     pub csrs: CsrFile,
     pub tlb: Tlb,
@@ -177,6 +178,21 @@ pub struct PipelineState {
     pub last_forward_b: ForwardSrc,
     /// True if an asynchronous interrupt was taken at the start of this cycle.
     pub last_trap_taken: bool,
+
+    // ── Per-cycle activity (for the visualizer) ────────────────────
+    /// Bitmask of registers read this cycle (rs1/rs2 of ID).
+    pub reg_read_mask: u32,
+    /// Bitmask of registers written this cycle (rd of WB).
+    pub reg_write_mask: u32,
+    /// Address of the most recent load/store; 0 if none.
+    pub last_ram_addr: u32,
+    /// 0 = none, 1 = read, 2 = write.
+    pub last_ram_kind: u8,
+    /// 0 = machine, 1 = user. Tracks which RAM array was hit.
+    pub last_ram_side: u8,
+    /// Snapshot of all known CSRs at the *previous* cycle, so the
+    /// visualizer can show which CSRs changed this cycle.
+    pub last_csr_snapshot: Vec<u32>,
 }
 
 impl Default for PipelineState {
@@ -185,7 +201,8 @@ impl Default for PipelineState {
             pc: 0,
             registers: [0; 32],
             rom: vec![0x0000_0013; MEM_WORDS],  // NOPs
-            ram: vec![0; MEM_WORDS],
+            machine_ram: vec![0; MEM_WORDS],
+            user_ram: vec![0; MEM_WORDS],
             io_data: 0,
             csrs: CsrFile::default(),
             tlb: Tlb::default(),
@@ -202,6 +219,12 @@ impl Default for PipelineState {
             last_forward_a: ForwardSrc::Regfile,
             last_forward_b: ForwardSrc::Regfile,
             last_trap_taken: false,
+            reg_read_mask: 0,
+            reg_write_mask: 0,
+            last_ram_addr: 0,
+            last_ram_kind: 0,
+            last_ram_side: 0,
+            last_csr_snapshot: vec![0; CsrFile::known_addrs().len()],
         }
     }
 }
@@ -220,14 +243,56 @@ impl PipelineState {
         self.rom.get(idx).copied().unwrap_or(0)
     }
 
+    /// Machine-side RAM read. Used by the page-table walker (PTEs
+    /// always live in machine RAM) and by M-mode loads. Existing
+    /// tests that pre-date the user/machine split also call this.
     pub fn ram_read(&self, addr: u32) -> u32 {
         let idx = ((addr & !3).wrapping_sub(RAM_BASE) >> 2) as usize;
-        self.ram.get(idx).copied().unwrap_or(0)
+        self.machine_ram.get(idx).copied().unwrap_or(0)
     }
 
     pub fn ram_write(&mut self, addr: u32, val: u32) {
         let idx = ((addr & !3).wrapping_sub(RAM_BASE) >> 2) as usize;
-        if idx < self.ram.len() { self.ram[idx] = val; }
+        if idx < self.machine_ram.len() { self.machine_ram[idx] = val; }
+    }
+
+    pub fn user_ram_read(&self, addr: u32) -> u32 {
+        let idx = ((addr & !3).wrapping_sub(RAM_BASE) >> 2) as usize;
+        self.user_ram.get(idx).copied().unwrap_or(0)
+    }
+
+    pub fn user_ram_write(&mut self, addr: u32, val: u32) {
+        let idx = ((addr & !3).wrapping_sub(RAM_BASE) >> 2) as usize;
+        if idx < self.user_ram.len() { self.user_ram[idx] = val; }
+    }
+
+    /// Privilege-aware RAM read for stage_ma loads. M-mode hits
+    /// machine RAM; U/S-mode hits user RAM. Records `last_ram_*`
+    /// for the visualizer.
+    pub fn priv_ram_read(&mut self, addr: u32) -> u32 {
+        let v;
+        if self.priv_mode == 3 {
+            v = self.ram_read(addr);
+            self.last_ram_side = 0;
+        } else {
+            v = self.user_ram_read(addr);
+            self.last_ram_side = 1;
+        }
+        self.last_ram_addr = addr & !3;
+        self.last_ram_kind = 1;
+        v
+    }
+
+    pub fn priv_ram_write(&mut self, addr: u32, val: u32) {
+        if self.priv_mode == 3 {
+            self.ram_write(addr, val);
+            self.last_ram_side = 0;
+        } else {
+            self.user_ram_write(addr, val);
+            self.last_ram_side = 1;
+        }
+        self.last_ram_addr = addr & !3;
+        self.last_ram_kind = 2;
     }
 
     pub fn is_io(addr: u32) -> bool { addr >= IO_BASE }
