@@ -1,0 +1,30 @@
+[
+  { "addr":   0, "value": "0x08000293", "asm": "addi t0, x0, 0x80         (mtvec base)" },
+  { "addr":   4, "value": "0x30529073", "asm": "csrrw x0, mtvec, t0       (mtvec = 0x80)" },
+  { "addr":   8, "value": "0x00100293", "asm": "addi t0, x0, 1" },
+  { "addr":  12, "value": "0x00b29293", "asm": "slli t0, t0, 11           (t0 = 0x800 = MEIE)" },
+  { "addr":  16, "value": "0x30429073", "asm": "csrrw x0, mie, t0         (mie.MEIE = 1)" },
+  { "addr":  20, "value": "0x00800293", "asm": "addi t0, x0, 8            (t0 = 8 = MIE bit)" },
+  { "addr":  24, "value": "0x3002a073", "asm": "csrrs x0, mstatus, t0     (mstatus.MIE = 1)" },
+
+  { "addr":  28, "value": "0x00500293", "asm": "addi t0, x0, 5" },
+  { "addr":  32, "value": "0x00128313", "asm": "addi t1, t0, 1            (RAW: forwards t0)" },
+  { "addr":  36, "value": "0x000102b7", "asm": "lui t0, 0x10              (t0 = 0x10000)" },
+  { "addr":  40, "value": "0x0062a023", "asm": "sw t1, 0(t0)              (MEM[0x10000] = 6)" },
+  { "addr":  44, "value": "0x0002a383", "asm": "lw t2, 0(t0)              (load t2)" },
+  { "addr":  48, "value": "0x00738433", "asm": "add s0, t2, t2            (load-use stall)" },
+  { "addr":  52, "value": "0x407404b3", "asm": "sub s1, s0, t2            (chained dependency)" },
+
+  { "addr":  56, "value": "0x00300513", "asm": "addi a0, x0, 3            (counter = 3)" },
+  { "addr":  60, "value": "0xfff50513", "asm": "addi a0, a0, -1           (LOOP: decrement)" },
+  { "addr":  64, "value": "0xfe051ee3", "asm": "bne a0, x0, -4            (loop while a0 != 0)" },
+
+  { "addr":  68, "value": "0x00540863", "asm": "beq s0, t0, 16            (not taken)" },
+  { "addr":  72, "value": "0x02a00913", "asm": "addi s2, x0, 42" },
+  { "addr":  76, "value": "0x0000006f", "asm": "jal x0, 0                 (spin)" },
+
+  { "addr": 128, "value": "0x34202373", "asm": "csrrs t1, mcause, x0      (handler @ 0x80)" },
+  { "addr": 132, "value": "0x34405073", "asm": "csrrwi x0, mip, 0         (clear MEIP)" },
+  { "addr": 136, "value": "0x00140413", "asm": "addi s0, s0, 1            (bump counter)" },
+  { "addr": 140, "value": "0x30200073", "asm": "mret" }
+]

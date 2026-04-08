@@ -160,13 +160,13 @@ function buildProgram(): Uint32Array {
 
   return new Uint32Array(rom)
 }
-const program = buildProgram()
+const program = ref<Uint32Array>(buildProgram())
 
 onMounted(async () => {
   const mod = await import('../wasm/cpu_sim.js')
   await mod.default()
   const c = new mod.JsPipelineState() as Cpu
-  c.load_program(program)
+  c.load_program(program.value)
   cpu.value = c
   // Reuse the JsCpuState's disasm helper for ROM display
   const d = new mod.JsCpuState() as unknown as Disasmer
@@ -180,8 +180,71 @@ function step20()  { for (let i = 0; i < 20; i++) cpu.value?.step(); renderTick.
 function reset()   {
   if (!cpu.value) return
   cpu.value.reset()
-  cpu.value.load_program(program)
+  cpu.value.load_program(program.value)
   renderTick.value++
+}
+
+// ── Load program from file ─────────────────────────────────────────
+const fileInput = ref<HTMLInputElement | null>(null)
+function clickLoad() { fileInput.value?.click() }
+
+interface ProgramEntryHex  { hex: string; asm?: string }
+interface ProgramFileHex   { program?: ProgramEntryHex[] }
+interface ProgramEntryAddr { addr: number; value: string; asm?: string }
+const ROM_WORDS = 64
+const NOP = 0x00000013
+
+function onFileLoad(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file || !cpu.value) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    const text = reader.result as string
+    let words: Uint32Array | null = null
+
+    // Try JSON formats.
+    try {
+      const json = JSON.parse(text) as unknown
+      // Format A: array of {addr, value, asm} (lab format).
+      if (Array.isArray(json) && json.length > 0
+          && typeof (json as ProgramEntryAddr[])[0]?.addr === 'number') {
+        const arr = json as ProgramEntryAddr[]
+        const buf = new Uint32Array(ROM_WORDS).fill(NOP)
+        for (const e of arr) {
+          const idx = (e.addr >>> 2)
+          const v = parseInt(e.value, 16)
+          if (!isNaN(v) && idx < buf.length) buf[idx] = v >>> 0
+        }
+        words = buf
+      } else {
+        // Format B: { program: [{ hex, asm }, ...] } (CpuLayout format).
+        const j = json as ProgramFileHex
+        if (j.program && Array.isArray(j.program)) {
+          words = new Uint32Array(j.program.map(e => parseInt(e.hex, 16) >>> 0))
+        }
+      }
+    } catch { /* not JSON, try hex-per-line */ }
+
+    // Format C: hex per line.
+    if (!words) {
+      const lines = text.trim().split('\n').filter(l => l.trim())
+      const arr = lines.map(l => parseInt(l.trim(), 16)).filter(n => !isNaN(n))
+      if (arr.length > 0) words = new Uint32Array(arr)
+    }
+
+    if (!words || words.length === 0) {
+      alert('No instructions parsed from file.')
+      target.value = ''
+      return
+    }
+    program.value = words
+    cpu.value!.reset()
+    cpu.value!.load_program(program.value)
+    renderTick.value++
+  }
+  reader.readAsText(file)
+  target.value = ''
 }
 
 const snap = computed<Snapshot | null>(() => {
@@ -404,6 +467,9 @@ function ctrlPretty(c: CtrlJson): string[] {
       <button class="btn"     @click="step5">Step 5</button>
       <button class="btn"     @click="step20">Step 20</button>
       <button class="btn"     @click="reset">Reset</button>
+      <button class="btn"     @click="clickLoad">Load…</button>
+      <input ref="fileInput" type="file" accept=".json,.hex,.txt"
+             style="display:none" @change="onFileLoad" />
       <span class="bar-gap"></span>
       <button class="btn btn-irq" @click="injectIrq">Inject IRQ</button>
     </div>
