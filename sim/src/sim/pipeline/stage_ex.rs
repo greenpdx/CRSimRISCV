@@ -82,7 +82,7 @@ pub fn compute_ex(id_ex: &IdEx, ex_ma_in: &ExMa, ma_wb_in: &MaWb) -> ExResult {
         let mut bubble = ExMa::bubble();
         bubble.stall_reg = id_ex.stall_reg;
         bubble.flush_bubble = id_ex.flush_bubble;
-        bubble.early_redirected = id_ex.early_branch;
+        bubble.early_redirected = id_ex.id_redirected;
         return ExResult {
             ex_ma: bubble,
             forward_a: ForwardSrc::Regfile,
@@ -151,7 +151,7 @@ pub fn compute_ex(id_ex: &IdEx, ex_ma_in: &ExMa, ma_wb_in: &MaWb) -> ExResult {
         trap_pc: id_ex.pc,
         stall_reg: 0,
         flush_bubble: false,
-        early_redirected: id_ex.early_branch,
+        early_redirected: id_ex.id_redirected,
     };
 
     ExResult { ex_ma, forward_a: fa, forward_b: fb }

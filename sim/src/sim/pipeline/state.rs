@@ -125,6 +125,10 @@ pub struct IdEx {
     /// early redirect by the ID-resolve modes. Set independently of
     /// `branch_taken` (which is decided in EX).
     pub early_branch: bool,
+    /// True if `mod.rs` actually performed an ID-side redirect for this
+    /// instruction. Only set in modes 2/3, only when `do_id_redirect`
+    /// fired. Propagated through stage_ex into `ExMa.early_redirected`.
+    pub id_redirected: bool,
 }
 
 impl IdEx {

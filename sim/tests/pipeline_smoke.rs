@@ -916,3 +916,43 @@ fn pipeline_mode2_jal_no_penalty() {
     assert_eq!(cpu.read_register(12), 0);     // squashed
     assert_eq!(cpu.read_register(13), 0x77);
 }
+
+#[test]
+fn pipeline_mode2_jal_spin_does_not_escape() {
+    // jal x0, 0 — target is the JAL itself. In mode 2 the pc must
+    // never escape past JAL+4.
+    let mut cpu = PipelineState::new();
+    cpu.branch_mode = BranchMode::AlwaysTarget;
+    let nop = 0x00000013u32;
+    let mut rom = vec![nop; 16];
+    rom[5] = 0x0000006f;
+    cpu.load_program(&rom);
+    cpu.pc = 0x14;
+    for _ in 0..40 { cpu.step(); }
+    assert!(cpu.pc == 0x14 || cpu.pc == 0x18,
+            "JAL spin escaped: pc=0x{:x}", cpu.pc);
+}
+
+#[test]
+fn pipeline_mode2_loop_then_spin() {
+    // Mirror the live default ROM: countdown loop, then beq, then
+    // JAL spin. After ~50 cycles the pc must be parked in the spin
+    // (0x4c or 0x50), not escaped to 0.
+    let mut cpu = PipelineState::new();
+    cpu.branch_mode = BranchMode::AlwaysTarget;
+    let nop = 0x00000013u32;
+    let mut rom = vec![nop; 64];
+    rom[0]=0x08000293; rom[1]=0x30529073;
+    rom[2]=0x00100293; rom[3]=0x00b29293;
+    rom[4]=0x30429073; rom[5]=0x00800293; rom[6]=0x3002a073;
+    rom[7]=0x00500293; rom[8]=0x00128313; rom[9]=0x000102b7;
+    rom[10]=0x0062a023; rom[11]=0x0002a383; rom[12]=0x00738433;
+    rom[13]=0x407404b3; rom[14]=0x00300513; rom[15]=0xfff50513;
+    rom[16]=0xfe051ee3; rom[17]=0x00540863; rom[18]=0x02a00913;
+    rom[19]=0x0000006f;
+    cpu.load_program(&rom);
+    for _ in 0..80 { cpu.step(); }
+    assert!(cpu.pc == 0x4c || cpu.pc == 0x50,
+            "demo escaped to pc=0x{:x}", cpu.pc);
+    assert_eq!(cpu.read_register(18), 42); // s2 from `addi s2, x0, 42`
+}

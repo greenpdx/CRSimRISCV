@@ -41,7 +41,7 @@ pub fn compute_id(state: &PipelineState, if_id: &IfId) -> Option<IdEx> {
             funct3: 0, funct7b30: 0, opcode: 0,
             ctrl: ControlBits::default(),
             csr_addr: 0, csr_uimm: 0, csr_imm_form: false, stall_reg: 0, flush_bubble: false,
-            early_target: 0, early_branch: false,
+            early_target: 0, early_branch: false, id_redirected: false,
             trap_kind: if_id.trap_kind,
         });
     }
@@ -70,7 +70,7 @@ pub fn compute_id(state: &PipelineState, if_id: &IfId) -> Option<IdEx> {
                 funct3: 0, funct7b30: 0, opcode,
                 ctrl: ControlBits::default(),
                 csr_addr: 0, csr_uimm: 0, csr_imm_form: false, stall_reg: 0, flush_bubble: false,
-            early_target: 0, early_branch: false,
+            early_target: 0, early_branch: false, id_redirected: false,
                 trap_kind: 1, // illegal
             });
         }
@@ -171,6 +171,7 @@ pub fn compute_id(state: &PipelineState, if_id: &IfId) -> Option<IdEx> {
         flush_bubble: false,
         early_target,
         early_branch,
+        id_redirected: false,
     })
 }
 

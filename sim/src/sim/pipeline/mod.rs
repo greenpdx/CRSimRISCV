@@ -325,16 +325,18 @@ impl PipelineState {
             self.pc = new_ex_ma.branch_target;
         } else if need_misspec_fix {
             // Mode 2/3 misprediction: ID speculated taken but EX says
-            // not taken. The seq1 in new_id_ex_default is correct
-            // (it was on the not-taken path). The target_instr in
-            // new_if_id_default is wrong (we speculatively fetched
-            // it from the target). Squash if_id, keep id_ex,
-            // redirect pc back to seq1's pc_plus4.
-            self.id_ex = new_id_ex_default;
+            // not taken. The branch's pc_plus4 (= the address right
+            // after the branch) is the correct continuation. Squash
+            // if_id (the speculatively-fetched target_instr) and
+            // both id_ex (which may itself be a stale bubble from a
+            // chained recovery) — let the pipeline refill cleanly.
+            let mut id_b = IdEx::bubble();
+            id_b.flush_bubble = true;
+            self.id_ex = id_b;
             let mut bub = IfId::bubble();
             bub.flush_bubble = true;
             self.if_id = bub;
-            self.pc = new_id_ex_default.pc_plus4;
+            self.pc = new_ex_ma.pc_plus4;
         } else if need_match_squash {
             // Mode 2/3 correct speculation: branch was taken as we
             // guessed. The target_instr in new_if_id_default is
@@ -349,8 +351,14 @@ impl PipelineState {
             // Mode 2/3: ID just decoded a branch this cycle. Latch
             // normally (id_ex = decoded branch, if_id = seq1 we
             // fetched at PC+4) and override pc so the next cycle's
-            // IF fetches at the early target.
-            self.id_ex = new_id_ex_default;
+            // IF fetches at the early target. Mark id_ex with
+            // `id_redirected` so when this branch reaches EX, the
+            // need_match_squash / need_misspec_fix logic recognizes
+            // that an ID-side redirect actually occurred (and
+            // doesn't fire on every random branch in id_ex).
+            let mut idex = new_id_ex_default;
+            idex.id_redirected = true;
+            self.id_ex = idex;
             self.if_id = new_if_id_default;
             self.pc = new_id_ex_default.early_target;
         } else {
