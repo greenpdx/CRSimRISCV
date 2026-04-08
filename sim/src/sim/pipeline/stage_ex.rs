@@ -79,8 +79,12 @@ fn pick_value(src: ForwardSrc, fallback: u32, ex_ma: &ExMa, ma_wb: &MaWb) -> u32
 /// sources.
 pub fn compute_ex(id_ex: &IdEx, ex_ma_in: &ExMa, ma_wb_in: &MaWb) -> ExResult {
     if !id_ex.valid {
+        let mut bubble = ExMa::bubble();
+        bubble.stall_reg = id_ex.stall_reg;
+        bubble.flush_bubble = id_ex.flush_bubble;
+        bubble.early_redirected = id_ex.early_branch;
         return ExResult {
-            ex_ma: ExMa::bubble(),
+            ex_ma: bubble,
             forward_a: ForwardSrc::Regfile,
             forward_b: ForwardSrc::Regfile,
         };
@@ -145,6 +149,9 @@ pub fn compute_ex(id_ex: &IdEx, ex_ma_in: &ExMa, ma_wb_in: &MaWb) -> ExResult {
         csr_src_is_zero,
         trap_kind: id_ex.trap_kind,
         trap_pc: id_ex.pc,
+        stall_reg: 0,
+        flush_bubble: false,
+        early_redirected: id_ex.early_branch,
     };
 
     ExResult { ex_ma, forward_a: fa, forward_b: fb }

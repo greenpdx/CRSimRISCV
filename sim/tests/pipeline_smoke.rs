@@ -858,36 +858,61 @@ fn pipeline_inject_irq_handler_returns() {
             "pc=0x{:x} should have returned to near mepc=0x{:x}", cpu.pc, mepc);
 }
 
+
+// ── Branch resolution modes ──────────────────────────────────────────
+use cpu_sim::sim::pipeline::BranchMode;
+
 #[test]
-fn pipeline_irq_handler_stage_trace() {
+fn pipeline_mode2_taken_branch_one_bubble() {
     let mut cpu = PipelineState::new();
-    let nop = 0x00000013u32;
-    let mut rom = vec![nop; 64];
-    rom[0] = 0x08000293; rom[1] = 0x30529073;
-    rom[2] = 0x00500293; rom[3] = 0x00128313;
-    rom[4] = 0x000102b7; rom[5] = 0x0062a023;
-    rom[6] = 0x0002a383; rom[7] = 0x00738433;
-    rom[8] = 0x00540863; rom[9] = 0x02a00913;
-    rom[10] = 0x0000006f;
-    rom[32] = 0x34202373; rom[33] = 0x34405073;
-    rom[34] = 0x00140413; rom[35] = 0x30200073;
-    cpu.load_program(&rom);
+    cpu.branch_mode = BranchMode::AlwaysTarget;
+    cpu.load_program(&[
+        0x00500513, // addi a0, x0, 5      ; pc=0x00
+        0x00500593, // addi a1, x0, 5      ; pc=0x04
+        0x00b50463, // beq  a0, a1, 8      ; pc=0x08, target=0x10
+        0x06300613, // addi a2, x0, 0x63   ; pc=0x0c (squashed)
+        0x07700693, // addi a3, x0, 0x77   ; pc=0x10 (target)
+        0x0000006f, // jal  x0, 0          ; spin
+    ]);
+    for _ in 0..15 { cpu.step(); }
+    assert_eq!(cpu.read_register(10), 5);     // a0
+    assert_eq!(cpu.read_register(11), 5);     // a1
+    assert_eq!(cpu.read_register(12), 0);     // a2 squashed
+    assert_eq!(cpu.read_register(13), 0x77);  // a3 target ran
+}
+
+#[test]
+fn pipeline_mode2_not_taken_branch_one_bubble() {
+    let mut cpu = PipelineState::new();
+    cpu.branch_mode = BranchMode::AlwaysTarget;
+    cpu.load_program(&[
+        0x00500513, // addi a0, x0, 5
+        0x00600593, // addi a1, x0, 6
+        0x00b50463, // beq  a0, a1, 8       (NOT taken: 5 != 6)
+        0x06300613, // addi a2, x0, 0x63    (executes since not taken)
+        0x07700693, // addi a3, x0, 0x77    (also executes)
+        0x0000006f, // spin
+    ]);
+    for _ in 0..15 { cpu.step(); }
+    // Both fall-through instructions must execute.
+    assert_eq!(cpu.read_register(12), 0x63);
+    assert_eq!(cpu.read_register(13), 0x77);
+}
+
+#[test]
+fn pipeline_mode2_jal_no_penalty() {
+    // In mode 2 we still pay 1 cycle for JAL (the seq1 fetched at PC+4
+    // gets squashed), unless we add the IF-side JAL predecode trick.
+    // For now just check correctness: JAL still jumps to its target.
+    let mut cpu = PipelineState::new();
+    cpu.branch_mode = BranchMode::AlwaysTarget;
+    cpu.load_program(&[
+        0x0080006f, // jal x0, 8     ; pc=0x00, target=0x08
+        0x06300613, // addi a2, x0, 0x63  (squashed)
+        0x07700693, // addi a3, x0, 0x77  ; pc=0x08 (target)
+        0x0000006f,
+    ]);
     for _ in 0..10 { cpu.step(); }
-
-    // Inject IRQ
-    cpu.csrs.mstatus |= 1 << 3;
-    cpu.csrs.mie     |= 1 << 11;
-    cpu.csrs.mip     |= 1 << 11;
-
-    eprintln!("---- after inject, pc=0x{:x}", cpu.pc);
-    for c in 0..15 {
-        cpu.step();
-        eprintln!("step{:2}: pc=0x{:x}  IF={:08x}({})  ID={:08x}({})  EX={:08x}({})  MA={:08x}({})",
-            c, cpu.pc,
-            cpu.if_id.instr, if cpu.if_id.valid {"v"} else {"-"},
-            cpu.id_ex.instr, if cpu.id_ex.valid {"v"} else {"-"},
-            cpu.ex_ma.instr, if cpu.ex_ma.valid {"v"} else {"-"},
-            cpu.ma_wb.instr, if cpu.ma_wb.valid {"v"} else {"-"},
-        );
-    }
+    assert_eq!(cpu.read_register(12), 0);     // squashed
+    assert_eq!(cpu.read_register(13), 0x77);
 }

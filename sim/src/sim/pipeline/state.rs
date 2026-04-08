@@ -9,6 +9,40 @@
 use super::csr::CsrFile;
 use super::tlb::Tlb;
 
+/// Branch resolution strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum BranchMode {
+    /// Resolve fully in EX, predict-not-taken. Penalty: 2 if taken, 0 if not.
+    /// Default; matches the original behavior.
+    Eager       = 0,
+    /// Compute target in ID, always speculate taken. Penalty: flat 1 cycle
+    /// for branches. JAL gets 0 cycles via in-IF predecode.
+    AlwaysTarget= 1,
+    /// Resolve direction in ID via a comparator + forwarding. Penalty: 1 if
+    /// mispredicted, 0 if predicted correctly. Stalls when a branch reads a
+    /// register still in flight.
+    EarlyResolve= 2,
+    /// Reserved for future BHT/BTB-based prediction.
+    Predict     = 3,
+}
+
+impl Default for BranchMode {
+    fn default() -> Self { BranchMode::Eager }
+}
+
+impl BranchMode {
+    pub fn from_u8(v: u8) -> BranchMode {
+        match v {
+            1 => BranchMode::AlwaysTarget,
+            2 => BranchMode::EarlyResolve,
+            3 => BranchMode::Predict,
+            _ => BranchMode::Eager,
+        }
+    }
+    pub fn to_u8(self) -> u8 { self as u8 }
+}
+
 const ROM_BASE: u32 = 0x0000_0000;
 const RAM_BASE: u32 = 0x0001_0000;
 const IO_BASE:  u32 = 0x4002_0000;
@@ -43,6 +77,8 @@ pub struct IfId {
     /// 0 = none, 6 = instruction page fault (set by IF translation)
     pub trap_kind: u8,
     pub trap_value: u32,
+    /// True if this bubble was inserted by a branch flush.
+    pub flush_bubble: bool,
 }
 
 impl IfId {
@@ -76,6 +112,19 @@ pub struct IdEx {
     /// Synchronous trap / mret kind decoded in ID:
     /// 0 = none, 1 = illegal_instr, 2 = ecall_m, 3 = ebreak, 4 = mret.
     pub trap_kind: u8,
+    /// If this entry is a stall-induced bubble, the register the
+    /// younger instruction is waiting on. 0 = not a stall bubble.
+    pub stall_reg: u8,
+    /// True if this bubble was inserted by a branch flush.
+    pub flush_bubble: bool,
+    /// If this is a branch/JAL, the branch target computed by the ID-stage
+    /// adder (PC + imm). Used by AlwaysTarget and EarlyResolve modes to
+    /// redirect IF without waiting for EX.
+    pub early_target: u32,
+    /// True if compute_id detected a branch/JAL/JALR opcode that needs an
+    /// early redirect by the ID-resolve modes. Set independently of
+    /// `branch_taken` (which is decided in EX).
+    pub early_branch: bool,
 }
 
 impl IdEx {
@@ -106,6 +155,13 @@ pub struct ExMa {
     pub trap_kind: u8,
     /// PC of the trapping instruction (saved into mepc on sync trap).
     pub trap_pc: u32,
+    /// Propagated stall-bubble tag (0 = not a stall bubble).
+    pub stall_reg: u8,
+    /// Propagated branch-flush bubble tag.
+    pub flush_bubble: bool,
+    /// True if the ID stage redirected IF for this branch (modes 2/3).
+    /// Used so the EX-stage flush logic doesn't double-flush.
+    pub early_redirected: bool,
 }
 
 impl ExMa {
@@ -128,6 +184,10 @@ pub struct MaWb {
     pub trap_kind: u8,
     pub trap_pc: u32,
     pub trap_value: u32,
+    /// Propagated stall-bubble tag (0 = not a stall bubble).
+    pub stall_reg: u8,
+    /// Propagated branch-flush bubble tag.
+    pub flush_bubble: bool,
 }
 
 impl MaWb {
@@ -156,6 +216,8 @@ pub struct PipelineState {
     pub tlb: Tlb,
     /// Current privilege mode: 3=M, 1=S, 0=U. Reset = M.
     pub priv_mode: u8,
+    /// Branch resolution strategy.
+    pub branch_mode: BranchMode,
     pub cycle_count: u64,
     pub halted: bool,
 
@@ -178,6 +240,9 @@ pub struct PipelineState {
     pub last_forward_b: ForwardSrc,
     /// True if an asynchronous interrupt was taken at the start of this cycle.
     pub last_trap_taken: bool,
+    /// Register being awaited during a load-use stall (the load's rd).
+    /// 0 when no stall.
+    pub last_stall_reg: u8,
 
     // ── Per-cycle activity (for the visualizer) ────────────────────
     /// Bitmask of registers read this cycle (rs1/rs2 of ID).
@@ -207,6 +272,7 @@ impl Default for PipelineState {
             csrs: CsrFile::default(),
             tlb: Tlb::default(),
             priv_mode: 3,
+            branch_mode: BranchMode::default(),
             cycle_count: 0,
             halted: false,
             if_id: IfId::default(),
@@ -219,6 +285,7 @@ impl Default for PipelineState {
             last_forward_a: ForwardSrc::Regfile,
             last_forward_b: ForwardSrc::Regfile,
             last_trap_taken: false,
+            last_stall_reg: 0,
             reg_read_mask: 0,
             reg_write_mask: 0,
             last_ram_addr: 0,

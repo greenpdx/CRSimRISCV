@@ -22,7 +22,11 @@ use super::state::{ControlBits, IdEx, IfId, PipelineState};
 /// contents (assuming no stall/flush). Returns `None` for an unknown
 /// opcode (treated as a NOP bubble by the caller).
 pub fn compute_id(state: &PipelineState, if_id: &IfId) -> Option<IdEx> {
-    if !if_id.valid { return Some(IdEx::bubble()); }
+    if !if_id.valid {
+        let mut b = IdEx::bubble();
+        b.flush_bubble = if_id.flush_bubble;
+        return Some(b);
+    }
 
     // IF stage already detected an instr page fault — propagate the
     // trap through ID/EX so the existing trap path delivers it.
@@ -36,7 +40,8 @@ pub fn compute_id(state: &PipelineState, if_id: &IfId) -> Option<IdEx> {
             rs1_num: 0, rs2_num: 0, rd_num: 0,
             funct3: 0, funct7b30: 0, opcode: 0,
             ctrl: ControlBits::default(),
-            csr_addr: 0, csr_uimm: 0, csr_imm_form: false,
+            csr_addr: 0, csr_uimm: 0, csr_imm_form: false, stall_reg: 0, flush_bubble: false,
+            early_target: 0, early_branch: false,
             trap_kind: if_id.trap_kind,
         });
     }
@@ -64,7 +69,8 @@ pub fn compute_id(state: &PipelineState, if_id: &IfId) -> Option<IdEx> {
                 rs1_num: 0, rs2_num: 0, rd_num: 0,
                 funct3: 0, funct7b30: 0, opcode,
                 ctrl: ControlBits::default(),
-                csr_addr: 0, csr_uimm: 0, csr_imm_form: false,
+                csr_addr: 0, csr_uimm: 0, csr_imm_form: false, stall_reg: 0, flush_bubble: false,
+            early_target: 0, early_branch: false,
                 trap_kind: 1, // illegal
             });
         }
@@ -132,6 +138,16 @@ pub fn compute_id(state: &PipelineState, if_id: &IfId) -> Option<IdEx> {
     let rs1_data = state.read_register(rs1_num);
     let rs2_data = state.read_register(rs2_num);
 
+    // ID-side branch target adder. For BEQ/BNE/JAL the target is
+    // PC + imm. For JALR it's (rs1 + imm) & ~1, which we cannot
+    // compute in ID without forwarding for rs1, so JALR's early_target
+    // is left at 0 and the EX stage handles it as before.
+    let is_jalr = opcode == 0b1100111;
+    let early_branch = branch || (jump && !is_jalr);
+    let early_target = if early_branch {
+        if_id.pc.wrapping_add(imm)
+    } else { 0 };
+
     Some(IdEx {
         valid: true,
         pc: if_id.pc,
@@ -151,6 +167,10 @@ pub fn compute_id(state: &PipelineState, if_id: &IfId) -> Option<IdEx> {
         csr_uimm,
         csr_imm_form,
         trap_kind,
+        stall_reg: 0,
+        flush_bubble: false,
+        early_target,
+        early_branch,
     })
 }
 

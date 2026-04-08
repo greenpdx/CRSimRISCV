@@ -20,11 +20,11 @@ pub fn compute_if(state: &mut PipelineState) -> IfId {
     match translate(state, pc, AccessKind::Fetch) {
         Ok(phys) => {
             let instr = state.rom_read(phys);
-            IfId { valid: true, pc, instr, pc_plus4, trap_kind: 0, trap_value: 0 }
+            IfId { valid: true, pc, instr, pc_plus4, trap_kind: 0, trap_value: 0, flush_bubble: false }
         }
         Err(_cause) => {
             IfId { valid: true, pc, instr: 0, pc_plus4,
-                   trap_kind: 6, trap_value: pc }
+                   trap_kind: 6, trap_value: pc, flush_bubble: false }
         }
     }
 }

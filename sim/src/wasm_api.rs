@@ -256,7 +256,7 @@ fn phase_name(p: Phase) -> &'static str {
 // ─────────────────────────────────────────────────────────────────────────
 
 use crate::sim::pipeline::{
-    self, ControlBits, ExMa, ForwardSrc, IdEx, IfId, MaWb, PipelineState, Stage,
+    self, BranchMode, ControlBits, ExMa, ForwardSrc, IdEx, IfId, MaWb, PipelineState, Stage,
 };
 
 #[wasm_bindgen]
@@ -291,10 +291,14 @@ impl From<&ControlBits> for CtrlJson {
 #[derive(Serialize)]
 struct IfIdJson {
     valid: bool, pc: u32, instr: u32, pc_plus4: u32,
+    flush_bubble: bool,
 }
 impl From<&IfId> for IfIdJson {
     fn from(r: &IfId) -> Self {
-        Self { valid: r.valid, pc: r.pc, instr: r.instr, pc_plus4: r.pc_plus4 }
+        Self {
+            valid: r.valid, pc: r.pc, instr: r.instr, pc_plus4: r.pc_plus4,
+            flush_bubble: r.flush_bubble,
+        }
     }
 }
 
@@ -306,6 +310,8 @@ struct IdExJson {
     funct3: u8, funct7b30: u8, opcode: u8,
     ctrl: CtrlJson,
     csr_addr: u16, csr_uimm: u8, csr_imm_form: bool,
+    stall_reg: u8,
+    flush_bubble: bool,
 }
 impl From<&IdEx> for IdExJson {
     fn from(r: &IdEx) -> Self {
@@ -316,6 +322,8 @@ impl From<&IdEx> for IdExJson {
             funct3: r.funct3, funct7b30: r.funct7b30, opcode: r.opcode,
             ctrl: (&r.ctrl).into(),
             csr_addr: r.csr_addr, csr_uimm: r.csr_uimm, csr_imm_form: r.csr_imm_form,
+            stall_reg: r.stall_reg,
+            flush_bubble: r.flush_bubble,
         }
     }
 }
@@ -328,6 +336,8 @@ struct ExMaJson {
     branch_taken: bool, branch_target: u32,
     ctrl: CtrlJson,
     csr_addr: u16, csr_write_val: u32,
+    stall_reg: u8,
+    flush_bubble: bool,
 }
 impl From<&ExMa> for ExMaJson {
     fn from(r: &ExMa) -> Self {
@@ -338,6 +348,8 @@ impl From<&ExMa> for ExMaJson {
             branch_taken: r.branch_taken, branch_target: r.branch_target,
             ctrl: (&r.ctrl).into(),
             csr_addr: r.csr_addr, csr_write_val: r.csr_write_val,
+            stall_reg: r.stall_reg,
+            flush_bubble: r.flush_bubble,
         }
     }
 }
@@ -347,6 +359,8 @@ struct MaWbJson {
     valid: bool, instr: u32,
     alu_result: u32, mem_data: u32, pc_plus4: u32,
     rd_num: u8, ctrl: CtrlJson,
+    stall_reg: u8,
+    flush_bubble: bool,
 }
 impl From<&MaWb> for MaWbJson {
     fn from(r: &MaWb) -> Self {
@@ -355,12 +369,14 @@ impl From<&MaWb> for MaWbJson {
             alu_result: r.alu_result, mem_data: r.mem_data,
             pc_plus4: r.pc_plus4, rd_num: r.rd_num,
             ctrl: (&r.ctrl).into(),
+            stall_reg: r.stall_reg,
+            flush_bubble: r.flush_bubble,
         }
     }
 }
 
 #[derive(Serialize)]
-struct HazardJson { stall: bool, flush: bool }
+struct HazardJson { stall: bool, flush: bool, stall_reg: u8 }
 #[derive(Serialize)]
 struct ForwardJson { a: String, b: String }
 
@@ -379,6 +395,7 @@ struct PipelineSnapshot {
     pc: u32,
     halted: bool,
     priv_mode: u8,
+    branch_mode: u8,
     registers: Vec<u32>,
     reg_read_mask: u32,
     reg_write_mask: u32,
@@ -454,6 +471,8 @@ impl JsPipelineState {
     #[wasm_bindgen(getter)] pub fn last_ram_kind(&self) -> u8 { self.inner.last_ram_kind }
     #[wasm_bindgen(getter)] pub fn last_ram_side(&self) -> u8 { self.inner.last_ram_side }
     #[wasm_bindgen(getter)] pub fn priv_mode(&self) -> u8 { self.inner.priv_mode }
+    #[wasm_bindgen(getter)] pub fn branch_mode(&self) -> u8 { self.inner.branch_mode.to_u8() }
+    pub fn set_branch_mode(&mut self, mode: u8) { self.inner.branch_mode = BranchMode::from_u8(mode); }
 
     // ── Pipeline-register snapshots ────────────────────────────────────
     pub fn if_id(&self) -> JsValue {
@@ -499,6 +518,7 @@ impl JsPipelineState {
             pc: self.inner.pc,
             halted: self.inner.halted,
             priv_mode: self.inner.priv_mode,
+            branch_mode: self.inner.branch_mode.to_u8(),
             registers: self.inner.registers.to_vec(),
             reg_read_mask: self.inner.reg_read_mask,
             reg_write_mask: self.inner.reg_write_mask,
@@ -511,7 +531,11 @@ impl JsPipelineState {
             ex_ma: (&self.inner.ex_ma).into(),
             ma_wb: (&self.inner.ma_wb).into(),
             last_wb: (&self.inner.last_wb).into(),
-            hazard: HazardJson { stall: self.inner.last_stall, flush: self.inner.last_flush },
+            hazard: HazardJson {
+                stall: self.inner.last_stall,
+                flush: self.inner.last_flush,
+                stall_reg: self.inner.last_stall_reg,
+            },
             forward: ForwardJson {
                 a: forward_name(self.inner.last_forward_a).into(),
                 b: forward_name(self.inner.last_forward_b).into(),

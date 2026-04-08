@@ -28,7 +28,7 @@ pub mod stage_ma;
 pub mod stage_wb;
 
 pub use state::{
-    ControlBits, ExMa, ForwardSrc, IdEx, IfId, MaWb, PipelineState,
+    BranchMode, ControlBits, ExMa, ForwardSrc, IdEx, IfId, MaWb, PipelineState,
 };
 
 /// The five pipeline stages, in execution order.
@@ -168,6 +168,7 @@ impl PipelineState {
         // right now).
         let stall = stage_id::detect_load_use_hazard(&prev_if_id, &prev_id_ex);
         self.last_stall = stall;
+        self.last_stall_reg = if stall { prev_id_ex.rd_num } else { 0 };
         let new_id_ex_default = stage_id::compute_id(self, &prev_if_id)
             .unwrap_or_else(IdEx::bubble);
         // Record this cycle's register reads (rs1/rs2 of new ID/EX).
@@ -247,9 +248,55 @@ impl PipelineState {
             new_ex_ma.trap_kind = 0;
         }
 
-        // ── 6b. Branch flush ────────────────────────────────────────
-        let flush = new_ex_ma.valid && new_ex_ma.branch_taken;
-        self.last_flush = flush || trap_redirect.is_some();
+        // ── 6b. Branch flush logic (mode-aware) ────────────────────
+        // Three branch-related events can happen in this cycle:
+        //
+        //   A. EX resolved a JALR-or-mode-1 branch this cycle
+        //      (no ID-side speculation was done for it).
+        //      → mode-1 style "squash IF and ID, redirect to ex_ma.branch_target"
+        //
+        //   B. EX resolved a branch that WAS speculated by ID one
+        //      cycle ago (modes 2/3, conditional branch or JAL).
+        //      → check if speculation matched; squash either id_ex
+        //        (if speculation correct = taken) or if_id (if
+        //        speculation wrong = not taken, redirect back).
+        //
+        //   C. ID just decoded a branch with early_branch set
+        //      (modes 2/3, this cycle). Override pc to early target.
+        //      The previously-fetched if_id stays put.
+        //
+        // Events A/B happen on a branch's MA-stage cycle (its EX
+        // resolution one cycle ago); event C happens on a different
+        // branch's ID-stage cycle. They are normally one cycle apart
+        // and don't conflict.
+
+        let mode = self.branch_mode;
+        let modes_with_id_redirect = matches!(
+            mode,
+            BranchMode::AlwaysTarget | BranchMode::EarlyResolve | BranchMode::Predict
+        );
+
+        let ex_branch = new_ex_ma.valid
+            && (new_ex_ma.ctrl.branch || new_ex_ma.ctrl.jump);
+        // Only treat the branch as "ID-speculated" in modes that
+        // actually perform the ID-side redirect. In Eager mode the
+        // compute_id stage still sets the flag (it's mode-agnostic)
+        // but the redirect never happened, so we must not skip the
+        // EX-stage flush.
+        let ex_was_speculated =
+            modes_with_id_redirect && ex_branch && new_ex_ma.early_redirected;
+        let need_eager_flush  = ex_branch && new_ex_ma.branch_taken && !ex_was_speculated;
+        let need_misspec_fix  = modes_with_id_redirect && ex_was_speculated && !new_ex_ma.branch_taken;
+        let need_match_squash = modes_with_id_redirect && ex_was_speculated && new_ex_ma.branch_taken;
+        let do_id_redirect    = modes_with_id_redirect
+            && new_id_ex_default.early_branch
+            && !stall
+            && trap_redirect.is_none()
+            && !need_eager_flush;
+
+        let flush_visible =
+            need_eager_flush || need_misspec_fix || need_match_squash || do_id_redirect;
+        self.last_flush = flush_visible || trap_redirect.is_some();
 
         // ── 7. Latch ────────────────────────────────────────────────
         self.ma_wb = new_ma_wb;
@@ -261,16 +308,51 @@ impl PipelineState {
             self.id_ex = IdEx::bubble();
             self.pc = target;
         } else if stall {
-            // Freeze IF/ID and PC, insert bubble in ID/EX.
-            self.id_ex = IdEx::bubble();
+            // Freeze IF/ID and PC, insert a stall-tagged bubble.
+            let mut bubble = IdEx::bubble();
+            bubble.stall_reg = prev_id_ex.rd_num;
+            self.id_ex = bubble;
             // self.if_id stays as it was (don't overwrite).
             // self.pc stays as it was.
-        } else if flush {
-            // The branch fired; squash the next two instructions in
-            // flight and redirect PC.
-            self.if_id = IfId::bubble();
-            self.id_ex = IdEx::bubble();
+        } else if need_eager_flush {
+            // Mode 1 / JALR style: squash IF and ID, redirect.
+            let mut if_b = IfId::bubble();
+            if_b.flush_bubble = true;
+            let mut id_b = IdEx::bubble();
+            id_b.flush_bubble = true;
+            self.if_id = if_b;
+            self.id_ex = id_b;
             self.pc = new_ex_ma.branch_target;
+        } else if need_misspec_fix {
+            // Mode 2/3 misprediction: ID speculated taken but EX says
+            // not taken. The seq1 in new_id_ex_default is correct
+            // (it was on the not-taken path). The target_instr in
+            // new_if_id_default is wrong (we speculatively fetched
+            // it from the target). Squash if_id, keep id_ex,
+            // redirect pc back to seq1's pc_plus4.
+            self.id_ex = new_id_ex_default;
+            let mut bub = IfId::bubble();
+            bub.flush_bubble = true;
+            self.if_id = bub;
+            self.pc = new_id_ex_default.pc_plus4;
+        } else if need_match_squash {
+            // Mode 2/3 correct speculation: branch was taken as we
+            // guessed. The target_instr in new_if_id_default is
+            // correct (continue from target). Squash id_ex (the
+            // seq1 from the not-taken path).
+            let mut id_b = IdEx::bubble();
+            id_b.flush_bubble = true;
+            self.id_ex = id_b;
+            self.if_id = new_if_id_default;
+            self.pc = self.pc.wrapping_add(4);
+        } else if do_id_redirect {
+            // Mode 2/3: ID just decoded a branch this cycle. Latch
+            // normally (id_ex = decoded branch, if_id = seq1 we
+            // fetched at PC+4) and override pc so the next cycle's
+            // IF fetches at the early target.
+            self.id_ex = new_id_ex_default;
+            self.if_id = new_if_id_default;
+            self.pc = new_id_ex_default.early_target;
         } else {
             // Normal advance.
             self.id_ex = new_id_ex_default;
@@ -401,5 +483,6 @@ impl PipelineState {
         self.last_forward_a = ForwardSrc::Regfile;
         self.last_forward_b = ForwardSrc::Regfile;
         self.last_trap_taken = false;
+        self.last_stall_reg = 0;
     }
 }

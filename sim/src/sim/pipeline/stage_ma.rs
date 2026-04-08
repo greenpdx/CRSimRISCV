@@ -15,7 +15,10 @@ use super::translate::{translate, AccessKind};
 /// writes). Returns the new MA/WB register contents.
 pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
     if !ex_ma.valid {
-        return MaWb::bubble();
+        let mut bubble = MaWb::bubble();
+        bubble.stall_reg = ex_ma.stall_reg;
+        bubble.flush_bubble = ex_ma.flush_bubble;
+        return bubble;
     }
 
     let mut mem_data = 0u32;
@@ -42,6 +45,8 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
                     trap_kind,
                     trap_pc: ex_ma.trap_pc,
                     trap_value: vaddr,
+                    stall_reg: 0,
+                    flush_bubble: false,
                 };
             }
         }
@@ -119,5 +124,7 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
         rd_num: ex_ma.rd_num,
         ctrl: ex_ma.ctrl,
         trap_kind: 0, trap_pc: 0, trap_value: 0,
+        stall_reg: 0,
+        flush_bubble: false,
     }
 }
