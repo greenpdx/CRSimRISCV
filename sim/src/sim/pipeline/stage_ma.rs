@@ -7,6 +7,7 @@
 //! Always-active components: `ma_wb_reg`, plus `ram` or `io` and
 //! `loadstore` if memory access.
 
+use crate::data::load_width::sign_extend_load;
 use super::csr::CsrOp;
 use super::state::{ExMa, MaWb, PipelineState};
 use super::translate::{translate, AccessKind};
@@ -61,22 +62,7 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
         } else {
             state.priv_ram_read(addr)
         };
-        // Apply sign/zero extension based on funct3 (LB/LH/LW/LBU/LHU)
-        let byte_off = (addr & 0x3) * 8;
-        mem_data = match funct3 {
-            0b000 => {  // LB
-                let v = (raw >> byte_off) & 0xff;
-                if v & 0x80 != 0 { v | 0xffff_ff00 } else { v }
-            }
-            0b001 => {  // LH
-                let v = (raw >> byte_off) & 0xffff;
-                if v & 0x8000 != 0 { v | 0xffff_0000 } else { v }
-            }
-            0b010 => raw,  // LW
-            0b100 => (raw >> byte_off) & 0xff,    // LBU
-            0b101 => (raw >> byte_off) & 0xffff,  // LHU
-            _     => raw,
-        };
+        mem_data = sign_extend_load(raw, addr, funct3);
     }
 
     // Zicsr: CSR read/modify/write happens in MA. The old value goes

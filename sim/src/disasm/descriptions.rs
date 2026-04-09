@@ -1,6 +1,7 @@
 //! Plain-English descriptions for RISC-V instruction mnemonics.
 //! Used as the disassembler's `desc` field for tooltip display.
 
+#[allow(dead_code)]
 pub fn mnemonic_desc(m: &str) -> Option<&'static str> {
     Some(match m {
         // ── RV32I base ─────────────────────────────────────────────────

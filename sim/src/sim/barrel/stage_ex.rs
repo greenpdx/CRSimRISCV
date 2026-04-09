@@ -7,15 +7,9 @@
 //! degenerate case is broken in B1 and gets forwarding/stalls in
 //! a later phase.
 
-use crate::data::alu_control_data::compute_alu_control;
-use crate::data::alu_data::alu_compute;
-use crate::data::control_data::{branch_condition, BranchCondition};
-
+use crate::sim::execute::{execute_alu, decide_branch};
+use crate::sim::forwarding::ForwardSrc;
 use super::state::{CustomOp, DiEx, ExMa, MaWb};
-
-/// Forwarding source for an ALU input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ForwardSrc { Regfile, ExMa, MaWb }
 
 /// Pick the right forwarding source for one rs operand. Only fires
 /// when the in-flight producer is from the SAME thread as the
@@ -92,27 +86,12 @@ pub fn compute_ex(di_ex: &DiEx, ex_ma_in: &ExMa, ma_wb_in: &MaWb) -> ExMa {
     }
 
     let alu_b = if di_ex.ctrl.alu_src { di_ex.imm } else { rs2_val };
-
-    let is_lui = di_ex.opcode == 0b0110111;
-    let is_rt = di_ex.opcode == 0b0110011;
-    let is_si = di_ex.opcode == 0b0010011 && (di_ex.funct3 == 0b101 || di_ex.funct3 == 0b001);
-    let f7b30 = if is_rt || is_si { di_ex.funct7b30 } else { 0 };
-    let alu_op_code = compute_alu_control(di_ex.ctrl.alu_op, di_ex.funct3, f7b30, is_lui);
-
-    let r = alu_compute(alu_op_code, rs1_val, alu_b);
+    let r = execute_alu(rs1_val, alu_b, di_ex.ctrl.alu_op, di_ex.funct3, di_ex.funct7b30, di_ex.opcode);
 
     let mut branch_taken = false;
     let mut branch_target = di_ex.pc.wrapping_add(di_ex.imm);
     if di_ex.ctrl.branch {
-        branch_taken = match branch_condition(di_ex.funct3) {
-            Some(BranchCondition::Zero) => r.flags.zero,
-            Some(BranchCondition::NotZero) => !r.flags.zero,
-            Some(BranchCondition::Neg) => r.flags.negative,
-            Some(BranchCondition::NotNeg) => !r.flags.negative,
-            Some(BranchCondition::Carry) => r.flags.carry,
-            Some(BranchCondition::NotCarry) => !r.flags.carry,
-            None => false,
-        };
+        branch_taken = decide_branch(di_ex.funct3, &r.flags);
     }
     if di_ex.ctrl.jump {
         branch_taken = true;

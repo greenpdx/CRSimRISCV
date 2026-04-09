@@ -198,14 +198,7 @@ impl MaWb {
     pub fn bubble() -> Self { Self::default() }
 }
 
-/// Forwarding source for an ALU input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ForwardSrc {
-    #[default]
-    Regfile,
-    ExMa,
-    MaWb,
-}
+pub use super::super::forwarding::ForwardSrc;
 
 /// The full state of the 5-stage pipeline simulator.
 #[derive(Debug, Clone)]

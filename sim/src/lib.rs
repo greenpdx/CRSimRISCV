@@ -16,6 +16,7 @@ pub mod data {
     pub mod alu_control_data;
     pub mod control_data;
     pub mod imm_data;
+    pub mod load_width;
     pub mod netlist;
 }
 
@@ -39,6 +40,9 @@ pub mod sim {
     pub mod trace;
     pub mod micro;
     pub mod trap;
+    pub mod decode;
+    pub mod forwarding;
+    pub mod execute;
     pub mod cpu_state;
     pub mod pipeline;
     pub mod barrel;

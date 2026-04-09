@@ -8,9 +8,7 @@
 //! Always-active components: `forward_unit`, `mux_fwd_a`, `mux_fwd_b`,
 //! `alu_ctrl`, `mux_alusrc`, `alu`, `branch_adder`, `ex_ma_reg`.
 
-use crate::data::alu_control_data::compute_alu_control;
-use crate::data::alu_data::alu_compute;
-use crate::data::control_data::{branch_condition, BranchCondition};
+use crate::sim::execute::{execute_alu, decide_branch};
 
 use super::state::{ExMa, ForwardSrc, IdEx, MaWb};
 
@@ -96,28 +94,12 @@ pub fn compute_ex(id_ex: &IdEx, ex_ma_in: &ExMa, ma_wb_in: &MaWb) -> ExResult {
     let rs2_val = pick_value(fb, id_ex.rs2_data, ex_ma_in, ma_wb_in);
 
     let alu_b = if id_ex.ctrl.alu_src { id_ex.imm } else { rs2_val };
+    let r = execute_alu(rs1_val, alu_b, id_ex.ctrl.alu_op, id_ex.funct3, id_ex.funct7b30, id_ex.opcode);
 
-    let is_lui = id_ex.opcode == 0b0110111;
-    let is_rt  = id_ex.opcode == 0b0110011;
-    let is_si  = id_ex.opcode == 0b0010011 && (id_ex.funct3 == 0b101 || id_ex.funct3 == 0b001);
-    let f7b30  = if is_rt || is_si { id_ex.funct7b30 } else { 0 };
-    let alu_op_code = compute_alu_control(id_ex.ctrl.alu_op, id_ex.funct3, f7b30, is_lui);
-
-    let r = alu_compute(alu_op_code, rs1_val, alu_b);
-
-    // Branch decision
     let mut branch_taken = false;
     let mut branch_target = id_ex.pc.wrapping_add(id_ex.imm);
     if id_ex.ctrl.branch {
-        branch_taken = match branch_condition(id_ex.funct3) {
-            Some(BranchCondition::Zero)     =>  r.flags.zero,
-            Some(BranchCondition::NotZero)  => !r.flags.zero,
-            Some(BranchCondition::Neg)      =>  r.flags.negative,
-            Some(BranchCondition::NotNeg)   => !r.flags.negative,
-            Some(BranchCondition::Carry)    =>  r.flags.carry,
-            Some(BranchCondition::NotCarry) => !r.flags.carry,
-            None => false,
-        };
+        branch_taken = decide_branch(id_ex.funct3, &r.flags);
     }
     if id_ex.ctrl.jump {
         branch_taken = true;

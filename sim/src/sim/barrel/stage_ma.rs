@@ -3,195 +3,117 @@
 //! Phase B1: direct external data memory access (no D-L1 cache, no
 //! store buffer). Loads do sign/zero extension based on funct3.
 
+use crate::data::load_width::sign_extend_load;
 use super::cache::{Cache, PendingMiss};
 use super::state::{BarrelState, CustomOp, ExMa, MaWb, N_THREADS, Thread};
 use super::thread_mmio;
 
-pub fn compute_ma(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
-    if !ex_ma.valid {
-        return MaWb::bubble();
-    }
-
-    // ── Custom-0 dispatch ─────────────────────────────────────
-    if ex_ma.ctrl.custom_op != CustomOp::None {
-        return execute_custom0(state, ex_ma);
-    }
-
-    // ── Zicsr (CSR read/modify/write) ────────────────────────
-    if ex_ma.csr_op != 0 {
-        let slot = ex_ma.thread;
-        let old = state.read_csr(slot, ex_ma.csr_addr);
-        let new_val = match ex_ma.csr_op {
-            1 => Some(ex_ma.csr_write_val),                          // RW
-            2 => if ex_ma.csr_src_is_zero { None } else { Some(old | ex_ma.csr_write_val) },  // RS
-            3 => if ex_ma.csr_src_is_zero { None } else { Some(old & !ex_ma.csr_write_val) }, // RC
-            _ => None,
-        };
-        if let Some(v) = new_val {
-            state.write_csr(slot, ex_ma.csr_addr, v);
-        }
-        return MaWb {
-            valid: true, thread: ex_ma.thread, instr: ex_ma.instr,
-            alu_result: old,
-            mem_data: 0,
-            pc_plus4: ex_ma.pc_plus4, rd_num: ex_ma.rd_num,
-            ctrl: ex_ma.ctrl,
-        };
-    }
-
-    let addr = ex_ma.alu_result;
-    let funct3 = ex_ma.funct3;
-    let thread = ex_ma.thread;
-
-    // ── Loads ─────────────────────────────────────────────────
-    if ex_ma.ctrl.mem_read {
-        // 0. Thread MMIO read (M-mode T0 only).
-        if thread_mmio::is_tmmio(addr) {
-            let t = &state.threads[thread as usize];
-            if !thread_mmio::check_access(thread, t.priv_mode) {
-                // Access fault — deliver trap.
-                state.take_sync_trap(thread, 5, ex_ma.trap_pc, addr); // cause 5 = load access fault
-                return MaWb::bubble();
-            }
-            let v = thread_mmio::read(state, addr);
-            return MaWb {
-                valid: true, thread, instr: ex_ma.instr,
-                alu_result: ex_ma.alu_result, mem_data: v,
-                pc_plus4: ex_ma.pc_plus4, rd_num: ex_ma.rd_num,
-                ctrl: ex_ma.ctrl,
-            };
-        }
-        // 0a. IRQ controller register read (MMIO).
-        if let Some(v) = state.irq.read_reg(addr) {
-            return MaWb {
-                valid: true, thread, instr: ex_ma.instr,
-                alu_result: ex_ma.alu_result, mem_data: v,
-                pc_plus4: ex_ma.pc_plus4, rd_num: ex_ma.rd_num,
-                ctrl: ex_ma.ctrl,
-            };
-        }
-        // 0b. DMA register read (MMIO).
-        if let Some(v) = state.dma.read_reg(addr) {
-            return MaWb {
-                valid: true, thread, instr: ex_ma.instr,
-                alu_result: ex_ma.alu_result, mem_data: v,
-                pc_plus4: ex_ma.pc_plus4, rd_num: ex_ma.rd_num,
-                ctrl: ex_ma.ctrl,
-            };
-        }
-        // 1. Read-after-write forwarding from store buffer.
-        if let Some(v) = state.store_buffer.forward(addr) {
-            let mem_data = sign_extend_load(v, addr, funct3);
-            return MaWb {
-                valid: true, thread, instr: ex_ma.instr,
-                alu_result: ex_ma.alu_result, mem_data,
-                pc_plus4: ex_ma.pc_plus4, rd_num: ex_ma.rd_num,
-                ctrl: ex_ma.ctrl,
-            };
-        }
-        // 2. D-L1 lookup.
-        if let Some(raw) = state.dcache.lookup(addr) {
-            let mem_data = sign_extend_load(raw, addr, funct3);
-            return MaWb {
-                valid: true, thread, instr: ex_ma.instr,
-                alu_result: ex_ma.alu_result, mem_data,
-                pc_plus4: ex_ma.pc_plus4, rd_num: ex_ma.rd_num,
-                ctrl: ex_ma.ctrl,
-            };
-        }
-        // 3. Miss. Issue or queue, stall this thread, return bubble.
-        // Roll back the thread's pc by 4 because IF already
-        // advanced it after fetching this instruction; without the
-        // rollback, when the miss completes and the thread is
-        // re-dispatched, it would skip the missing load entirely.
-        let line_addr = Cache::line_addr(addr);
-        if state.dcache.pending.is_none() {
-            state.dcache.pending = Some(PendingMiss { line_addr, thread });
-        }
-        state.dcache.waiters[thread as usize] = true;
-        state.threads[thread as usize].miss_pending = true;
-        state.threads[thread as usize].pc =
-            state.threads[thread as usize].pc.wrapping_sub(4);
-        return MaWb::bubble();
-    }
-
-    // ── Stores ────────────────────────────────────────────────
-    if ex_ma.ctrl.mem_write {
-        // Thread MMIO write (M-mode T0 only).
-        if thread_mmio::is_tmmio(addr) {
-            let priv_m = state.threads[thread as usize].priv_mode;
-            if !thread_mmio::check_access(thread, priv_m) {
-                state.take_sync_trap(thread, 7, ex_ma.trap_pc, addr); // cause 7 = store access fault
-                return MaWb::bubble();
-            }
-            thread_mmio::write(state, addr, ex_ma.rs2_data);
-            return MaWb {
-                valid: true, thread, instr: ex_ma.instr,
-                alu_result: ex_ma.alu_result, mem_data: 0,
-                pc_plus4: ex_ma.pc_plus4, rd_num: ex_ma.rd_num,
-                ctrl: ex_ma.ctrl,
-            };
-        }
-        // Check IRQ controller MMIO first.
-        let is_irq = state.irq.write_reg(addr, ex_ma.rs2_data);
-        if is_irq {
-            return MaWb {
-                valid: true, thread, instr: ex_ma.instr,
-                alu_result: ex_ma.alu_result, mem_data: 0,
-                pc_plus4: ex_ma.pc_plus4, rd_num: ex_ma.rd_num,
-                ctrl: ex_ma.ctrl,
-            };
-        }
-        // Check if this is a DMA register write (MMIO).
-        let is_dma = state.dma.write_reg(
-            addr, ex_ma.rs2_data,
-            &state.ext_imem,
-            &mut state.local_isram,
-        );
-        if !is_dma {
-            // Update D-L1 if the line is currently cached (write
-            // through, no write-allocate on miss).
-            if let Some(line) = state.dcache.peek_line_mut(addr) {
-                line.data[Cache::word_offset(addr)] = ex_ma.rs2_data;
-            }
-            // Push to store buffer; if full, stall this thread by
-            // rolling back its pc so it re-issues the store later.
-            if !state.store_buffer.push(addr, ex_ma.rs2_data, thread) {
-                state.threads[thread as usize].pc =
-                    state.threads[thread as usize].pc.wrapping_sub(4);
-                return MaWb::bubble();
-            }
-        }
-    }
-
+/// Build a MaWb from an ExMa with a given mem_data (helper to
+/// avoid repeating the 8-field construction everywhere).
+fn mawb_from(ex_ma: &ExMa, mem_data: u32) -> MaWb {
     MaWb {
-        valid: true,
-        thread,
-        instr: ex_ma.instr,
-        alu_result: ex_ma.alu_result,
-        mem_data: 0,
-        pc_plus4: ex_ma.pc_plus4,
-        rd_num: ex_ma.rd_num,
+        valid: true, thread: ex_ma.thread, instr: ex_ma.instr,
+        alu_result: ex_ma.alu_result, mem_data,
+        pc_plus4: ex_ma.pc_plus4, rd_num: ex_ma.rd_num,
         ctrl: ex_ma.ctrl,
     }
 }
 
-fn sign_extend_load(raw: u32, addr: u32, funct3: u8) -> u32 {
-    let byte_off = (addr & 0x3) * 8;
-    match funct3 {
-        0b000 => {
-            let v = (raw >> byte_off) & 0xff;
-            if v & 0x80 != 0 { v | 0xffff_ff00 } else { v }
-        }
-        0b001 => {
-            let v = (raw >> byte_off) & 0xffff;
-            if v & 0x8000 != 0 { v | 0xffff_0000 } else { v }
-        }
-        0b010 => raw,
-        0b100 => (raw >> byte_off) & 0xff,
-        0b101 => (raw >> byte_off) & 0xffff,
-        _     => raw,
+fn execute_csr(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
+    let slot = ex_ma.thread;
+    let old = state.read_csr(slot, ex_ma.csr_addr);
+    let new_val = match ex_ma.csr_op {
+        1 => Some(ex_ma.csr_write_val),
+        2 => if ex_ma.csr_src_is_zero { None } else { Some(old | ex_ma.csr_write_val) },
+        3 => if ex_ma.csr_src_is_zero { None } else { Some(old & !ex_ma.csr_write_val) },
+        _ => None,
+    };
+    if let Some(v) = new_val {
+        state.write_csr(slot, ex_ma.csr_addr, v);
     }
+    let mut r = mawb_from(ex_ma, 0);
+    r.alu_result = old; // old CSR value → WB writes to rd
+    r
+}
+
+fn execute_load(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
+    let addr = ex_ma.alu_result;
+    let funct3 = ex_ma.funct3;
+    let thread = ex_ma.thread;
+
+    // MMIO: thread state, IRQ controller, DMA
+    if thread_mmio::is_tmmio(addr) {
+        let t = &state.threads[thread as usize];
+        if !thread_mmio::check_access(thread, t.priv_mode) {
+            state.take_sync_trap(thread, 5, ex_ma.trap_pc, addr);
+            return MaWb::bubble();
+        }
+        return mawb_from(ex_ma, thread_mmio::read(state, addr));
+    }
+    if let Some(v) = state.irq.read_reg(addr) { return mawb_from(ex_ma, v); }
+    if let Some(v) = state.dma.read_reg(addr)  { return mawb_from(ex_ma, v); }
+
+    // Store-buffer forwarding
+    if let Some(v) = state.store_buffer.forward(addr) {
+        return mawb_from(ex_ma, sign_extend_load(v, addr, funct3));
+    }
+    // D-L1 cache
+    if let Some(raw) = state.dcache.lookup(addr) {
+        return mawb_from(ex_ma, sign_extend_load(raw, addr, funct3));
+    }
+    // Cache miss — stall + rollback
+    let line_addr = Cache::line_addr(addr);
+    if state.dcache.pending.is_none() {
+        state.dcache.pending = Some(PendingMiss { line_addr, thread });
+    }
+    state.dcache.waiters[thread as usize] = true;
+    state.threads[thread as usize].miss_pending = true;
+    state.threads[thread as usize].pc =
+        state.threads[thread as usize].pc.wrapping_sub(4);
+    MaWb::bubble()
+}
+
+fn execute_store(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
+    let addr = ex_ma.alu_result;
+    let thread = ex_ma.thread;
+    let val = ex_ma.rs2_data;
+
+    // Thread MMIO
+    if thread_mmio::is_tmmio(addr) {
+        let priv_m = state.threads[thread as usize].priv_mode;
+        if !thread_mmio::check_access(thread, priv_m) {
+            state.take_sync_trap(thread, 7, ex_ma.trap_pc, addr);
+            return MaWb::bubble();
+        }
+        thread_mmio::write(state, addr, val);
+        return mawb_from(ex_ma, 0);
+    }
+    // IRQ controller
+    if state.irq.write_reg(addr, val) { return mawb_from(ex_ma, 0); }
+    // DMA
+    let is_dma = state.dma.write_reg(addr, val, &state.ext_imem, &mut state.local_isram);
+    if !is_dma {
+        // D-L1 write-through
+        if let Some(line) = state.dcache.peek_line_mut(addr) {
+            line.data[Cache::word_offset(addr)] = val;
+        }
+        // Store buffer
+        if !state.store_buffer.push(addr, val, thread) {
+            state.threads[thread as usize].pc =
+                state.threads[thread as usize].pc.wrapping_sub(4);
+            return MaWb::bubble();
+        }
+    }
+    mawb_from(ex_ma, 0)
+}
+
+pub fn compute_ma(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
+    if !ex_ma.valid { return MaWb::bubble(); }
+    if ex_ma.ctrl.custom_op != CustomOp::None { return execute_custom0(state, ex_ma); }
+    if ex_ma.csr_op != 0 { return execute_csr(state, ex_ma); }
+    if ex_ma.ctrl.mem_read { return execute_load(state, ex_ma); }
+    if ex_ma.ctrl.mem_write { return execute_store(state, ex_ma); }
+    mawb_from(ex_ma, 0)
 }
 
 /// Execute one custom-0 instruction in the MA stage. The issuer is

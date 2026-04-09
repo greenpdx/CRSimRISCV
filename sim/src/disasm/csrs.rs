@@ -44,6 +44,7 @@ pub fn csr_name(addr: u16) -> Option<&'static str> {
 }
 
 /// Plain-English description for a CSR (used as tooltip in the demo).
+#[allow(dead_code)]
 pub fn csr_desc(addr: u16) -> Option<&'static str> {
     Some(match addr {
         // User counters
