@@ -767,6 +767,7 @@
       <!-- Micro-step visualizer launcher (separate Vue view) -->
       <button class="clock-btn clock-btn--edit" @click="emit('switch-microstep')">μStep</button>
       <button class="clock-btn clock-btn--edit" @click="emit('switch-microstep-pipeline')">μStep Pipe</button>
+      <button class="clock-btn clock-btn--edit" @click="emit('switch-microstep-barrel')">μStep Barrel</button>
     </div>
 
     <!-- Config Modal -->
@@ -891,7 +892,8 @@ const emit = defineEmits<{
   'switch-tab': []
   'switch-pipeline': []
   'switch-microstep': []
-  'switch-microstep-pipeline': []
+  'switch-microstep-pipeline': [],
+  'switch-microstep-barrel': []
 }>()
 
 function openEditor() {

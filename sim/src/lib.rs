@@ -41,6 +41,7 @@ pub mod sim {
     pub mod trap;
     pub mod cpu_state;
     pub mod pipeline;
+    pub mod barrel;
 }
 
 pub mod verify {

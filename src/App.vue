@@ -5,8 +5,9 @@ import EditorView from './views/EditorView.vue'
 import PipelineView from './views/PipelineView.vue'
 import MicroStepView from './views/MicroStepView.vue'
 import MicroStepPipelineView from './views/MicroStepPipelineView.vue'
+import MicroStepBarrelView from './views/MicroStepBarrelView.vue'
 
-const activeTab = ref<'cpu' | 'editor' | 'pipeline' | 'microstep' | 'microstep-pipeline'>('cpu')
+const activeTab = ref<'cpu' | 'editor' | 'pipeline' | 'microstep' | 'microstep-pipeline' | 'microstep-barrel'>('cpu')
 </script>
 
 <template>
@@ -17,6 +18,7 @@ const activeTab = ref<'cpu' | 'editor' | 'pipeline' | 'microstep' | 'microstep-p
         @switch-pipeline="activeTab = 'pipeline'"
         @switch-microstep="activeTab = 'microstep'"
         @switch-microstep-pipeline="activeTab = 'microstep-pipeline'"
+        @switch-microstep-barrel="activeTab = 'microstep-barrel'"
       />
     </div>
     <div v-show="activeTab === 'editor'">
@@ -30,6 +32,9 @@ const activeTab = ref<'cpu' | 'editor' | 'pipeline' | 'microstep' | 'microstep-p
     </div>
     <div v-if="activeTab === 'microstep-pipeline'">
       <MicroStepPipelineView @switch-cpu="activeTab = 'cpu'" />
+    </div>
+    <div v-if="activeTab === 'microstep-barrel'">
+      <MicroStepBarrelView @switch-cpu="activeTab = 'cpu'" />
     </div>
   </div>
 </template>

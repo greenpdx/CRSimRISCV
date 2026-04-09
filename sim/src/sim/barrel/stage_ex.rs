@@ -1,0 +1,128 @@
+//! Stage 4 — Execute.
+//!
+//! Runs the ALU and resolves branches/jumps. No forwarding here:
+//! when ≥ 2 threads are active, instructions from the same thread
+//! are always 8 cycles apart, so a producer's WB has already
+//! completed before its dependent's DI runs. The single-thread
+//! degenerate case is broken in B1 and gets forwarding/stalls in
+//! a later phase.
+
+use crate::data::alu_control_data::compute_alu_control;
+use crate::data::alu_data::alu_compute;
+use crate::data::control_data::{branch_condition, BranchCondition};
+
+use super::state::{CustomOp, DiEx, ExMa, MaWb};
+
+/// Forwarding source for an ALU input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForwardSrc { Regfile, ExMa, MaWb }
+
+/// Pick the right forwarding source for one rs operand. Only fires
+/// when the in-flight producer is from the SAME thread as the
+/// consumer (cross-thread forwarding is impossible — separate
+/// register files). In multi-thread barrel mode this naturally
+/// returns Regfile because adjacent stages always hold different
+/// threads. Single-thread mode is where it does real work.
+fn forward_for(rs_num: u8, thread: u8, ex_ma: &ExMa, ma_wb: &MaWb) -> ForwardSrc {
+    if rs_num == 0 { return ForwardSrc::Regfile; }
+    if ex_ma.valid && ex_ma.thread == thread && ex_ma.ctrl.reg_write
+       && ex_ma.rd_num == rs_num && ex_ma.rd_num != 0 {
+        return ForwardSrc::ExMa;
+    }
+    if ma_wb.valid && ma_wb.thread == thread && ma_wb.ctrl.reg_write
+       && ma_wb.rd_num == rs_num && ma_wb.rd_num != 0 {
+        return ForwardSrc::MaWb;
+    }
+    ForwardSrc::Regfile
+}
+
+fn pick_value(src: ForwardSrc, fallback: u32, ex_ma: &ExMa, ma_wb: &MaWb) -> u32 {
+    match src {
+        ForwardSrc::Regfile => fallback,
+        ForwardSrc::ExMa    => ex_ma.alu_result,
+        ForwardSrc::MaWb    => match ma_wb.ctrl.wb_sel {
+            0 => ma_wb.alu_result,
+            1 => ma_wb.mem_data,
+            2 => ma_wb.pc_plus4,
+            _ => 0,
+        },
+    }
+}
+
+pub fn compute_ex(di_ex: &DiEx, ex_ma_in: &ExMa, ma_wb_in: &MaWb) -> ExMa {
+    if !di_ex.valid {
+        return ExMa::bubble();
+    }
+
+    // Custom-0 instructions skip the ALU entirely. The actual
+    // semantics run in stage_ma where we have &mut state. Here we
+    // just propagate rs1/rs2 forward.
+    if di_ex.ctrl.custom_op != CustomOp::None {
+        return ExMa {
+            valid: true,
+            thread: di_ex.thread,
+            instr: di_ex.instr,
+            alu_result: 0,
+            rs1_data: di_ex.rs1_data,
+            rs2_data: di_ex.rs2_data,
+            pc_plus4: di_ex.pc_plus4,
+            rd_num: di_ex.rd_num,
+            funct3: di_ex.funct3,
+            branch_taken: false,
+            branch_target: 0,
+            ctrl: di_ex.ctrl,
+        };
+    }
+
+    // Forwarding from in-flight stages (same-thread only).
+    let fa = forward_for(di_ex.rs1_num, di_ex.thread, ex_ma_in, ma_wb_in);
+    let fb = forward_for(di_ex.rs2_num, di_ex.thread, ex_ma_in, ma_wb_in);
+    let rs1_val = pick_value(fa, di_ex.rs1_data, ex_ma_in, ma_wb_in);
+    let rs2_val = pick_value(fb, di_ex.rs2_data, ex_ma_in, ma_wb_in);
+
+    let alu_b = if di_ex.ctrl.alu_src { di_ex.imm } else { rs2_val };
+
+    let is_lui = di_ex.opcode == 0b0110111;
+    let is_rt = di_ex.opcode == 0b0110011;
+    let is_si = di_ex.opcode == 0b0010011 && (di_ex.funct3 == 0b101 || di_ex.funct3 == 0b001);
+    let f7b30 = if is_rt || is_si { di_ex.funct7b30 } else { 0 };
+    let alu_op_code = compute_alu_control(di_ex.ctrl.alu_op, di_ex.funct3, f7b30, is_lui);
+
+    let r = alu_compute(alu_op_code, rs1_val, alu_b);
+
+    let mut branch_taken = false;
+    let mut branch_target = di_ex.pc.wrapping_add(di_ex.imm);
+    if di_ex.ctrl.branch {
+        branch_taken = match branch_condition(di_ex.funct3) {
+            Some(BranchCondition::Zero) => r.flags.zero,
+            Some(BranchCondition::NotZero) => !r.flags.zero,
+            Some(BranchCondition::Neg) => r.flags.negative,
+            Some(BranchCondition::NotNeg) => !r.flags.negative,
+            Some(BranchCondition::Carry) => r.flags.carry,
+            Some(BranchCondition::NotCarry) => !r.flags.carry,
+            None => false,
+        };
+    }
+    if di_ex.ctrl.jump {
+        branch_taken = true;
+        if di_ex.opcode == 0b1100111 {
+            branch_target = r.result & 0xffff_fffe; // JALR
+        }
+    }
+
+    ExMa {
+        valid: true,
+        thread: di_ex.thread,
+        instr: di_ex.instr,
+        alu_result: r.result,
+        rs1_data: rs1_val,
+        // Stores read rs2 as the value to write. Forward it too.
+        rs2_data: rs2_val,
+        pc_plus4: di_ex.pc_plus4,
+        rd_num: di_ex.rd_num,
+        funct3: di_ex.funct3,
+        branch_taken,
+        branch_target,
+        ctrl: di_ex.ctrl,
+    }
+}
