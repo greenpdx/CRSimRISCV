@@ -99,276 +99,203 @@ pub fn active_components(state: &PipelineState, stage: Stage) -> Vec<&'static st
     v
 }
 
+/// Branch-mode flags computed per cycle, determining which latch
+/// path to take. Extracted from step() for readability.
+struct BranchFlags {
+    need_eager_flush: bool,
+    need_misspec_fix: bool,
+    need_match_squash: bool,
+    do_id_redirect: bool,
+    flush_visible: bool,
+}
+
 impl PipelineState {
     /// Advance the simulator by one clock cycle.
     pub fn step(&mut self) {
         if self.halted { return; }
+        self.clear_per_cycle_state();
 
-        // Snapshot CSRs *before* this cycle's stages run, so the
-        // visualizer can compare and highlight changed CSRs.
-        for (i, &a) in csr::CsrFile::known_addrs().iter().enumerate() {
-            self.last_csr_snapshot[i] = self.csrs.read(a);
-        }
-        // Clear per-cycle activity records (they reflect this cycle).
-        self.reg_read_mask = 0;
-        self.reg_write_mask = 0;
-        self.last_ram_addr = 0;
-        self.last_ram_kind = 0;
-
-        // ── 0. Interrupt check (asynchronous trap) ─────────────────
-        // Async interrupts redirect PC to mtvec but do NOT squash any
-        // in-flight stages. The instructions currently in IF/ID/EX/
-        // MA/WB drain to completion behind the handler. The IF stage
-        // this very cycle will fetch from mtvec (because PC was just
-        // overwritten), so the handler starts immediately while older
-        // in-flight instructions retire on subsequent cycles.
+        // ── 0. Interrupt check ──────────────────────────────────
         self.last_trap_taken = false;
         if self.check_and_take_interrupt() {
             self.last_trap_taken = true;
         }
 
-        // Snapshot the inputs each stage will use. We're computing the
-        // *new* register values from the *current* (previous-cycle)
-        // register values, then latching them all atomically.
+        // ── Snapshot previous-cycle pipeline registers ──────────
         let prev_if_id = self.if_id;
         let prev_id_ex = self.id_ex;
         let prev_ex_ma = self.ex_ma;
         let prev_ma_wb = self.ma_wb;
-
-        // Record the instruction WB is consuming this cycle so the
-        // visualizer can show it (the value will be gone after WB runs).
         self.last_wb = prev_ma_wb;
 
-        // ── 1. WB ───────────────────────────────────────────────────
-        // Write the value in MA/WB into the regfile (if applicable).
-        // Doing this first means the ID stage's regfile read in this
-        // same cycle will see the new value (write-then-read in one
-        // cycle, the standard split-cycle regfile trick).
+        // ── Run stages in reverse order (WB → IF) ──────────────
         stage_wb::compute_wb(self, &prev_ma_wb);
-
-        // ── 2. MA ───────────────────────────────────────────────────
-        // Read RAM/IO if loading; write RAM/IO if storing.
         let new_ma_wb = stage_ma::compute_ma(self, &prev_ex_ma);
-
-        // ── 3. EX ───────────────────────────────────────────────────
-        // ALU + forwarding + branch resolution. We pass the *current*
-        // EX/MA and MA/WB as forwarding sources because that matches
-        // what the hardware sees: the values that were latched on the
-        // previous edge are still on the wires at the start of this
-        // cycle.
         let ex_result = stage_ex::compute_ex(&prev_id_ex, &prev_ex_ma, &prev_ma_wb);
         let new_ex_ma = ex_result.ex_ma;
         self.last_forward_a = ex_result.forward_a;
         self.last_forward_b = ex_result.forward_b;
 
-        // ── 4. ID ───────────────────────────────────────────────────
-        // Decode the instruction in IF/ID, read the regfile, generate
-        // the immediate. Detect a load-use hazard against the
-        // instruction currently in ID/EX (the one EX is processing
-        // right now).
         let stall = stage_id::detect_load_use_hazard(&prev_if_id, &prev_id_ex);
         self.last_stall = stall;
         self.last_stall_reg = if stall { prev_id_ex.rd_num } else { 0 };
-        let new_id_ex_default = stage_id::compute_id(self, &prev_if_id)
+        let new_id_ex = stage_id::compute_id(self, &prev_if_id)
             .unwrap_or_else(IdEx::bubble);
-        // Record this cycle's register reads (rs1/rs2 of new ID/EX).
-        if new_id_ex_default.valid {
-            if new_id_ex_default.rs1_num != 0 {
-                self.reg_read_mask |= 1 << new_id_ex_default.rs1_num;
-            }
-            if new_id_ex_default.rs2_num != 0 {
-                self.reg_read_mask |= 1 << new_id_ex_default.rs2_num;
-            }
-        }
+        self.record_reg_reads(&new_id_ex);
+        let new_if_id = stage_if::compute_if(self);
 
-        // ── 5. IF ───────────────────────────────────────────────────
-        // Read the next instruction from ROM at PC.
-        let new_if_id_default = stage_if::compute_if(self);
-
-        // ── 5b. MA-stage page-fault resolution ──────────────────────
-        // If MA detected a load/store page fault, the instruction in
-        // MA traps NOW. The instructions currently in EX, ID, and IF
-        // are all younger and must be squashed. The MaWb result must
-        // not be latched (its rd_num was already cleared, but bubble
-        // it for clarity).
-        if new_ma_wb.trap_kind != 0 {
-            let cause: u32 = if new_ma_wb.trap_kind == 7 { 13 } else { 15 };
-            let target = self.take_trap(cause, new_ma_wb.trap_pc, new_ma_wb.trap_value);
-            self.last_flush = true;
-            self.ma_wb = MaWb::bubble();
-            self.ex_ma = ExMa::bubble();
-            self.id_ex = IdEx::bubble();
-            self.if_id = IfId::bubble();
-            self.pc = target;
-            self.cycle_count += 1;
-            return;
-        }
-
-        // ── 6a. Synchronous trap / mret resolution ──────────────────
-        // The instruction in EX may be a sync trap (illegal/ECALL/
-        // EBREAK) or an MRET. Both behave like a flush + redirect,
-        // and update mstatus/mepc/mcause. The trapping/mret
-        // instruction itself must NOT retire — squash new_ex_ma.
+        // ── Resolve traps + compute branch flags + latch ────────
+        if self.resolve_ma_trap(&new_ma_wb) { return; }
         let mut new_ex_ma = new_ex_ma;
-        let mut trap_redirect: Option<u32> = None;
-        if new_ex_ma.valid && new_ex_ma.trap_kind != 0 {
-            match new_ex_ma.trap_kind {
-                4 => { trap_redirect = Some(self.do_mret()); }
-                5 => { trap_redirect = Some(self.do_sret()); }
-                kind => { // 1=illegal, 2=ecall, 3=ebreak, 6=ifetch-pf
-                    let cause: u32 = match kind {
-                        1 => 2,
-                        2 => match self.priv_mode { 3 => 11, 1 => 9, _ => 8 },
-                        3 => 3,
-                        6 => 12, // instruction page fault
-                        _ => 0,
-                    };
-                    let mtval: u32 = match kind {
-                        1 => new_ex_ma.instr,
-                        6 => new_ex_ma.trap_pc, // faulting vaddr
-                        _ => 0,
-                    };
-                    trap_redirect = Some(self.take_trap(cause, new_ex_ma.trap_pc, mtval));
-                }
-            }
-            // The trapping instruction itself must not retire any
-            // architectural side-effects, but we keep the pipeline-
-            // register entry alive so the visualizer can show it
-            // travel through MA and WB. Suppress reg/mem writes and
-            // any CSR side-effect by clearing the relevant control
-            // bits and zeroing rd.
-            new_ex_ma.ctrl.reg_write = false;
-            new_ex_ma.ctrl.mem_read  = false;
-            new_ex_ma.ctrl.mem_write = false;
-            new_ex_ma.ctrl.csr_op    = 0;
-            new_ex_ma.ctrl.is_sfence = false;
-            new_ex_ma.rd_num         = 0;
-            // Clear trap_kind so the next cycle's MA-trap check
-            // doesn't re-fire on this same instruction.
-            new_ex_ma.trap_kind = 0;
-        }
-
-        // ── 6b. Branch flush logic (mode-aware) ────────────────────
-        // Three branch-related events can happen in this cycle:
-        //
-        //   A. EX resolved a JALR-or-mode-1 branch this cycle
-        //      (no ID-side speculation was done for it).
-        //      → mode-1 style "squash IF and ID, redirect to ex_ma.branch_target"
-        //
-        //   B. EX resolved a branch that WAS speculated by ID one
-        //      cycle ago (modes 2/3, conditional branch or JAL).
-        //      → check if speculation matched; squash either id_ex
-        //        (if speculation correct = taken) or if_id (if
-        //        speculation wrong = not taken, redirect back).
-        //
-        //   C. ID just decoded a branch with early_branch set
-        //      (modes 2/3, this cycle). Override pc to early target.
-        //      The previously-fetched if_id stays put.
-        //
-        // Events A/B happen on a branch's MA-stage cycle (its EX
-        // resolution one cycle ago); event C happens on a different
-        // branch's ID-stage cycle. They are normally one cycle apart
-        // and don't conflict.
-
-        let mode = self.branch_mode;
-        let modes_with_id_redirect = matches!(
-            mode,
-            BranchMode::AlwaysTarget | BranchMode::EarlyResolve | BranchMode::Predict
+        let trap_redirect = self.resolve_ex_trap(&mut new_ex_ma);
+        let bf = self.compute_branch_flags(
+            &new_ex_ma, &new_id_ex, stall, trap_redirect.is_some(),
         );
+        self.last_flush = bf.flush_visible || trap_redirect.is_some();
+        self.latch(
+            new_ma_wb, new_ex_ma, new_id_ex, new_if_id,
+            stall, &prev_id_ex, trap_redirect, &bf,
+        );
+        self.cycle_count += 1;
+    }
 
-        let ex_branch = new_ex_ma.valid
-            && (new_ex_ma.ctrl.branch || new_ex_ma.ctrl.jump);
-        // Only treat the branch as "ID-speculated" in modes that
-        // actually perform the ID-side redirect. In Eager mode the
-        // compute_id stage still sets the flag (it's mode-agnostic)
-        // but the redirect never happened, so we must not skip the
-        // EX-stage flush.
-        let ex_was_speculated =
-            modes_with_id_redirect && ex_branch && new_ex_ma.early_redirected;
-        let need_eager_flush  = ex_branch && new_ex_ma.branch_taken && !ex_was_speculated;
-        let need_misspec_fix  = modes_with_id_redirect && ex_was_speculated && !new_ex_ma.branch_taken;
-        let need_match_squash = modes_with_id_redirect && ex_was_speculated && new_ex_ma.branch_taken;
-        let do_id_redirect    = modes_with_id_redirect
-            && new_id_ex_default.early_branch
-            && !stall
-            && trap_redirect.is_none()
-            && !need_eager_flush;
+    // ── Private helpers for step() ──────────────────────────────
 
-        let flush_visible =
-            need_eager_flush || need_misspec_fix || need_match_squash || do_id_redirect;
-        self.last_flush = flush_visible || trap_redirect.is_some();
+    fn clear_per_cycle_state(&mut self) {
+        for (i, &a) in csr::CsrFile::known_addrs().iter().enumerate() {
+            self.last_csr_snapshot[i] = self.csrs.read(a);
+        }
+        self.reg_read_mask = 0;
+        self.reg_write_mask = 0;
+        self.last_ram_addr = 0;
+        self.last_ram_kind = 0;
+    }
 
-        // ── 7. Latch ────────────────────────────────────────────────
+    fn record_reg_reads(&mut self, id_ex: &IdEx) {
+        if id_ex.valid {
+            if id_ex.rs1_num != 0 { self.reg_read_mask |= 1 << id_ex.rs1_num; }
+            if id_ex.rs2_num != 0 { self.reg_read_mask |= 1 << id_ex.rs2_num; }
+        }
+    }
+
+    /// Handle MA-stage page fault. Returns true if the trap was
+    /// taken (caller should return early from step).
+    fn resolve_ma_trap(&mut self, new_ma_wb: &MaWb) -> bool {
+        if new_ma_wb.trap_kind == 0 { return false; }
+        let cause: u32 = if new_ma_wb.trap_kind == 7 { 13 } else { 15 };
+        let target = self.take_trap(cause, new_ma_wb.trap_pc, new_ma_wb.trap_value);
+        self.last_flush = true;
+        self.ma_wb = MaWb::bubble();
+        self.ex_ma = ExMa::bubble();
+        self.id_ex = IdEx::bubble();
+        self.if_id = IfId::bubble();
+        self.pc = target;
+        self.cycle_count += 1;
+        true
+    }
+
+    /// Handle EX-stage sync trap or mret. Defangs the trapping
+    /// instruction and returns the redirect PC (or None).
+    fn resolve_ex_trap(&mut self, ex_ma: &mut ExMa) -> Option<u32> {
+        if !ex_ma.valid || ex_ma.trap_kind == 0 { return None; }
+        let redirect = match ex_ma.trap_kind {
+            4 => self.do_mret(),
+            5 => self.do_sret(),
+            kind => {
+                let cause: u32 = match kind {
+                    1 => 2,
+                    2 => match self.priv_mode { 3 => 11, 1 => 9, _ => 8 },
+                    3 => 3,
+                    6 => 12,
+                    _ => 0,
+                };
+                let mtval: u32 = match kind {
+                    1 => ex_ma.instr, 6 => ex_ma.trap_pc, _ => 0,
+                };
+                self.take_trap(cause, ex_ma.trap_pc, mtval)
+            }
+        };
+        // Defang: keep entry alive for the visualizer but suppress
+        // all side effects so MA/WB treat it as a no-op.
+        ex_ma.ctrl.reg_write = false;
+        ex_ma.ctrl.mem_read  = false;
+        ex_ma.ctrl.mem_write = false;
+        ex_ma.ctrl.csr_op    = 0;
+        ex_ma.ctrl.is_sfence = false;
+        ex_ma.rd_num         = 0;
+        ex_ma.trap_kind      = 0;
+        Some(redirect)
+    }
+
+    fn compute_branch_flags(
+        &self, ex_ma: &ExMa, id_ex: &IdEx, stall: bool, has_trap: bool,
+    ) -> BranchFlags {
+        let mode = self.branch_mode;
+        let adv = matches!(mode, BranchMode::AlwaysTarget | BranchMode::EarlyResolve | BranchMode::Predict);
+        let ex_br = ex_ma.valid && (ex_ma.ctrl.branch || ex_ma.ctrl.jump);
+        let spec = adv && ex_br && ex_ma.early_redirected;
+        let eager = ex_br && ex_ma.branch_taken && !spec;
+        let misspec = adv && spec && !ex_ma.branch_taken;
+        let matched = adv && spec && ex_ma.branch_taken;
+        let id_redir = adv && id_ex.early_branch && !stall && !has_trap && !eager;
+        BranchFlags {
+            need_eager_flush: eager,
+            need_misspec_fix: misspec,
+            need_match_squash: matched,
+            do_id_redirect: id_redir,
+            flush_visible: eager || misspec || matched || id_redir,
+        }
+    }
+
+    /// Latch new pipeline register values based on the resolved
+    /// trap, stall, branch, or normal-advance path.
+    #[allow(clippy::too_many_arguments)]
+    fn latch(
+        &mut self,
+        new_ma_wb: MaWb, new_ex_ma: ExMa,
+        new_id_ex: IdEx, new_if_id: IfId,
+        stall: bool, prev_id_ex: &IdEx,
+        trap_redirect: Option<u32>, bf: &BranchFlags,
+    ) {
         self.ma_wb = new_ma_wb;
         self.ex_ma = new_ex_ma;
 
         if let Some(target) = trap_redirect {
-            // Sync trap or mret: squash IF/ID and ID/EX, redirect.
             self.if_id = IfId::bubble();
             self.id_ex = IdEx::bubble();
             self.pc = target;
         } else if stall {
-            // Freeze IF/ID and PC, insert a stall-tagged bubble.
             let mut bubble = IdEx::bubble();
             bubble.stall_reg = prev_id_ex.rd_num;
             self.id_ex = bubble;
-            // self.if_id stays as it was (don't overwrite).
-            // self.pc stays as it was.
-        } else if need_eager_flush {
-            // Mode 1 / JALR style: squash IF and ID, redirect.
-            let mut if_b = IfId::bubble();
-            if_b.flush_bubble = true;
-            let mut id_b = IdEx::bubble();
-            id_b.flush_bubble = true;
+        } else if bf.need_eager_flush {
+            let mut if_b = IfId::bubble(); if_b.flush_bubble = true;
+            let mut id_b = IdEx::bubble(); id_b.flush_bubble = true;
             self.if_id = if_b;
             self.id_ex = id_b;
             self.pc = new_ex_ma.branch_target;
-        } else if need_misspec_fix {
-            // Mode 2/3 misprediction: ID speculated taken but EX says
-            // not taken. The branch's pc_plus4 (= the address right
-            // after the branch) is the correct continuation. Squash
-            // if_id (the speculatively-fetched target_instr) and
-            // both id_ex (which may itself be a stale bubble from a
-            // chained recovery) — let the pipeline refill cleanly.
-            let mut id_b = IdEx::bubble();
-            id_b.flush_bubble = true;
+        } else if bf.need_misspec_fix {
+            let mut id_b = IdEx::bubble(); id_b.flush_bubble = true;
+            let mut if_b = IfId::bubble(); if_b.flush_bubble = true;
             self.id_ex = id_b;
-            let mut bub = IfId::bubble();
-            bub.flush_bubble = true;
-            self.if_id = bub;
+            self.if_id = if_b;
             self.pc = new_ex_ma.pc_plus4;
-        } else if need_match_squash {
-            // Mode 2/3 correct speculation: branch was taken as we
-            // guessed. The target_instr in new_if_id_default is
-            // correct (continue from target). Squash id_ex (the
-            // seq1 from the not-taken path).
-            let mut id_b = IdEx::bubble();
-            id_b.flush_bubble = true;
+        } else if bf.need_match_squash {
+            let mut id_b = IdEx::bubble(); id_b.flush_bubble = true;
             self.id_ex = id_b;
-            self.if_id = new_if_id_default;
+            self.if_id = new_if_id;
             self.pc = self.pc.wrapping_add(4);
-        } else if do_id_redirect {
-            // Mode 2/3: ID just decoded a branch this cycle. Latch
-            // normally (id_ex = decoded branch, if_id = seq1 we
-            // fetched at PC+4) and override pc so the next cycle's
-            // IF fetches at the early target. Mark id_ex with
-            // `id_redirected` so when this branch reaches EX, the
-            // need_match_squash / need_misspec_fix logic recognizes
-            // that an ID-side redirect actually occurred (and
-            // doesn't fire on every random branch in id_ex).
-            let mut idex = new_id_ex_default;
+        } else if bf.do_id_redirect {
+            let mut idex = new_id_ex;
             idex.id_redirected = true;
             self.id_ex = idex;
-            self.if_id = new_if_id_default;
-            self.pc = new_id_ex_default.early_target;
+            self.if_id = new_if_id;
+            self.pc = new_id_ex.early_target;
         } else {
-            // Normal advance.
-            self.id_ex = new_id_ex_default;
-            self.if_id = new_if_id_default;
+            self.id_ex = new_id_ex;
+            self.if_id = new_if_id;
             self.pc = self.pc.wrapping_add(4);
         }
-
-        self.cycle_count += 1;
     }
 
     /// Take a synchronous trap (illegal/ECALL/EBREAK). Updates mepc,

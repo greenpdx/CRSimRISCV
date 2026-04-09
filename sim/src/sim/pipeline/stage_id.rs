@@ -8,10 +8,9 @@
 //! Also runs the **load-use hazard detection**.
 
 use crate::sim::decode::{
-    self, InstrFields, RegRead, extract_fields, is_branch, is_jump,
-    is_jalr, system_trap_kind,
+    self, RegRead, extract_fields, is_jalr, system_trap_kind,
 };
-use super::csr::{csr_op_from_funct3, csr_is_imm_form, CsrOp};
+use super::csr::{csr_op_from_funct3, CsrOp};
 use super::state::{ControlBits, IdEx, IfId, PipelineState};
 
 // ── RegRead impl for pipeline's single regfile ──────────────────
