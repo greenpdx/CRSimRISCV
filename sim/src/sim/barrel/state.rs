@@ -3,6 +3,8 @@
 
 use super::bus::Bus;
 use super::cache::Cache;
+use super::dma::DmaController;
+use super::irq_controller::IrqController;
 use super::store_buffer::StoreBuffer;
 
 pub const N_THREADS: usize = 8;
@@ -55,15 +57,13 @@ pub struct Thread {
     // future phase. The IRQ "controller" in B7 is just a wasm
     // entry point that sets `active=true` on a slot.
     pub priv_mode: u8,    // 3=M, 1=S, 0=U; reset = M
-    pub mstatus:  u32,
-    pub mtvec:    u32,
-    pub mepc:     u32,
-    pub mcause:   u32,
-    pub mtval:    u32,
-    pub mscratch: u32,
-    pub mip:      u32,
-    pub mie:      u32,
-    pub satp:     u32,
+    pub mstatus:  u32,    // per-thread: MIE/MPIE/MPP for sync trap, SUM/MXR for Sv32
+    pub mepc:     u32,    // per-thread: sync trap return address
+    pub mcause:   u32,    // per-thread: sync trap cause
+    pub mtval:    u32,    // per-thread: sync trap fault info
+    pub mscratch: u32,    // per-thread: handler scratch
+    pub satp:     u32,    // per-thread: address space root
+    // Note: mtvec, mie, mip are GLOBAL (on BarrelState), not per-thread.
 }
 
 impl Thread {
@@ -80,8 +80,8 @@ impl Thread {
             miss_pending: false,
             instr_access_fault: false,
             priv_mode: 3,
-            mstatus: 0, mtvec: 0, mepc: 0, mcause: 0, mtval: 0,
-            mscratch: 0, mip: 0, mie: 0, satp: 0,
+            mstatus: 0, mepc: 0, mcause: 0, mtval: 0,
+            mscratch: 0, satp: 0,
         }
     }
 
@@ -192,6 +192,14 @@ pub struct DiEx {
     pub funct7b30: u8,
     pub opcode: u8,
     pub ctrl: ControlBits,
+    /// Sync trap kind: 0=none, 1=illegal, 2=ecall, 3=ebreak, 4=mret,
+    /// 5=instr_access_fault. Propagated through EX to step() for delivery.
+    pub trap_kind: u8,
+    // ── Zicsr fields ──
+    pub csr_op: u8,         // 0=none, 1=RW, 2=RS, 3=RC
+    pub csr_addr: u16,
+    pub csr_uimm: u8,
+    pub csr_imm_form: bool,
 }
 impl DiEx { pub fn bubble() -> Self { Self::default() } }
 
@@ -209,6 +217,13 @@ pub struct ExMa {
     pub branch_taken: bool,
     pub branch_target: u32,
     pub ctrl: ControlBits,
+    pub trap_kind: u8,
+    pub trap_pc: u32,
+    // ── Zicsr fields ──
+    pub csr_op: u8,
+    pub csr_addr: u16,
+    pub csr_write_val: u32,
+    pub csr_src_is_zero: bool,
 }
 impl ExMa { pub fn bubble() -> Self { Self::default() } }
 
@@ -285,6 +300,17 @@ pub struct BarrelState {
     pub store_buffer: StoreBuffer,
     /// Single shared external memory bus, fixed-priority.
     pub bus: Bus,
+    /// DMA controller for loading code into per-slot I-SRAMs.
+    pub dma: DmaController,
+    /// IRQ controller with routing table.
+    pub irq: IrqController,
+
+    // ── Global CSRs (shared by all threads) ──
+    pub mtvec:   u32,   // sync trap vector (all threads trap here)
+    pub mie:     u32,   // global interrupt enable mask
+    pub mip:     u32,   // global interrupt pending (reflects device state)
+    pub medeleg: u32,   // exception delegation
+    pub mideleg: u32,   // interrupt delegation
 
     // Pipeline registers
     pub lt_if: LtIf,
@@ -329,6 +355,9 @@ impl Default for BarrelState {
             dcache: Cache::new("D-L1"),
             store_buffer: StoreBuffer::new(),
             bus: Bus::new(),
+            dma: DmaController::new(),
+            irq: IrqController::new(),
+            mtvec: 0, mie: 0, mip: 0, medeleg: 0, mideleg: 0,
             lt_if: LtIf::default(),
             if_di: IfDi::default(),
             di_ex: DiEx::default(),
@@ -437,53 +466,95 @@ impl BarrelState {
         }
     }
 
-    /// Inject an IRQ on `slot`. Models the hardware "interrupt
-    /// line asserted" event. In the barrel design IRQs are
-    /// pre-loaded handler threads — the controller just sets
-    /// `active=true` and the slot starts running its handler on
-    /// the next barrel rotation. Also sets MEIP in the slot's mip
-    /// CSR for visualization.
-    pub fn inject_irq(&mut self, slot: u8) {
-        if (slot as usize) >= N_THREADS { return; }
-        let t = &mut self.threads[slot as usize];
-        t.active = true;
-        t.mip |= 1 << 11; // MEIP
-    }
-
     /// Read one CSR for a given thread, by 12-bit address. Returns
     /// 0 for unknown CSRs. Used by the visualizer's CSR strip.
+    /// Read a CSR. Global CSRs (mtvec/mie/mip) ignore the slot arg.
+    /// Per-thread CSRs (mstatus/mepc/mcause/mtval/mscratch/satp) use it.
     pub fn read_csr(&self, slot: u8, addr: u16) -> u32 {
+        // Global CSRs
+        match addr {
+            0x305 => return self.mtvec,
+            0x304 => return self.mie,
+            0x344 => return self.mip,
+            0x302 => return self.medeleg,
+            0x303 => return self.mideleg,
+            _ => {}
+        }
+        // Per-thread CSRs
         if (slot as usize) >= N_THREADS { return 0; }
         let t = &self.threads[slot as usize];
         match addr {
             0x300 => t.mstatus,
-            0x305 => t.mtvec,
             0x340 => t.mscratch,
             0x341 => t.mepc,
             0x342 => t.mcause,
             0x343 => t.mtval,
-            0x344 => t.mip,
-            0x304 => t.mie,
             0x180 => t.satp,
             _     => 0,
         }
     }
 
     pub fn write_csr(&mut self, slot: u8, addr: u16, val: u32) {
+        // Global CSRs
+        match addr {
+            0x305 => { self.mtvec = val; return; }
+            0x304 => { self.mie = val; return; }
+            0x344 => { self.mip = val; return; }
+            0x302 => { self.medeleg = val; return; }
+            0x303 => { self.mideleg = val; return; }
+            _ => {}
+        }
+        // Per-thread CSRs
         if (slot as usize) >= N_THREADS { return; }
         let t = &mut self.threads[slot as usize];
         match addr {
             0x300 => t.mstatus  = val,
-            0x305 => t.mtvec    = val,
             0x340 => t.mscratch = val,
             0x341 => t.mepc     = val,
             0x342 => t.mcause   = val,
             0x343 => t.mtval    = val,
-            0x344 => t.mip      = val,
-            0x304 => t.mie      = val,
             0x180 => t.satp     = val,
             _     => {}
         }
+    }
+
+    /// Deliver a synchronous trap on thread `slot`. Updates per-thread
+    /// mepc/mcause/mtval/mstatus and redirects pc to global mtvec.
+    pub fn take_sync_trap(&mut self, slot: u8, cause: u32, epc: u32, tval: u32) {
+        if (slot as usize) >= N_THREADS { return; }
+        let t = &mut self.threads[slot as usize];
+        t.mepc = epc;
+        t.mcause = cause;
+        t.mtval = tval;
+        let mie = (t.mstatus >> 3) & 1;
+        let mut nm = t.mstatus & !((1 << 3) | (1 << 7) | (3 << 11));
+        nm |= mie << 7;                     // MPIE ← MIE
+        nm |= (t.priv_mode as u32) << 11;   // MPP ← priv
+        t.mstatus = nm;
+        t.priv_mode = 3;                    // handler in M-mode
+        t.pc = self.mtvec & !0x3;
+    }
+
+    /// Execute MRET for thread `slot`. Restores pc from mepc,
+    /// MIE from MPIE, priv from MPP.
+    pub fn do_mret(&mut self, slot: u8) {
+        if (slot as usize) >= N_THREADS { return; }
+        let t = &mut self.threads[slot as usize];
+        let m = t.mstatus;
+        let mpie = (m >> 7) & 1;
+        let mpp = (m >> 11) & 0b11;
+        let mut nm = m & !((1 << 3) | (1 << 7) | (3 << 11));
+        nm |= mpie << 3;     // MIE ← MPIE
+        nm |= 1 << 7;        // MPIE ← 1
+        nm |= 0b11 << 11;    // MPP ← M
+        t.mstatus = nm;
+        t.priv_mode = mpp as u8;
+        t.pc = t.mepc;
+    }
+
+    /// Update inject_irq to use the IRQ controller.
+    pub fn inject_irq(&mut self, line: u8) {
+        self.irq.assert_line(line);
     }
 
     /// Test helper: pre-load every line of ext_imem into the

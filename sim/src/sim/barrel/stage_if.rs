@@ -30,9 +30,14 @@ pub fn compute_if(state: &mut BarrelState, lt_if: &LtIf) -> IfDi {
                 src: IfSrc::LocalIsram,
             };
         } else {
+            // Foreign I-SRAM access → instruction access fault.
+            // Deliver as a sync trap via the pipeline (trap_kind=5
+            // in stage_di → step() delivers cause 1).
             let t = &mut state.threads[thread as usize];
             t.instr_access_fault = true;
-            t.active = false;
+            // Instead of deactivating, deliver a trap. The trap
+            // delivery in step() will redirect pc to mtvec.
+            state.take_sync_trap(thread, 1, pc, pc);
             return IfDi::bubble();
         }
     }

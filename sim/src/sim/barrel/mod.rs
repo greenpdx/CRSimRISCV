@@ -28,7 +28,10 @@
 
 pub mod bus;
 pub mod cache;
+pub mod dma;
+pub mod irq_controller;
 pub mod store_buffer;
+pub mod thread_mmio;
 
 pub mod state;
 pub mod scheduler;
@@ -60,10 +63,11 @@ impl BarrelState {
     pub fn step(&mut self) {
         if self.halted { return; }
 
-        // ── 0. Bus tick ──────────────────────────────────────────
-        // Run before any stages so completing fills are visible
-        // to this cycle's IF/MA, and so missing threads can be
-        // unblocked before LT picks the next thread.
+        // ── 0a. IRQ controller tick ───────────────────────────────
+        // Activate handler slots for any pending+routed IRQ lines.
+        self.irq.tick(&mut self.threads);
+
+        // ── 0b. Bus tick ─────────────────────────────────────────
         self.bus_tick();
 
         // Snapshot inputs each stage will use.
@@ -86,7 +90,7 @@ impl BarrelState {
         // from them. In multi-thread barrel mode the forwarding
         // paths never fire (different threads); in single-thread
         // fallback they cover RAW dependencies.
-        let new_ex_ma = stage_ex::compute_ex(&prev_di_ex, &prev_ex_ma, &prev_ma_wb);
+        let mut new_ex_ma = stage_ex::compute_ex(&prev_di_ex, &prev_ex_ma, &prev_ma_wb);
 
         // ── 4. DI ────────────────────────────────────────────────
         let new_di_ex = stage_di::compute_di(self, &prev_if_di);
@@ -145,15 +149,47 @@ impl BarrelState {
             }
         }
 
-        // ── EX-stage branch resolution ──
+        // ── Sync trap / MRET resolution ──
         //
-        // If the EX stage just decided that some thread T's branch
-        // is taken, override T's PC to the branch target. This
-        // affects T's NEXT dispatch only; no in-flight squashing
-        // happens because no younger instructions from T can be in
-        // the pipeline (the next-oldest instruction in flight from
-        // ANY single thread is at least N=8 cycles behind us, far
-        // beyond pipeline depth).
+        // If the instruction in new_ex_ma carries a trap_kind, the
+        // trapping thread's PC gets redirected to mtvec (for traps)
+        // or mepc (for MRET). In multi-thread barrel mode, no
+        // other in-flight instructions need squashing because
+        // they belong to different threads.
+        if new_ex_ma.valid && new_ex_ma.trap_kind != 0 {
+            let slot = new_ex_ma.thread;
+            match new_ex_ma.trap_kind {
+                4 => {
+                    // MRET: restore pc from mepc, MIE from MPIE.
+                    self.do_mret(slot);
+                }
+                kind => {
+                    // Sync trap: illegal(1), ecall(2), ebreak(3).
+                    let cause: u32 = match kind {
+                        1 => 2,  // illegal instruction
+                        2 => {   // ECALL (cause depends on priv)
+                            let p = self.threads[slot as usize].priv_mode;
+                            match p { 3 => 11, 1 => 9, _ => 8 }
+                        }
+                        3 => 3,  // EBREAK
+                        5 => 1,  // instruction access fault
+                        _ => 0,
+                    };
+                    let tval = if kind == 1 { new_ex_ma.instr } else { 0 };
+                    self.take_sync_trap(slot, cause, new_ex_ma.trap_pc, tval);
+                }
+            }
+            // Defang the trapping instruction so MA/WB don't
+            // produce side effects (same pattern as 5-stage).
+            new_ex_ma.ctrl.reg_write = false;
+            new_ex_ma.ctrl.mem_read  = false;
+            new_ex_ma.ctrl.mem_write = false;
+            new_ex_ma.ctrl.custom_op = CustomOp::None;
+            new_ex_ma.rd_num = 0;
+            new_ex_ma.trap_kind = 0;
+        }
+
+        // ── EX-stage branch resolution ──
         if new_ex_ma.valid && new_ex_ma.branch_taken {
             let s = new_ex_ma.thread as usize;
             self.threads[s].pc = new_ex_ma.branch_target;

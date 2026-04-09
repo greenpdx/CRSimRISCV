@@ -605,13 +605,10 @@ struct BThreadJson {
     instr_access_fault: bool,
     priv_mode: u8,
     mstatus: u32,
-    mtvec:   u32,
     mepc:    u32,
     mcause:  u32,
     mtval:   u32,
     mscratch:u32,
-    mip:     u32,
-    mie:     u32,
     satp:    u32,
 }
 impl From<&barrel::Thread> for BThreadJson {
@@ -626,9 +623,9 @@ impl From<&barrel::Thread> for BThreadJson {
             miss_pending: t.miss_pending,
             instr_access_fault: t.instr_access_fault,
             priv_mode: t.priv_mode,
-            mstatus: t.mstatus, mtvec: t.mtvec, mepc: t.mepc,
-            mcause: t.mcause, mtval: t.mtval, mscratch: t.mscratch,
-            mip: t.mip, mie: t.mie, satp: t.satp,
+            mstatus: t.mstatus, mepc: t.mepc,
+            mcause: t.mcause, mtval: t.mtval,
+            mscratch: t.mscratch, satp: t.satp,
         }
     }
 }
@@ -724,6 +721,9 @@ struct BSnapshot {
     halted: bool,
     sched_mode: u8,
     current_thread: u8,
+    mtvec: u32,
+    mie: u32,
+    mip: u32,
     threads: Vec<BThreadJson>,
     lt_if: BLtIfJson,
     if_di: BIfDiJson,
@@ -764,6 +764,11 @@ impl JsBarrelState {
 
     // ── IRQ + per-thread CSR access (B7) ──
     pub fn inject_irq(&mut self, slot: u8) { self.inner.inject_irq(slot); }
+    pub fn ext_imem(&self) -> Vec<u32> { self.inner.ext_imem.clone() }
+    pub fn ext_dmem(&self) -> Vec<u32> { self.inner.ext_dmem.clone() }
+    pub fn read_isram_word(&self, slot: u8, byte_off: u32) -> u32 {
+        self.inner.isram_read(slot, byte_off)
+    }
     pub fn read_csr(&self, slot: u8, addr: u16) -> u32 { self.inner.read_csr(slot, addr) }
     pub fn write_csr(&mut self, slot: u8, addr: u16, val: u32) { self.inner.write_csr(slot, addr, val); }
 
@@ -783,6 +788,9 @@ impl JsBarrelState {
             halted: self.inner.halted,
             sched_mode: self.inner.sched_mode as u8,
             current_thread: self.inner.current_thread,
+            mtvec: self.inner.mtvec,
+            mie: self.inner.mie,
+            mip: self.inner.mip,
             threads: self.inner.threads.iter().map(|t| t.into()).collect(),
             lt_if: (&self.inner.lt_if).into(),
             if_di: (&self.inner.if_di).into(),
