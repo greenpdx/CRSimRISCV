@@ -773,6 +773,15 @@
             </select>
           </div>
 
+          <div class="modal__section">Datapath</div>
+          <div class="modal__row">
+            <label class="modal__label">Multicycle</label>
+            <label class="modal__toggle">
+              <input type="checkbox" v-model="config.multicycle" />
+              <span>{{ config.multicycle ? 'Enabled' : 'Disabled' }}</span>
+            </label>
+          </div>
+
           <div class="modal__section">Extensions</div>
           <div class="modal__row">
             <label class="modal__label">Zicsr (CSR registers)</label>
