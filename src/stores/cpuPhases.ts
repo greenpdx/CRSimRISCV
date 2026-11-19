@@ -350,6 +350,7 @@ export const useCpuPhases = defineStore('cpuPhases', () => {
     }
 
     const phase = PHASE_ORDER[phaseIndex.value]
+    if (!phase) return
     currentPhase.value = phase
 
     // Clear previous phase visuals (but not computed ctx values)
@@ -378,6 +379,7 @@ export const useCpuPhases = defineStore('cpuPhases', () => {
 
     for (let i = 0; i < PHASE_ORDER.length; i++) {
       const phase = PHASE_ORDER[i]
+      if (!phase) continue
       phaseIndex.value = i
       currentPhase.value = phase
 
