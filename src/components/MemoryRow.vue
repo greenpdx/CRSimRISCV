@@ -4,6 +4,7 @@
     :class="{
       'mem-row--active': word.active,
       'mem-row--stripe': stripe,
+      'mem-row--rom': kind === 'rom',
     }"
   >
     <!-- Fixed address — never changes, not selectable -->
@@ -24,7 +25,11 @@
     </td>
 
     <!-- ASM (ROM) or decimal (RAM) — optional, slot-driven by parent -->
-    <td v-if="showAnnotation" class="mem-row__annotation">
+    <td
+      v-if="showAnnotation"
+      class="mem-row__annotation"
+      :title="kind === 'rom' ? word.asm : undefined"
+    >
       {{ word.asm ?? decValue }}
     </td>
 
@@ -102,6 +107,16 @@ const decValue = computed(() => (props.word.value | 0).toString(10))
 .mem-row--active {
   background-color: #d8f0ff !important;
   font-weight: 600;
+}
+
+/* ROM: fixed-width table — tighter padding, long assembly truncates with … */
+.mem-row--rom > td {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.mem-row--rom .mem-row__annotation {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Address — fixed, dimmed, non-selectable */

@@ -18,7 +18,7 @@
       <div class="ctrl__divider" />
 
       <!-- Control signals — absolutely positioned to match vertical control lines -->
-      <!-- x-offsets relative to decoder left (x=300): 110, 140, 173, 334, 420, 553, 693 -->
+      <!-- left: offsets are relative to the decoder's left edge (x=410 in CpuLayout); each must line up with its control line -->
       <div class="ctrl__grid">
         <div class="ctrl__group" style="left: 34px">
           <ControlSignalBadge label="RegWr" :value="signals.regWrite ? 1 : 0" />
@@ -97,7 +97,7 @@ const signals = computed<ControlSignals>(() =>
   border-radius: 3px;
   overflow: hidden;
   font-family: 'JetBrains Mono', 'Courier New', monospace;
-  min-width: 703px;
+  min-width: 685px;
   transition: box-shadow 0.15s ease;
 }
 .ctrl--active {
