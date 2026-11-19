@@ -205,7 +205,7 @@ function buildDemo(): Uint32Array {
   boot.push(enc_addi(5, 5, 1))
   boot.push(JAL_BACK4)
 
-  for (let i = 0; i < boot.length && i < rom.length; i++) rom[i] = boot[i]
+  for (let i = 0; i < boot.length && i < rom.length; i++) rom[i] = boot[i] ?? 0
   return new Uint32Array(rom)
 }
 const program = buildDemo()
@@ -338,14 +338,15 @@ const CSR_DISPLAY: Array<{ addr: number; name: string }> = [
 function csrValForSelected(addr: number): number {
   if (!snap.value) return 0
   const t = snap.value.threads[selectedThread.value]
+  if (!t) return 0
   switch (addr) {
     case 0x300: return t.mstatus
-    case 0x305: return t.mtvec
+    case 0x305: return snap.value.mtvec  // core-wide
     case 0x341: return t.mepc
     case 0x342: return t.mcause
     case 0x343: return t.mtval
-    case 0x344: return t.mip
-    case 0x304: return t.mie
+    case 0x344: return snap.value.mip    // core-wide
+    case 0x304: return snap.value.mie    // core-wide
     case 0x340: return t.mscratch
     case 0x180: return t.satp
   }
@@ -462,7 +463,7 @@ function stageBadge(r: { valid: boolean; thread: number }) {
           <div class="rbox">
             <div v-for="r in 32" :key="r-1" class="rrow">
               <span class="rname">x{{ r-1 }} {{ REG_NAMES[r-1] }}</span>
-              <span class="rval">{{ hex(t.regs[r-1]) }}</span>
+              <span class="rval">{{ hex(t.regs[r-1] ?? 0) }}</span>
             </div>
           </div>
 
