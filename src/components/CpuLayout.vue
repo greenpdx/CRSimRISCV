@@ -8,7 +8,7 @@
       <!-- regWrite → Register File -->
       <ControlLine
         net-id="ctrl_reg_write"
-        :points="[{ x: 334, y: 105 }, { x: 334, y: 353 }]"
+        :points="[{ x: 444, y: 105 }, { x: 444, y: 353 }]"
         :asserted="cpu.controlStates['ctrl_reg_write']?.asserted ?? false"
         :show-label="true"
         :phase="wbPhase"
@@ -17,7 +17,7 @@
       <!-- immSel → Imm Generator: only when aluSrc=imm -->
       <ControlLine
         net-id="ctrl_imm_sel"
-        :points="[{ x: 459, y: 105 }, { x: 459, y: 255 }]"
+        :points="[{ x: 569, y: 105 }, { x: 569, y: 255 }]"
         :asserted="busVal('ctrl_imm_sel') !== 5"
         :show-label="true"
         :phase="immChainPhase"
@@ -26,7 +26,7 @@
       <!-- ctrl_is_jalr → PC Sel MUX -->
       <ControlLine
         net-id="ctrl_is_jalr"
-        :points="[{ x: 530, y: 105 }, { x: 530, y: 161 }]"
+        :points="[{ x: 640, y: 105 }, { x: 640, y: 131 }]"
         :asserted="cpu.controlStates['ctrl_is_jalr']?.asserted ?? false"
         :show-label="true"
         phase="pcupdate"
@@ -35,7 +35,7 @@
       <!-- aluSrc → ALU Src MUX -->
       <ControlLine
         net-id="ctrl_alu_src"
-        :points="[{ x: 634, y: 105 }, { x: 634, y: 528 }]"
+        :points="[{ x: 744, y: 105 }, { x: 744, y: 528 }]"
         :asserted="cpu.controlStates['ctrl_alu_src']?.asserted ?? false"
         :show-label="true"
         phase="regread"
@@ -44,7 +44,7 @@
       <!-- ctrl_offset_sel → +4/Imm MUX -->
       <ControlLine
         net-id="ctrl_offset_sel"
-        :points="[{ x: 777, y: 105 }, { x: 777, y: 141 }]"
+        :points="[{ x: 887, y: 105 }, { x: 887, y: 111 }]"
         :asserted="cpu.controlStates['ctrl_offset_sel']?.asserted ?? false"
         :show-label="true"
         phase="pcupdate"
@@ -53,7 +53,7 @@
       <!-- aluOp → ALU Control -->
       <ControlLine
         net-id="ctrl_alu_op"
-        :points="[{ x: 853, y: 105 }, { x: 853, y: 403 }]"
+        :points="[{ x: 963, y: 105 }, { x: 963, y: 403 }]"
         :asserted="busVal('ctrl_alu_op') !== 0"
         :show-label="true"
         phase="execute"
@@ -62,7 +62,7 @@
       <!-- wbSel → WB Sel MUX -->
       <ControlLine
         net-id="ctrl_wb_sel"
-        :points="[{ x: 955, y: 105 }, { x: 955, y: 288 }]"
+        :points="[{ x: 1065, y: 105 }, { x: 1065, y: 288 }]"
         :asserted="busVal('ctrl_wb_sel') !== 0"
         :show-label="true"
         :phase="wbPhase"
@@ -70,15 +70,10 @@
 
       <!-- ── Data buses ── -->
 
-      <!-- PC addr → ROM: from PC left edge up-left to ROM addr port -->
+      <!-- PC addr → ROM: straight left from PC into the side of instruction memory -->
       <BusLine
         net-id="pc_out"
-        :points="[
-          { x: 357, y: 198 },
-          { x: 297, y: 198 },
-          { x: 297, y: 55 },
-          { x: 240, y: 55 },
-        ]"
+        :points="[{ x: 467, y: 168 }, { x: 288, y: 168 }]"
         :bits="32"
         :value="cpu.pc"
         :state="busActive('pc_out') ? 'active' : 'idle'"
@@ -89,10 +84,7 @@
       <!-- PC Sel (next_pc) → PC: straight from mux output to PC right side -->
       <BusLine
         net-id="next_pc"
-        :points="[
-          { x: 474, y: 198 },
-          { x: 447, y: 198 },
-        ]"
+        :points="[{ x: 584, y: 168 }, { x: 557, y: 168 }]"
         :bits="32"
         :value="cpu.nextPc"
         :state="busActive('next_pc') ? 'active' : 'idle'"
@@ -103,12 +95,7 @@
       <!-- PC → Adder: down from PC bottom, right along bus, up into adder bottom -->
       <BusLine
         net-id="pc_out_adder"
-        :points="[
-          { x: 317, y: 198 },
-          { x: 317, y: 244 },
-          { x: 663, y: 244 },
-          { x: 663, y: 199 },
-        ]"
+        :points="[{ x: 427, y: 168 }, { x: 427, y: 244 }, { x: 773, y: 244 }, { x: 773, y: 169 }]"
         :bits="32"
         :value="cpu.pc"
         :state="busActive('pc_out') ? 'active' : 'idle'"
@@ -119,10 +106,7 @@
        <!-- Adder output → MUX PC Sel input -->
       <BusLine
         net-id="pc_adder_result"
-        :points="[
-          { x: 644, y: 180 },
-          { x: 587, y: 180 },
-        ]"
+        :points="[{ x: 754, y: 150 }, { x: 697, y: 150 }]"
         :bits="32"
         :value="busVal('pc_adder_result')"
         :state="busActive('pc_adder_result') ? 'active' : 'idle'"
@@ -130,14 +114,10 @@
       phase="pcupdate"
         />
 
-      <!-- Instruction bus branch: down to ImmGen (only when aluSrc=imm) -->
+      <!-- Instruction bus branch: out of IF/PC box bottom, down to ImmGen (only when aluSrc=imm) -->
       <BusLine
         net-id="instr_immgen"
-        :points="[
-          { x: 280, y: 40 },
-          { x: 280, y: 287 },
-          { x: 412, y: 287 },
-        ]"
+        :points="[{ x: 380, y: 113 }, { x: 380, y: 287 }, { x: 522, y: 287 }]"
         :bits="32"
         :value="busVal('instr')"
         :state="busActive('instr') ? 'active' : 'idle'"
@@ -149,8 +129,8 @@
       <BusLine
         net-id="immediate"
         :points="[
-          { x: 522, y: 287 },
-          { x: 565, y: 287 },
+          { x: 632, y: 287 },
+          { x: 675, y: 287 },
         ]"
         :bits="32"
         :value="busVal('immediate')"
@@ -163,9 +143,9 @@
       <BusLine
         net-id="immediate_alusrc"
         :points="[
-          { x: 565, y: 287 },
-          { x: 565, y: 574 },
-          { x: 578, y: 574 },
+          { x: 675, y: 287 },
+          { x: 675, y: 574 },
+          { x: 688, y: 574 },
         ]"
         :bits="32"
         :value="busVal('immediate')"
@@ -177,12 +157,7 @@
       <!-- ImmGen → +4/Imm mux (imm input): right, up, short left into mux -->
       <BusLine
         net-id="immediate_pcoffset"
-        :points="[
-          { x: 565, y: 287 },
-          { x: 843, y: 287 },
-          { x: 843, y: 190 },
-          { x: 833, y: 190 },
-        ]"
+        :points="[{ x: 675, y: 287 }, { x: 953, y: 287 }, { x: 953, y: 160 }, { x: 943, y: 160 }]"
         :bits="32"
         :value="busVal('immediate')"
         :state="busActive('immediate') ? 'active' : 'idle'"
@@ -194,8 +169,8 @@
       <BusLine
         net-id="alu_control"
         :points="[
-          { x: 850, y: 473 },
-          { x: 850, y: 495 },
+          { x: 960, y: 473 },
+          { x: 960, y: 495 },
         ]"
         :bits="4"
         :value="busVal('alu_control')"
@@ -208,8 +183,8 @@
       <BusLine
         net-id="alu_b"
         :points="[
-          { x: 690, y: 565 },
-          { x: 776, y: 565 },
+          { x: 800, y: 565 },
+          { x: 886, y: 565 },
         ]"
         :bits="32"
         :value="busVal('alu_b')"
@@ -222,9 +197,9 @@
       <BusLine
         net-id="write_data"
         :points="[
-          { x: 899, y: 337 },
-          { x: 410, y: 337 },
-          { x: 410, y: 353 },
+          { x: 1009, y: 337 },
+          { x: 520, y: 337 },
+          { x: 520, y: 353 },
         ]"
         :bits="32"
         :value="busVal('write_data')"
@@ -237,8 +212,8 @@
       <BusLine
         net-id="alu_result_horiz"
         :points="[
-          { x: 936, y: 555 },
-          { x: 1060, y: 555 },
+          { x: 1046, y: 555 },
+          { x: 1170, y: 555 },
         ]"
         :bits="32"
         :value="busVal('alu_result')"
@@ -251,8 +226,8 @@
       <BusLine
         net-id="alu_result_vert_lower"
         :points="[
-          { x: 1060, y: 545 },
-          { x: 1060, y: 310 },
+          { x: 1170, y: 545 },
+          { x: 1170, y: 310 },
         ]"
         :bits="32"
         :value="busVal('alu_result')"
@@ -265,8 +240,8 @@
       <BusLine
         net-id="alu_result_to_wb"
         :points="[
-          { x: 1060, y: 310 },
-          { x: 1011, y: 310 },
+          { x: 1170, y: 310 },
+          { x: 1121, y: 310 },
         ]"
         :bits="32"
         :value="busVal('alu_result')"
@@ -278,10 +253,7 @@
       <!-- ALU result: vertical upper (junction to JALR tap) -->
       <BusLine
         net-id="alu_result_vert_upper"
-        :points="[
-          { x: 1060, y: 310 },
-          { x: 1060, y: 228 },
-        ]"
+        :points="[{ x: 1170, y: 310 }, { x: 1170, y: 198 }]"
         :bits="32"
         :value="busVal('alu_result')"
         :state="busActive('alu_result') ? 'active' : 'idle'"
@@ -292,10 +264,7 @@
       <!-- JALR target → PC Sel mux input 1 -->
       <BusLine
         net-id="jalr_target"
-        :points="[
-          { x: 1060, y: 228 },
-          { x: 586, y: 228 },
-        ]"
+        :points="[{ x: 1170, y: 198 }, { x: 696, y: 198 }]"
         :bits="32"
         :value="busVal('jalr_target')"
         :state="busActive('jalr_target') ? 'active' : 'idle'"
@@ -308,9 +277,9 @@
         net-id="mem_read_data"
         :points="[
           { x: 1280, y: 585 },
-          { x: 1100, y: 585 },
-          { x: 1100, y: 330 },
-          { x: 1011, y: 330 },
+          { x: 1210, y: 585 },
+          { x: 1210, y: 330 },
+          { x: 1121, y: 330 },
         ]"
         :bits="32"
         :value="busVal('mem_read_data')"
@@ -322,13 +291,7 @@
       <!-- PC Adder result → WB Sel input 2 (PC+4 link for JAL/JALR only) -->
       <BusLine
         net-id="pc_adder_result_wb"
-        :points="[
-          { x: 624, y: 180 },
-          { x: 624, y: 260 },
-          { x: 1035, y: 260 },
-          { x: 1035, y: 350 },
-          { x: 1011, y: 350 },
-        ]"
+        :points="[{ x: 734, y: 150 }, { x: 734, y: 260 }, { x: 1145, y: 260 }, { x: 1145, y: 350 }, { x: 1121, y: 350 }]"
         :bits="32"
         :value="busVal('pc_adder_result')"
         :state="busActive('pc_adder_result') ? 'active' : 'idle'"
@@ -341,9 +304,9 @@
         v-if="config.enableCsr"
         net-id="csr_read_data"
         :points="[
-          { x: 1150, y: 246 },
-          { x: 1150, y: 388 },
-          { x: 1011, y: 388 },
+          { x: 1180, y: 166 },
+          { x: 1180, y: 388 },
+          { x: 1121, y: 388 },
         ]"
         :bits="32"
         :value="busVal('csr_read_data')"
@@ -355,7 +318,7 @@
       <!-- ctrl_mem_read → LoadStore -->
       <ControlLine
         net-id="ctrl_mem_read"
-        :points="[{ x: 1003, y: 75 }, { x: 1270, y: 75 }, { x: 1270, y: 545 }, { x: 1280, y: 545 }]"
+        :points="[{ x: 1080, y: 20 }, { x: 1080, y: 8 }, { x: 1150, y: 8 }, { x: 1210, y: 8 }, { x: 1274, y: 8 }, { x: 1274, y: 545 }, { x: 1280, y: 545 }]"
         :asserted="cpu.controlStates['ctrl_mem_read']?.asserted ?? false"
         :show-label="true"
         :phase="memPhase"
@@ -364,7 +327,7 @@
       <!-- ctrl_mem_write → LoadStore -->
       <ControlLine
         net-id="ctrl_mem_write"
-        :points="[{ x: 1003, y: 82 }, { x: 1260, y: 82 }, { x: 1260, y: 555 }, { x: 1280, y: 555 }]"
+        :points="[{ x: 1088, y: 20 }, { x: 1088, y: 13 }, { x: 1110, y: 13 }, { x: 1140, y: 13 }, { x: 1269, y: 13 }, { x: 1269, y: 555 }, { x: 1280, y: 555 }]"
         :asserted="cpu.controlStates['ctrl_mem_write']?.asserted ?? false"
         :show-label="true"
         :phase="memPhase"
@@ -374,8 +337,8 @@
       <BusLine
         net-id="alu_result_ls"
         :points="[
-          { x: 1060, y: 310 },
-          { x: 1060, y: 555 },
+          { x: 1170, y: 310 },
+          { x: 1170, y: 555 },
           { x: 1280, y: 555 },
         ]"
         :bits="32"
@@ -389,8 +352,8 @@
       <BusLine
         net-id="rs2_data_ls"
         :points="[
-          { x: 540, y: 548 },
-          { x: 540, y: 620 },
+          { x: 650, y: 548 },
+          { x: 650, y: 620 },
           { x: 1280, y: 620 },
         ]"
         :bits="32"
@@ -468,8 +431,8 @@
       <BusLine
         net-id="rs1_data"
         :points="[
-          { x: 520, y: 515 },
-          { x: 776, y: 515 },
+          { x: 630, y: 515 },
+          { x: 886, y: 515 },
         ]"
         :bits="32"
         :value="busVal('rs1_data')"
@@ -482,8 +445,8 @@
       <BusLine
         net-id="rs2_data"
         :points="[
-          { x: 520, y: 548 },
-          { x: 578, y: 548 },
+          { x: 630, y: 548 },
+          { x: 688, y: 548 },
         ]"
         :bits="32"
         :value="busVal('rs2_data')"
@@ -495,12 +458,7 @@
       <!-- Instruction bus branch: down to ALU Control -->
       <BusLine
         net-id="instr_aluctrl"
-        :points="[
-          { x: 280, y: 287 },
-          { x: 280, y: 313 },
-          { x: 820, y: 313 },
-          { x: 820, y: 403 },
-        ]"
+        :points="[{ x: 380, y: 287 }, { x: 380, y: 313 }, { x: 930, y: 313 }, { x: 930, y: 403 }]"
         :bits="32"
         :value="busVal('instr')"
         :state="busActive('instr') ? 'active' : 'idle'"
@@ -508,13 +466,22 @@
       phase="regread"
         />
 
-      <!-- Instruction bus: ROM → Decoder -->
+      <!-- Instruction bus: ROM → IF/PC box -->
+      <BusLine
+        net-id="instr_rom_ifpc"
+        :points="[{ x: 288, y: 40 }, { x: 296, y: 40 }]"
+        :bits="32"
+        :value="busVal('instr')"
+        :state="busActive('instr') ? 'active' : 'idle'"
+        :show-label="false"
+      phase="fetch"
+        />
+
+
+      <!-- Instruction bus: IF/PC box → Decoder -->
       <BusLine
         net-id="instr"
-        :points="[
-          { x: 250, y: 40 },
-          { x: 300, y: 40 },
-        ]"
+        :points="[{ x: 391, y: 40 }, { x: 410, y: 40 }]"
         :bits="32"
         :value="busVal('instr')"
         :state="busActive('instr') ? 'active' : 'idle'"
@@ -525,10 +492,7 @@
        <!-- +4/Imm MUX output → Adder right input -->
       <BusLine
         net-id="pc_offset"
-        :points="[
-          { x: 722, y: 180 },
-          { x: 684, y: 180 },
-        ]"
+        :points="[{ x: 832, y: 150 }, { x: 794, y: 150 }]"
         :bits="32"
         :value="busVal('pc_offset')"
         :state="busActive('pc_offset') ? 'active' : 'idle'"
@@ -546,9 +510,19 @@
       />
     </div>
 
+    <!-- ── IF / PC box (between ROM and Decoder) ── -->
+    <div class="cpu-block" :style="px(296, 20)">
+      <IfPcBox
+        :pc="cpu.pc"
+        :instr="fetchWord?.value"
+        :asm="currentAsm"
+        :active="busActive('pc_out') || busActive('instr')"
+      />
+    </div>
+
     <!-- ── PC chain (horizontal row: PC → MUX PC Sel → Adder → MUX +4/Imm) ── -->
 
-    <div class="cpu-block" :style="px(357, 178)">
+    <div class="cpu-block" :style="px(467, 148)">
       <PcRegister
         :pc="cpu.pc"
         :next-pc="cpu.nextPc"
@@ -556,7 +530,7 @@
       />
     </div>
 
-    <div class="cpu-block" :style="px(474, 161)">
+    <div class="cpu-block" :style="px(584, 131)">
       <MuxTrapezoid
         label="PC Sel"
         output-label="New PC"
@@ -566,7 +540,7 @@
       />
     </div>
 
-    <div class="cpu-block" :style="px(643, 159)">
+    <div class="cpu-block" :style="px(753, 129)">
       <PcAdder
         :pc="cpu.pc"
         :offset="busVal('pc_offset')"
@@ -574,7 +548,7 @@
       />
     </div>
 
-    <div class="cpu-block" :style="px(721, 141)">
+    <div class="cpu-block" :style="px(831, 111)">
       <MuxTrapezoid
         label="+4/Imm"
         output-label="offset"
@@ -585,7 +559,7 @@
     </div>
 
     <!-- ── Decoder / Control (top) ── -->
-    <div class="cpu-block" :style="px(300, 20)">
+    <div class="cpu-block" :style="px(410, 20)">
       <DecoderControl
         :opcode="opcode"
         :active="busActive('instr')"
@@ -596,7 +570,7 @@
     </div>
 
     <!-- ── Immediate Generator ── -->
-    <div class="cpu-block" :style="px(414, 255)">
+    <div class="cpu-block" :style="px(524, 255)">
       <ImmGenerator
         :instruction="cpu.lastInstr"
         :imm-sel="immSel"
@@ -605,7 +579,7 @@
     </div>
 
     <!-- ── ALU Control ── -->
-    <div class="cpu-block" :style="px(803, 403)">
+    <div class="cpu-block" :style="px(913, 403)">
       <AluControlUnit
         :alu-op="aluOp"
         :funct3="funct3"
@@ -616,19 +590,19 @@
     </div>
 
     <!-- ── Register File ── -->
-    <div class="cpu-block" :style="px(258, 353)">
+    <div class="cpu-block" :style="px(368, 353)">
       <RegisterFile
         :registers="cpu.registers"
       />
     </div>
 
     <!-- ── CSR Registers (only when Zicsr enabled) ── -->
-    <div v-if="config.enableCsr" class="cpu-block" :style="px(1073, 100)">
+    <div v-if="config.enableCsr" class="cpu-block" :style="px(1103, 20)">
       <CsrUnit />
     </div>
 
     <!-- ── MUX ALU Src B ── -->
-    <div class="cpu-block" :style="px(578, 528)">
+    <div class="cpu-block" :style="px(688, 528)">
       <MuxTrapezoid
         label="ALU Src"
         output-label="ALU B"
@@ -640,7 +614,7 @@
     </div>
 
     <!-- ── ALU ── -->
-    <div class="cpu-block" :style="px(776, 485)">
+    <div class="cpu-block" :style="px(886, 485)">
       <AluUnit
         :alu-control="busVal('alu_control')"
         :operand-a="busVal('rs1_data')"
@@ -650,7 +624,7 @@
     </div>
 
     <!-- ── MUX Write-Back ── -->
-    <div class="cpu-block" :style="px(899, 288)">
+    <div class="cpu-block" :style="px(1009, 288)">
       <MuxTrapezoid
         label="WB Sel"
         output-label="write data"
@@ -841,6 +815,7 @@ import RomBlock from './RomBlock.vue'
 import RamBlock from './RamBlock.vue'
 import RegisterFile from './RegisterFile.vue'
 import PcRegister from './PcRegister.vue'
+import IfPcBox from './IfPcBox.vue'
 import PcAdder from './PcAdder.vue'
 import AluUnit from './AluUnit.vue'
 import AluControlUnit from './AluControlUnit.vue'
@@ -1111,10 +1086,8 @@ const funct3   = computed(() => (cpu.lastInstr >> 12) & 0x07)
 const funct7b30 = computed(() => ((cpu.lastInstr >> 30) & 0x1) as 0 | 1)
 const isLui    = computed(() => opcode.value === 0b0110111)
 
-const currentAsm = computed(() => {
-  const word = cpu.romWords.find(w => w.address === cpu.pc)
-  return word?.asm ?? ''
-})
+const fetchWord = computed(() => cpu.romWords.find(w => w.address === cpu.pc))
+const currentAsm = computed(() => fetchWord.value?.asm ?? '')
 
 // ── Control signal values ────────────────────────────────────────────────────
 

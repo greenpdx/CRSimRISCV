@@ -15,6 +15,13 @@
     <!-- Single table with sticky header inside scrollable container -->
     <div class="rom__scroll" ref="scrollEl">
       <table class="rom__table">
+        <!-- Fixed column widths; Assembly takes the rest and truncates with … -->
+        <colgroup>
+          <col style="width: 68px" />
+          <col style="width: 62px" />
+          <col />
+          <col style="width: 14px" />
+        </colgroup>
         <thead>
           <tr class="rom__col-headers">
             <th class="rom__th">Address</th>
@@ -89,7 +96,9 @@ watch(activeWord, async () => {
   border-radius: 3px;
   overflow: hidden;
   font-family: 'JetBrains Mono', 'Courier New', monospace;
-  width: max-content;
+  /* Fixed width: CpuLayout wiring assumes the right edge is at x=288 */
+  width: 288px;
+  box-sizing: border-box;
 }
 
 /* Header */
@@ -139,6 +148,7 @@ watch(activeWord, async () => {
 .rom__table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 .rom__col-headers {
   background: #3ab8cc;
@@ -147,7 +157,7 @@ watch(activeWord, async () => {
   position: sticky;
   top: 0;
   background: #3ab8cc;
-  padding: 2px 6px;
+  padding: 2px 4px;
   font-size: 9px;
   font-weight: 500;
   letter-spacing: 1px;
@@ -157,7 +167,6 @@ watch(activeWord, async () => {
   text-align: left;
   z-index: 1;
 }
-.rom__th--dot   { width: 16px; }
 
 /* Scrollable body */
 .rom__scroll {
