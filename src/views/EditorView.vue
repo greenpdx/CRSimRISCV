@@ -413,8 +413,9 @@ function onDrop(event: DragEvent) {
   const text = event.dataTransfer?.getData('text/plain')
   if (!text) return
   const group = instrGroups.find(g => g.example === text)
-  if (group) {
-    openWizard(group, group.variants[0].mnemonic)
+  const first = group?.variants[0]
+  if (group && first) {
+    openWizard(group, first.mnemonic)
   } else {
     asmLines.value.push({ label: '', instr: text.toUpperCase() })
   }
@@ -507,6 +508,7 @@ function focusInstr(i: number) {
 
 function onLabelBackspace(event: KeyboardEvent, i: number) {
   const line = asmLines.value[i]
+  if (!line) return
   if (line.label === '' && line.instr === '' && asmLines.value.length > 1) {
     event.preventDefault()
     removeAsmLine(i)
@@ -515,6 +517,7 @@ function onLabelBackspace(event: KeyboardEvent, i: number) {
 
 function onInstrBackspace(event: KeyboardEvent, i: number) {
   const line = asmLines.value[i]
+  if (!line) return
   if (line.instr === '' && line.label === '' && asmLines.value.length > 1) {
     event.preventDefault()
     removeAsmLine(i)

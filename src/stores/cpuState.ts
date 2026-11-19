@@ -138,8 +138,8 @@ export const useCpuState = defineStore('cpu', () => {
   const romWords = ref<MemoryWord[]>(
     Array.from({ length: ROM_WORDS }, (_, i) => ({
       address: 0x00000000 + i * 4,
-      value:   i < DEFAULT_PROGRAM.length ? DEFAULT_PROGRAM[i].value : 0x00000013,
-      asm:     i < DEFAULT_PROGRAM.length ? DEFAULT_PROGRAM[i].asm   : 'nop',
+      value:   DEFAULT_PROGRAM[i]?.value ?? 0x00000013,
+      asm:     DEFAULT_PROGRAM[i]?.asm ?? 'nop',
       active:  false,
     }))
   )
@@ -437,13 +437,13 @@ export const useCpuState = defineStore('cpu', () => {
   }
 
   function clearBusStates() {
-    for (const key in busStates.value)     busStates.value[key].state    = 'idle'
-    for (const key in controlStates.value) controlStates.value[key].asserted = false
+    for (const s of Object.values(busStates.value))     s.state    = 'idle'
+    for (const s of Object.values(controlStates.value)) s.asserted = false
   }
 
   /** Clear only bus visual states (idle), preserve control signal values */
   function clearBusVisuals() {
-    for (const key in busStates.value)     busStates.value[key].state = 'idle'
+    for (const s of Object.values(busStates.value))     s.state = 'idle'
   }
 
   function setBus(netId: string, value: number) {
@@ -776,7 +776,7 @@ export const useCpuState = defineStore('cpu', () => {
    */
   function loadProgram(words: number[], baseAddress = 0x00000000) {
     const padded = Array.from({ length: ROM_WORDS }, (_, i) =>
-      i < words.length ? words[i] : 0x00000013
+      words[i] ?? 0x00000013
     )
     romWords.value = padded.map((value, i) => ({
       address: baseAddress + i * 4,
@@ -795,9 +795,7 @@ export const useCpuState = defineStore('cpu', () => {
     baseAddress = 0x00000000,
   ) {
     const padded = Array.from({ length: ROM_WORDS }, (_, i) =>
-      i < entries.length
-        ? entries[i]
-        : { value: 0x00000013, asm: 'nop' }
+      entries[i] ?? { value: 0x00000013, asm: 'nop' }
     )
     romWords.value = padded.map((e, i) => ({
       address: baseAddress + i * 4,

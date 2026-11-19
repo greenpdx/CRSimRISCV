@@ -104,6 +104,7 @@ const showValue = computed(() =>
 const pathD = computed(() => {
   if (props.points.length < 2) return ''
   const [first, ...rest] = props.points
+  if (!first) return ''
   return `M ${first.x},${first.y} ` +
     rest.map(p => `L ${p.x},${p.y}`).join(' ')
 })
@@ -131,7 +132,7 @@ const midpoint = computed(() => {
   const pts = props.points
   if (pts.length < 2) return { x: 0, y: 0 }
   const mid = Math.floor(pts.length / 2)
-  return pts[mid]
+  return pts[mid] ?? { x: 0, y: 0 }
 })
 
 /** Formatted value for label */

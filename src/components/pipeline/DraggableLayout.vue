@@ -42,14 +42,15 @@
         <circle
           v-for="(_, si) in bus.points.slice(0, -1)"
           :key="'mid' + si"
-          :cx="(bus.points[si].x + bus.points[si+1].x) / 2"
-          :cy="(bus.points[si].y + bus.points[si+1].y) / 2"
+          :cx="(bus.points[si]!.x + bus.points[si+1]!.x) / 2"
+          :cy="(bus.points[si]!.y + bus.points[si+1]!.y) / 2"
           r="4" fill="#4a8" stroke="#fff" stroke-width="1" opacity="0.6"
           class="drag-layout__handle"
           @mousedown.prevent="addBusCorner(bus.id, si, $event)"
         />
         <!-- Bus label -->
         <text
+          v-if="bus.points[0]"
           :x="bus.points[0].x" :y="bus.points[0].y - 8"
           font-size="8" :fill="bus.color || '#cc8800'" font-family="JetBrains Mono, monospace"
         >{{ bus.id }}</text>
@@ -267,8 +268,8 @@ function onMouseMove(e: MouseEvent) {
         if (Math.abs(nx - next.x) < SNAP_THRESHOLD) nx = next.x
       }
 
-      bus.points[pi].x = nx
-      bus.points[pi].y = ny
+      const pt = bus.points[pi]
+      if (pt) { pt.x = nx; pt.y = ny }
     }
   } else if (dragTarget.value.type === 'framemove') {
     frameX.value = e.clientX - dragTarget.value.offsetX
