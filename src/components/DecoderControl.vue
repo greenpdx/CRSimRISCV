@@ -83,7 +83,7 @@ const signals = computed<ControlSignals>(() =>
   entry.value?.signals ?? {
     regWrite: false, aluSrc: false, aluOp: 0,
     memRead:  false, memWrite: false,
-    wbSel: 0, pcSel: 0, immSel: 5,
+    wbSel: 0, pcSel: 0, immSel: 5, csrOp: 0,
   }
 )
 </script>

@@ -36,7 +36,7 @@ interface TrapInfo {
 // JsCpuState is the wasm class — typed loosely to avoid import wrangling.
 type Cpu = {
   pc: number
-  cycle: number
+  cycle: bigint
   priv_mode: string
   in_trap: boolean
   reset(): void

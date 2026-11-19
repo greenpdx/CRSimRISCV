@@ -176,10 +176,11 @@ export const IMM_FORMAT_LABEL: Record<ImmFormat, string> = {
   none: 'R-type  no immediate',
 }
 
-export const WB_SEL_LABEL: Record<0|1|2, string> = {
+export const WB_SEL_LABEL: Record<0|1|2|3, string> = {
   0: 'ALU result',
   1: 'Mem read',
   2: 'PC + 4',
+  3: 'CSR',
 }
 
 export const ALU_OP_LABEL: Record<0|1|2, string> = {
