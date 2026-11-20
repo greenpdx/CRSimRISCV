@@ -1,5 +1,6 @@
 //! Phase B7 — IRQ injection + per-thread CSRs.
 
+use cpu_sim::sim::system::{addr, PrivMode};
 use cpu_sim::sim::barrel::{BarrelState, N_THREADS};
 
 const NOP: u32 = 0x00000013;
@@ -85,7 +86,9 @@ fn b7_csr_addresses_recognized() {
     ];
     for (addr, val) in per_thread {
         cpu.write_csr(2, addr, val);
-        assert_eq!(cpu.read_csr(2, addr), val, "per-thread csr 0x{:x}", addr);
+        // mepc bit 0 is always 0 (shared system unit, as the RISC-V spec)
+        let want = if addr == 0x341 { val & !1 } else { val };
+        assert_eq!(cpu.read_csr(2, addr), want, "per-thread csr 0x{:x}", addr);
     }
     // Global CSRs round-trip.
     let global = [
@@ -111,7 +114,7 @@ fn b7_illegal_instr_traps_to_mtvec() {
     // Thread 0 executes an unknown opcode. It should trap to the
     // global mtvec. mepc[T0] = the faulting PC. mcause[T0] = 2.
     let mut cpu = BarrelState::new();
-    cpu.mtvec = 0x100;  // global trap vector
+    cpu.write_csr(0, addr::MTVEC, 0x100);  // global trap vector
     let mut rom = vec![NOP; 128];
     rom[0] = 0x0000_000B;  // unknown opcode (not custom-0 with valid funct7)
     // Wait, 0x0b IS the custom-0 opcode. Use something else.
@@ -130,22 +133,22 @@ fn b7_illegal_instr_traps_to_mtvec() {
     cpu.prewarm_icache();
 
     for _ in 0..100 { cpu.step(); }
-    assert_eq!(cpu.threads[0].mcause, 2, "mcause = illegal instr");
-    assert_eq!(cpu.threads[0].mepc, 0, "mepc = faulting PC");
+    assert_eq!(cpu.read_csr(0, addr::MCAUSE), 2, "mcause = illegal instr");
+    assert_eq!(cpu.read_csr(0, addr::MEPC), 0, "mepc = faulting PC");
     assert_eq!(cpu.read_thread_register(0, 6), 0x42, "handler ran");
 }
 
 #[test]
 fn b7_ecall_traps_with_correct_cause() {
     let mut cpu = BarrelState::new();
-    cpu.mtvec = 0x100;
+    cpu.write_csr(0, addr::MTVEC, 0x100);
     let mut rom = vec![NOP; 128];
     rom[0] = 0x00000073;  // ECALL
     rom[64] = addi(6, 0, 0x55);
     rom[65] = jal_spin();
     cpu.threads[0].active = true;
     cpu.threads[0].pc = 0;
-    cpu.threads[0].priv_mode = 3; // M-mode
+    cpu.threads[0].sys.priv_mode = PrivMode::from_bits(3); // M-mode
     for s in 1..N_THREADS {
         cpu.threads[s].active = true;
         cpu.threads[s].pc = 0x80;
@@ -155,7 +158,7 @@ fn b7_ecall_traps_with_correct_cause() {
     cpu.prewarm_icache();
 
     for _ in 0..100 { cpu.step(); }
-    assert_eq!(cpu.threads[0].mcause, 11, "mcause = ecall from M");
+    assert_eq!(cpu.read_csr(0, addr::MCAUSE), 11, "mcause = ecall from M");
     assert_eq!(cpu.read_thread_register(0, 6), 0x55, "handler ran");
 }
 
@@ -163,7 +166,7 @@ fn b7_ecall_traps_with_correct_cause() {
 fn b7_mret_restores_pc() {
     // Set up: thread 0 traps via ECALL, handler does MRET.
     let mut cpu = BarrelState::new();
-    cpu.mtvec = 0x100;
+    cpu.write_csr(0, addr::MTVEC, 0x100);
     let mut rom = vec![NOP; 128];
     // 0x00: ecall        → traps to 0x100
     // 0x04: addi x7,x0,99 → this is where mret should return to
@@ -189,7 +192,7 @@ fn b7_mret_restores_pc() {
     // To make MRET return past ECALL, the handler should advance mepc.
     // For this test, just verify that the mret instruction executed
     // (mcause was set and x7 should be 0 because it returns to ECALL).
-    assert_eq!(cpu.threads[0].mcause, 11, "ecall trapped");
+    assert_eq!(cpu.read_csr(0, addr::MCAUSE), 11, "ecall trapped");
     // T0 is stuck in ecall→trap→mret→ecall loop; x7 never gets set.
     assert_eq!(cpu.read_thread_register(0, 7), 0, "mret loops back to ecall");
 }
@@ -245,7 +248,7 @@ fn b7_csrrw_reads_and_writes_mcause() {
     cpu.load_program(&rom);
     cpu.prewarm_icache();
     for _ in 0..100 { cpu.step(); }
-    assert_eq!(cpu.threads[0].mcause, 42, "mcause written by csrrw");
+    assert_eq!(cpu.read_csr(0, addr::MCAUSE), 42, "mcause written by csrrw");
     assert_eq!(cpu.read_thread_register(0, 7), 0, "old mcause was 0");
     assert_eq!(cpu.read_thread_register(0, 8), 42, "csrrs reads back 42");
 }
@@ -268,7 +271,7 @@ fn b7_csrrw_global_mtvec() {
     cpu.load_program(&rom);
     cpu.prewarm_icache();
     for _ in 0..60 { cpu.step(); }
-    assert_eq!(cpu.mtvec, 0x80, "global mtvec set by csrrw");
+    assert_eq!(cpu.read_csr(0, addr::MTVEC), 0x80, "global mtvec set by csrrw");
 }
 
 #[test]
@@ -277,7 +280,7 @@ fn b7_thread_mmio_t0_reads_t3_regs() {
     let mut cpu = BarrelState::new();
     cpu.threads[0].active = true;
     cpu.threads[0].pc = 0;
-    cpu.threads[0].priv_mode = 3;
+    cpu.threads[0].sys.priv_mode = PrivMode::from_bits(3);
     // Pre-set T3's x5 to 0xABCD.
     cpu.threads[3].regs[5] = 0xABCD;
     for s in 1..N_THREADS {
@@ -303,7 +306,7 @@ fn b7_thread_mmio_t0_reads_t3_regs() {
 fn b7_thread_mmio_denied_for_non_t0() {
     // T3 tries to read thread MMIO → access fault.
     let mut cpu = BarrelState::new();
-    cpu.mtvec = 0x100;
+    cpu.write_csr(0, addr::MTVEC, 0x100);
     for s in 0..N_THREADS {
         cpu.threads[s].active = true;
         cpu.threads[s].pc = if s == 3 { 0 } else { 0x40 };
@@ -320,5 +323,5 @@ fn b7_thread_mmio_denied_for_non_t0() {
     cpu.prewarm_icache();
     for _ in 0..100 { cpu.step(); }
     // T3 should have trapped (load access fault, cause 5).
-    assert_eq!(cpu.threads[3].mcause, 5, "T3 access fault on thread MMIO");
+    assert_eq!(cpu.read_csr(3, addr::MCAUSE), 5, "T3 access fault on thread MMIO");
 }

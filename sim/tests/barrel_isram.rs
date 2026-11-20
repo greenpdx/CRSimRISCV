@@ -11,6 +11,7 @@
 //! - Slots 0/1/2 fetching from a *foreign* slot's I-SRAM range
 //!   also raise the same fault.
 
+use cpu_sim::sim::system::{addr, PrivMode};
 use cpu_sim::sim::barrel::{
     BarrelState, ISRAM_BASE, ISRAM_BYTES_PER_SLOT, ISRAM_N_SLOTS, N_THREADS,
 };
@@ -98,7 +99,7 @@ fn barrel_isram_slot3_fetching_from_isram_faults() {
     );
     // With sync trap delivery, the thread redirects to mtvec (not
     // deactivated). mcause should be 1 (instr access fault).
-    assert_eq!(cpu.threads[3].mcause, 1, "mcause = instr access fault");
+    assert_eq!(cpu.read_csr(3, addr::MCAUSE), 1, "mcause = instr access fault");
     // Other threads must still be running.
     for s in 0..N_THREADS {
         if s == 3 { continue; }
@@ -119,7 +120,7 @@ fn barrel_isram_foreign_slot_access_faults() {
     cpu.threads[0].pc = isram_pc(1); // slot 0 → slot 1's I-SRAM range
     for _ in 0..60 { cpu.step(); }
     assert!(cpu.threads[0].instr_access_fault, "slot 0 fault on foreign I-SRAM");
-    assert_eq!(cpu.threads[0].mcause, 1, "mcause = instr access fault");
+    assert_eq!(cpu.read_csr(0, addr::MCAUSE), 1, "mcause = instr access fault");
 }
 
 #[test]

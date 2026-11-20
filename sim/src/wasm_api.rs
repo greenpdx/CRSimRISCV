@@ -622,10 +622,10 @@ impl From<&barrel::Thread> for BThreadJson {
             age: t.age,
             miss_pending: t.miss_pending,
             instr_access_fault: t.instr_access_fault,
-            priv_mode: t.priv_mode,
-            mstatus: t.mstatus, mepc: t.mepc,
-            mcause: t.mcause, mtval: t.mtval,
-            mscratch: t.mscratch, satp: t.satp,
+            priv_mode: t.priv_bits(),
+            mstatus: t.sys.csrs.read(0x300), mepc: t.sys.csrs.read(0x341),
+            mcause: t.sys.csrs.read(0x342), mtval: t.sys.csrs.read(0x343),
+            mscratch: t.sys.csrs.read(0x340), satp: t.sys.csrs.read(0x180),
         }
     }
 }
@@ -764,6 +764,17 @@ impl JsBarrelState {
 
     // ── IRQ + per-thread CSR access (B7) ──
     pub fn inject_irq(&mut self, slot: u8) { self.inner.inject_irq(slot); }
+    /// External interrupt line (mei / msi / mti / sei / ssi / sti) into
+    /// every thread's system unit; a thread traps when it allows it.
+    pub fn raise_irq(&mut self, kind: &str) {
+        let mask = match kind {
+            "mei" => IRQ_MEI, "msi" => IRQ_MSI, "mti" => IRQ_MTI,
+            "sei" => IRQ_SEI, "ssi" => IRQ_SSI, "sti" => IRQ_STI,
+            _ => 0,
+        };
+        if mask != 0 { self.inner.raise_irq(mask); }
+    }
+    pub fn clear_irq(&mut self) { self.inner.clear_irq(); }
     pub fn ext_imem(&self) -> Vec<u32> { self.inner.ext_imem.clone() }
     pub fn ext_dmem(&self) -> Vec<u32> { self.inner.ext_dmem.clone() }
     pub fn read_isram_word(&self, slot: u8, byte_off: u32) -> u32 {
@@ -788,9 +799,9 @@ impl JsBarrelState {
             halted: self.inner.halted,
             sched_mode: self.inner.sched_mode as u8,
             current_thread: self.inner.current_thread,
-            mtvec: self.inner.mtvec,
-            mie: self.inner.mie,
-            mip: self.inner.mip,
+            mtvec: self.inner.read_csr(0, 0x305),
+            mie: self.inner.read_csr(0, 0x304),
+            mip: self.inner.read_csr(0, 0x344),
             threads: self.inner.threads.iter().map(|t| t.into()).collect(),
             lt_if: (&self.inner.lt_if).into(),
             if_di: (&self.inner.if_di).into(),

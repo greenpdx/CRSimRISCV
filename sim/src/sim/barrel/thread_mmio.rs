@@ -17,6 +17,7 @@
 //!
 //! Total: 8 slots × 0x100 = 0x800 bytes.
 
+use crate::sim::system::{addr, PrivMode};
 use super::state::{BarrelState, N_THREADS};
 
 pub const TMMIO_BASE: u32 = 0x4000_4000;
@@ -43,13 +44,13 @@ pub fn read(state: &BarrelState, addr: u32) -> u32 {
         if reg < 32 { t.regs[reg] } else { 0 }
     } else {
         match field {
-            0x80 => t.mstatus,
-            0x84 => t.mepc,
-            0x88 => t.mcause,
-            0x8C => t.mtval,
-            0x90 => t.mscratch,
-            0x94 => t.satp,
-            0x98 => t.priv_mode as u32,
+            0x80 => t.sys.csrs.read(addr::MSTATUS),
+            0x84 => t.sys.csrs.read(addr::MEPC),
+            0x88 => t.sys.csrs.read(addr::MCAUSE),
+            0x8C => t.sys.csrs.read(addr::MTVAL),
+            0x90 => t.sys.csrs.read(addr::MSCRATCH),
+            0x94 => t.sys.csrs.read(addr::SATP),
+            0x98 => t.priv_bits() as u32,
             0x9C => t.pc,
             _ => 0,
         }
@@ -67,13 +68,13 @@ pub fn write(state: &mut BarrelState, addr: u32, val: u32) {
         if reg > 0 && reg < 32 { t.regs[reg] = val; }
     } else {
         match field {
-            0x80 => t.mstatus  = val,
-            0x84 => t.mepc     = val,
-            0x88 => t.mcause   = val,
-            0x8C => t.mtval    = val,
-            0x90 => t.mscratch = val,
-            0x94 => t.satp     = val,
-            0x98 => t.priv_mode = (val & 0x3) as u8,
+            0x80 => t.sys.csrs.write(addr::MSTATUS, val),
+            0x84 => t.sys.csrs.write(addr::MEPC, val),
+            0x88 => t.sys.csrs.write(addr::MCAUSE, val),
+            0x8C => t.sys.csrs.write(addr::MTVAL, val),
+            0x90 => t.sys.csrs.write(addr::MSCRATCH, val),
+            0x94 => t.sys.csrs.write(addr::SATP, val),
+            0x98 => t.sys.priv_mode = PrivMode::from_bits((val & 0x3) as u8),
             0x9C => t.pc       = val,
             _ => {}
         }

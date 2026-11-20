@@ -21,16 +21,8 @@ fn mawb_from(ex_ma: &ExMa, mem_data: u32) -> MaWb {
 
 fn execute_csr(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
     let slot = ex_ma.thread;
-    let old = state.read_csr(slot, ex_ma.csr_addr);
-    let new_val = match ex_ma.csr_op {
-        1 => Some(ex_ma.csr_write_val),
-        2 => if ex_ma.csr_src_is_zero { None } else { Some(old | ex_ma.csr_write_val) },
-        3 => if ex_ma.csr_src_is_zero { None } else { Some(old & !ex_ma.csr_write_val) },
-        _ => None,
-    };
-    if let Some(v) = new_val {
-        state.write_csr(slot, ex_ma.csr_addr, v);
-    }
+    // Shared Zicsr unit (the shared CSRs are mirrored to every thread)
+    let old = state.csr_rmw(slot, ex_ma.csr_addr, ex_ma.csr_op, ex_ma.csr_src_is_zero, ex_ma.csr_write_val);
     let mut r = mawb_from(ex_ma, 0);
     r.alu_result = old; // old CSR value → WB writes to rd
     r
@@ -44,7 +36,7 @@ fn execute_load(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
     // MMIO: thread state, IRQ controller, DMA
     if thread_mmio::is_tmmio(addr) {
         let t = &state.threads[thread as usize];
-        if !thread_mmio::check_access(thread, t.priv_mode) {
+        if !thread_mmio::check_access(thread, t.priv_bits()) {
             state.take_sync_trap(thread, 5, ex_ma.trap_pc, addr);
             return MaWb::bubble();
         }
@@ -80,7 +72,7 @@ fn execute_store(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
 
     // Thread MMIO
     if thread_mmio::is_tmmio(addr) {
-        let priv_m = state.threads[thread as usize].priv_mode;
+        let priv_m = state.threads[thread as usize].priv_bits();
         if !thread_mmio::check_access(thread, priv_m) {
             state.take_sync_trap(thread, 7, ex_ma.trap_pc, addr);
             return MaWb::bubble();
@@ -137,7 +129,11 @@ fn execute_custom0(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
                 if s == issuer { continue; }
                 let t = &state.threads[s];
                 if !t.active && t.waiting < 0 {
-                    let mut child = Thread::idle();
+                    // fresh hart (mhartid = s) with the shared CSRs
+                    let mut child = Thread::idle_hart(s as u8);
+                    for a in super::state::SHARED_CSRS {
+                        child.sys.csrs.write(a, state.threads[issuer].sys.csrs.read(a));
+                    }
                     child.pc = start_pc;
                     child.active = true;
                     child.priority = 1;
@@ -157,7 +153,7 @@ fn execute_custom0(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
             // JOIN is a no-op (returns immediately, 1 cycle).
             let target = ex_ma.rs1_data as usize;
             if target < N_THREADS {
-                let target_state = state.threads[target];
+                let target_state = &state.threads[target];
                 let already_done = !target_state.active && target_state.waiting < 0;
                 if !already_done {
                     state.threads[issuer].waiting = target as i8;

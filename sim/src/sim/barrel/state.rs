@@ -6,6 +6,20 @@ use super::cache::Cache;
 use super::dma::DmaController;
 use super::irq_controller::IrqController;
 use super::store_buffer::StoreBuffer;
+use crate::sim::system::{addr, csr_exec, PrivMode, SysUnit};
+
+/// CSRs the barrel shares across all threads (one value, mirrored into
+/// every thread's system unit on write): the trap vector, interrupt
+/// enable / pending and the delegation registers.
+pub const SHARED_CSRS: [u16; 5] = [addr::MTVEC, addr::MIE, addr::MIP, addr::MEDELEG, addr::MIDELEG];
+
+/// A thread's system unit at reset: M-mode, misa = RV32I, mhartid = slot.
+pub fn hart_sys(slot: u8) -> SysUnit {
+    let mut s = SysUnit::new();
+    s.csrs.set_counter(addr::MISA, 0x4000_0100);
+    s.csrs.set_counter(addr::MHARTID, slot as u32);
+    s
+}
 
 pub const N_THREADS: usize = 8;
 pub const EXT_IMEM_WORDS: usize = 1024;
@@ -23,7 +37,7 @@ pub const ISRAM_N_SLOTS: usize = 3;
 pub const ISRAM_TOP: u32 = ISRAM_BASE + (ISRAM_N_SLOTS as u32) * ISRAM_BYTES_PER_SLOT;
 
 /// Single thread context. Each barrel slot owns one of these.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Thread {
     // ── execution state ──
     pub pc: u32,
@@ -51,19 +65,12 @@ pub struct Thread {
     /// also deactivated by the same fault.
     pub instr_access_fault: bool,
 
-    // ── Per-thread privileged state (B7) ──
-    // Each thread has its own CSR file. Storage only for now —
-    // trap delivery (synchronous + asynchronous) lands in a
-    // future phase. The IRQ "controller" in B7 is just a wasm
-    // entry point that sets `active=true` on a slot.
-    pub priv_mode: u8,    // 3=M, 1=S, 0=U; reset = M
-    pub mstatus:  u32,    // per-thread: MIE/MPIE/MPP for sync trap, SUM/MXR for Sv32
-    pub mepc:     u32,    // per-thread: sync trap return address
-    pub mcause:   u32,    // per-thread: sync trap cause
-    pub mtval:    u32,    // per-thread: sync trap fault info
-    pub mscratch: u32,    // per-thread: handler scratch
-    pub satp:     u32,    // per-thread: address space root
-    // Note: mtvec, mie, mip are GLOBAL (on BarrelState), not per-thread.
+    // ── Per-thread privileged state ──
+    /// Privilege mode, CSRs, trap entry / return and IRQ sampling: the
+    /// system unit shared with the other cores (sim/system), one per
+    /// thread (hart). mtvec / mie / mip / medeleg / mideleg are kept equal
+    /// in all threads (`SHARED_CSRS`, mirrored by `BarrelState::write_csr`).
+    pub sys: SysUnit,
 }
 
 impl Thread {
@@ -79,11 +86,17 @@ impl Thread {
             yield_pulse: false,
             miss_pending: false,
             instr_access_fault: false,
-            priv_mode: 3,
-            mstatus: 0, mepc: 0, mcause: 0, mtval: 0,
-            mscratch: 0, satp: 0,
+            sys: hart_sys(0),
         }
     }
+
+    /// Idle thread for slot `slot` (its mhartid = slot).
+    pub fn idle_hart(slot: u8) -> Self {
+        Self { sys: hart_sys(slot), ..Self::idle() }
+    }
+
+    /// Current privilege mode as bits: 3 = M, 1 = S, 0 = U.
+    pub fn priv_bits(&self) -> u8 { self.sys.priv_mode as u8 }
 
     /// Boot-active thread (slot 0 on real reset). Used by `BarrelState`
     /// helpers when only one slot is supposed to be running.
@@ -305,13 +318,6 @@ pub struct BarrelState {
     /// IRQ controller with routing table.
     pub irq: IrqController,
 
-    // ── Global CSRs (shared by all threads) ──
-    pub mtvec:   u32,   // sync trap vector (all threads trap here)
-    pub mie:     u32,   // global interrupt enable mask
-    pub mip:     u32,   // global interrupt pending (reflects device state)
-    pub medeleg: u32,   // exception delegation
-    pub mideleg: u32,   // interrupt delegation
-
     // Pipeline registers
     pub lt_if: LtIf,
     pub if_di: IfDi,
@@ -342,7 +348,7 @@ impl Default for BarrelState {
             // dispatch is observable in tests. Real boot (only slot 0
             // active) is set by `BarrelState::reset_boot()` in later
             // phases when custom-0 / IRQ controller exists.
-            threads: [Thread::idle(); N_THREADS],
+            threads: std::array::from_fn(|i| Thread::idle_hart(i as u8)),
             ext_imem: vec![0x0000_0013; EXT_IMEM_WORDS], // NOPs
             ext_dmem: vec![0; EXT_DMEM_WORDS],
             io_data: 0,
@@ -357,7 +363,6 @@ impl Default for BarrelState {
             bus: Bus::new(),
             dma: DmaController::new(),
             irq: IrqController::new(),
-            mtvec: 0, mie: 0, mip: 0, medeleg: 0, mideleg: 0,
             lt_if: LtIf::default(),
             if_di: IfDi::default(),
             di_ex: DiEx::default(),
@@ -391,8 +396,11 @@ impl BarrelState {
     /// what real reset will look like in later phases; B1 tests
     /// usually call `activate_all` instead.
     pub fn reset_boot(&mut self) {
-        self.threads = [Thread::idle(); N_THREADS];
+        let shared: Vec<(u16, u32)> = SHARED_CSRS.iter().map(|&a| (a, self.read_csr(0, a))).collect();
+        self.threads = std::array::from_fn(|i| Thread::idle_hart(i as u8));
         self.threads[0] = Thread::boot(0);
+        // the shared CSRs (global before) survive a boot reset
+        for (a, v) in shared { self.write_csr(0, a, v); }
     }
 
     pub fn set_thread_pc(&mut self, slot: u8, pc: u32) {
@@ -466,90 +474,81 @@ impl BarrelState {
         }
     }
 
-    /// Read one CSR for a given thread, by 12-bit address. Returns
-    /// 0 for unknown CSRs. Used by the visualizer's CSR strip.
-    /// Read a CSR. Global CSRs (mtvec/mie/mip) ignore the slot arg.
-    /// Per-thread CSRs (mstatus/mepc/mcause/mtval/mscratch/satp) use it.
+    /// Read a CSR of thread `slot` (its system unit). The shared CSRs
+    /// (`SHARED_CSRS`) read the same in every thread; an out-of-range slot
+    /// reads them from thread 0 and everything else as 0.
     pub fn read_csr(&self, slot: u8, addr: u16) -> u32 {
-        // Global CSRs
-        match addr {
-            0x305 => return self.mtvec,
-            0x304 => return self.mie,
-            0x344 => return self.mip,
-            0x302 => return self.medeleg,
-            0x303 => return self.mideleg,
-            _ => {}
-        }
-        // Per-thread CSRs
-        if (slot as usize) >= N_THREADS { return 0; }
-        let t = &self.threads[slot as usize];
-        match addr {
-            0x300 => t.mstatus,
-            0x340 => t.mscratch,
-            0x341 => t.mepc,
-            0x342 => t.mcause,
-            0x343 => t.mtval,
-            0x180 => t.satp,
-            _     => 0,
+        match self.threads.get(slot as usize) {
+            Some(t) => t.sys.csrs.read(addr),
+            None if SHARED_CSRS.contains(&addr) => self.threads[0].sys.csrs.read(addr),
+            None => 0,
         }
     }
 
+    /// Write a CSR of thread `slot`. A shared CSR is written in every
+    /// thread (one value, as the old global mtvec / mie / mip / m*deleg).
     pub fn write_csr(&mut self, slot: u8, addr: u16, val: u32) {
-        // Global CSRs
-        match addr {
-            0x305 => { self.mtvec = val; return; }
-            0x304 => { self.mie = val; return; }
-            0x344 => { self.mip = val; return; }
-            0x302 => { self.medeleg = val; return; }
-            0x303 => { self.mideleg = val; return; }
-            _ => {}
-        }
-        // Per-thread CSRs
-        if (slot as usize) >= N_THREADS { return; }
-        let t = &mut self.threads[slot as usize];
-        match addr {
-            0x300 => t.mstatus  = val,
-            0x340 => t.mscratch = val,
-            0x341 => t.mepc     = val,
-            0x342 => t.mcause   = val,
-            0x343 => t.mtval    = val,
-            0x180 => t.satp     = val,
-            _     => {}
+        if SHARED_CSRS.contains(&addr) {
+            for t in self.threads.iter_mut() { t.sys.csrs.write(addr, val); }
+        } else if let Some(t) = self.threads.get_mut(slot as usize) {
+            t.sys.csrs.write(addr, val);
         }
     }
 
-    /// Deliver a synchronous trap on thread `slot`. Updates per-thread
-    /// mepc/mcause/mtval/mstatus and redirects pc to global mtvec.
+    /// Zicsr read-modify-write for thread `slot` (shared Zicsr unit):
+    /// `op` = funct3[1:0] (1 RW · 2 RS · 3 RC), `src_is_zero` = rs1 is x0 /
+    /// zimm is 0 (RS / RC then do not write). Returns the old value.
+    pub fn csr_rmw(&mut self, slot: u8, addr: u16, op: u8, src_is_zero: bool, val: u32) -> u32 {
+        let old = self.read_csr(slot, addr);
+        let r = csr_exec(old, op & 3, if src_is_zero { 0 } else { 1 }, val);
+        if r.write { self.write_csr(slot, addr, r.new); }
+        old
+    }
+
+    /// Deliver a synchronous trap on thread `slot` through its system
+    /// unit (medeleg delegation, mstatus stacking, xepc / xcause / xtval)
+    /// and redirect its pc to the handler.
     pub fn take_sync_trap(&mut self, slot: u8, cause: u32, epc: u32, tval: u32) {
-        if (slot as usize) >= N_THREADS { return; }
-        let t = &mut self.threads[slot as usize];
-        t.mepc = epc;
-        t.mcause = cause;
-        t.mtval = tval;
-        let mie = (t.mstatus >> 3) & 1;
-        let mut nm = t.mstatus & !((1 << 3) | (1 << 7) | (3 << 11));
-        nm |= mie << 7;                     // MPIE ← MIE
-        nm |= (t.priv_mode as u32) << 11;   // MPP ← priv
-        t.mstatus = nm;
-        t.priv_mode = 3;                    // handler in M-mode
-        t.pc = self.mtvec & !0x3;
+        let cycle = self.cycle_count;
+        if let Some(t) = self.threads.get_mut(slot as usize) {
+            t.pc = t.sys.trap(cause, false, epc, tval, cycle);
+        }
     }
 
-    /// Execute MRET for thread `slot`. Restores pc from mepc,
-    /// MIE from MPIE, priv from MPP.
+    /// Execute MRET for thread `slot`: restores MIE / priv from the stack
+    /// and pc from mepc (shared system unit).
     pub fn do_mret(&mut self, slot: u8) {
-        if (slot as usize) >= N_THREADS { return; }
-        let t = &mut self.threads[slot as usize];
-        let m = t.mstatus;
-        let mpie = (m >> 7) & 1;
-        let mpp = (m >> 11) & 0b11;
-        let mut nm = m & !((1 << 3) | (1 << 7) | (3 << 11));
-        nm |= mpie << 3;     // MIE ← MPIE
-        nm |= 1 << 7;        // MPIE ← 1
-        nm |= 0b11 << 11;    // MPP ← M
-        t.mstatus = nm;
-        t.priv_mode = mpp as u8;
-        t.pc = t.mepc;
+        if let Some(t) = self.threads.get_mut(slot as usize) {
+            t.pc = t.sys.xret(false);
+        }
+    }
+
+    /// Interrupt delivery for thread `slot` at its fetch slot: if its
+    /// system unit has an interrupt to take (mip & mie, MIE / mode,
+    /// mideleg), enter the handler and return the new pc. mepc = the pc
+    /// it was about to fetch. The caller only asks when none of the
+    /// thread's instructions are in flight, so the trap is precise.
+    pub fn take_interrupt(&mut self, slot: u8) -> Option<u32> {
+        let cycle = self.cycle_count;
+        let t = self.threads.get_mut(slot as usize)?;
+        let cause = t.sys.sample_irq()?;
+        t.pc = t.sys.trap(cause, true, t.pc, 0, cycle);
+        Some(t.pc)
+    }
+
+    /// External interrupt lines (MEI / MTI / MSI / S…), as on the other
+    /// cores: level-triggered, seen by every thread (each takes it when its
+    /// own mstatus / mode allows).
+    pub fn raise_irq(&mut self, mask: u32) {
+        for t in self.threads.iter_mut() { t.sys.raise_irq(mask); }
+    }
+    pub fn clear_irq(&mut self) {
+        for t in self.threads.iter_mut() { t.sys.clear_irq(); }
+    }
+
+    /// Privilege mode of thread `slot`.
+    pub fn priv_mode_of(&self, slot: u8) -> PrivMode {
+        self.threads.get(slot as usize).map(|t| t.sys.priv_mode).unwrap_or(PrivMode::M)
     }
 
     /// Update inject_irq to use the IRQ controller.

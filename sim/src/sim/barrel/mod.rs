@@ -79,8 +79,18 @@ impl BarrelState {
 
         self.last_wb = prev_ma_wb;
 
+        // ── Counters: cycle (clocks done) in every thread; instret for
+        // the thread whose instruction leaves WB.
+        let cyc = self.cycle_count as u32;
+        for t in self.threads.iter_mut() { t.sys.csrs.set_counter(crate::sim::system::addr::CYCLE, cyc); }
+
         // ── 1. WB ────────────────────────────────────────────────
         stage_wb::compute_wb(self, &prev_ma_wb);
+        if prev_ma_wb.valid {
+            if let Some(t) = self.threads.get_mut(prev_ma_wb.thread as usize) {
+                t.sys.csrs.bump(crate::sim::system::addr::INSTRET);
+            }
+        }
 
         // ── 2. MA ────────────────────────────────────────────────
         let new_ma_wb = stage_ma::compute_ma(self, &prev_ex_ma);
@@ -128,7 +138,7 @@ impl BarrelState {
         }
 
         // ── 6. LT ────────────────────────────────────────────────
-        let (new_lt_if, picked) = stage_lt::compute_lt(self);
+        let (mut new_lt_if, picked) = stage_lt::compute_lt(self);
 
         if let Some(slot) = picked {
             self.threads[slot as usize].age = 0;
@@ -167,10 +177,7 @@ impl BarrelState {
                     // Sync trap: illegal(1), ecall(2), ebreak(3).
                     let cause: u32 = match kind {
                         1 => 2,  // illegal instruction
-                        2 => {   // ECALL (cause depends on priv)
-                            let p = self.threads[slot as usize].priv_mode;
-                            match p { 3 => 11, 1 => 9, _ => 8 }
-                        }
+                        2 => self.threads[slot as usize].sys.ecall_cause(),   // ECALL (by mode)
                         3 => 3,  // EBREAK
                         5 => 1,  // instruction access fault
                         _ => 0,
@@ -193,6 +200,28 @@ impl BarrelState {
         if new_ex_ma.valid && new_ex_ma.branch_taken {
             let s = new_ex_ma.thread as usize;
             self.threads[s].pc = new_ex_ma.branch_target;
+        }
+
+        // ── Interrupt delivery at the picked thread's fetch slot ──
+        // (shared system unit: mip & mie, mstatus / mode, mideleg). Taken
+        // only when none of the thread's instructions are in flight, so
+        // mepc (= its next fetch pc) is exact and no older branch / trap
+        // can overwrite the handler pc. While some are, the thread's fetch
+        // slot becomes a bubble so it drains (a lone thread would
+        // otherwise never be idle).
+        if let Some(slot) = picked {
+            if !stall && new_lt_if.valid && self.threads[slot as usize].sys.irq_would_take().is_some() {
+                let mine = |v: bool, t: u8| v && t == slot;
+                let in_flight = mine(new_if_di.valid, new_if_di.thread)
+                    || mine(new_di_ex.valid, new_di_ex.thread)
+                    || mine(new_ex_ma.valid, new_ex_ma.thread)
+                    || mine(new_ma_wb.valid, new_ma_wb.thread);
+                if in_flight {
+                    new_lt_if = LtIf::bubble();
+                } else if let Some(pc) = self.take_interrupt(slot) {
+                    new_lt_if.pc = pc;
+                }
+            }
         }
 
         // ── Latch ────────────────────────────────────────────────
