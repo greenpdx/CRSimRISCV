@@ -24,8 +24,10 @@ pub mod addr {
     pub const SCAUSE:  u16 = 0x142;
     pub const STVAL:   u16 = 0x143;
     pub const SIP:     u16 = 0x144;
+    pub const SATP:    u16 = 0x180;
     // M-mode
     pub const MSTATUS: u16 = 0x300;
+    pub const MISA:    u16 = 0x301;
     pub const MEDELEG: u16 = 0x302;
     pub const MIDELEG: u16 = 0x303;
     pub const MIE:     u16 = 0x304;
@@ -35,6 +37,9 @@ pub mod addr {
     pub const MCAUSE:  u16 = 0x342;
     pub const MTVAL:   u16 = 0x343;
     pub const MIP:     u16 = 0x344;
+    pub const MVENDORID: u16 = 0xF11;
+    pub const MARCHID: u16 = 0xF12;
+    pub const MIMPID:  u16 = 0xF13;
     pub const MHARTID: u16 = 0xF14;
     // Unprivileged counters (read-only views; the core advances them)
     pub const CYCLE:   u16 = 0xC00;
@@ -58,10 +63,15 @@ pub const M_MSTATUS_SPP:  u32 = 1 << 8;
 pub const M_MSTATUS_MPP_SHIFT: u32 = 11;
 pub const M_MSTATUS_MPP_MASK:  u32 = 0x3 << M_MSTATUS_MPP_SHIFT;
 
-// sstatus is a *view* of mstatus restricted to the S-visible bits.
-// Bits SIE, SPIE, SPP are visible; UPIE etc. would be too in a full impl.
+/// mstatus.SUM (bit 18) — S-mode may access U pages (Sv32).
+pub const M_MSTATUS_SUM:  u32 = 1 << 18;
+/// mstatus.MXR (bit 19) — loads from executable pages (Sv32).
+pub const M_MSTATUS_MXR:  u32 = 1 << 19;
+
+// sstatus is a *view* of mstatus restricted to the S-visible bits:
+// SIE, SPIE, SPP and the Sv32 bits SUM, MXR.
 pub const SSTATUS_VIEW_MASK: u32 =
-    M_MSTATUS_SIE | M_MSTATUS_SPIE | M_MSTATUS_SPP;
+    M_MSTATUS_SIE | M_MSTATUS_SPIE | M_MSTATUS_SPP | M_MSTATUS_SUM | M_MSTATUS_MXR;
 
 // sie/sip view: only the S-visible bits
 pub const SIRQ_VIEW_MASK: u32 = IRQ_SSI | IRQ_STI | IRQ_SEI;
@@ -115,7 +125,11 @@ impl CsrFile {
                 let new = (old & !SIRQ_VIEW_MASK) | (val & SIRQ_VIEW_MASK);
                 self.regs.insert(addr::MIP, new);
             }
-            // Read-only CSRs ignored; everything else stored verbatim.
+            // xEPC: bit 0 is always 0 (IALIGN = 32 / 16)
+            addr::MEPC | addr::SEPC => { self.regs.insert(addr, val & !1); }
+            // Read-only CSRs ignored (the core sets them with set_counter);
+            // everything else stored verbatim.
+            addr::MISA | addr::MVENDORID | addr::MARCHID | addr::MIMPID |
             addr::MHARTID | addr::CYCLE | addr::TIME | addr::INSTRET => {}
             _ => { self.regs.insert(addr, val); }
         }
@@ -135,7 +149,8 @@ impl CsrFile {
         self.regs.insert(addr, v);
     }
 
-    /// Set a counter CSR from the core (hardware side).
+    /// Set a counter / read-only CSR from the core (hardware side), e.g.
+    /// cycle, instret, misa, mhartid.
     pub fn set_counter(&mut self, addr: u16, v: u32) { self.regs.insert(addr, v); }
 }
 

@@ -49,3 +49,32 @@ fn irq_sampling_and_vectored_mode() {
     assert_eq!(s.csrs.read(addr::MCAUSE), 0x8000_0000 | INT_MTI);
     assert_eq!(s.priv_mode, PrivMode::M);
 }
+
+#[test]
+fn sstatus_view_includes_sum_mxr() {
+    let mut s = SysUnit::new();
+    s.csrs.write(addr::SSTATUS, (1 << 18) | (1 << 19) | (1 << 3));   // SUM, MXR, (MIE not visible)
+    assert_eq!(s.csrs.read(addr::MSTATUS), (1 << 18) | (1 << 19));
+    s.csrs.write(addr::MSTATUS, (1 << 3) | (1 << 18));
+    assert_eq!(s.csrs.read(addr::SSTATUS), 1 << 18);
+}
+
+#[test]
+fn id_csrs_and_misa_are_read_only() {
+    let mut s = SysUnit::new();
+    s.csrs.set_counter(addr::MISA, 0x4000_0100);
+    for a in [addr::MISA, addr::MVENDORID, addr::MARCHID, addr::MIMPID, addr::MHARTID] {
+        let before = s.csrs.read(a);
+        s.csrs.write(a, 0xdead_beef);
+        assert_eq!(s.csrs.read(a), before, "csr {a:#x}");
+    }
+    assert_eq!(s.csrs.read(addr::MISA), 0x4000_0100);
+}
+
+#[test]
+fn xepc_bit0_is_zero() {
+    let mut s = SysUnit::new();
+    s.csrs.write(addr::MEPC, 0x101);
+    s.csrs.write(addr::SEPC, 0x203);
+    assert_eq!((s.csrs.read(addr::MEPC), s.csrs.read(addr::SEPC)), (0x100, 0x202));
+}
