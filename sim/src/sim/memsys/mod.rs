@@ -23,6 +23,7 @@
 //! and their MMU reports TLB / walk / fault events here.
 
 pub mod cache;
+pub mod examples;
 pub mod system;
 
 pub use cache::{Cache, Line, Mesi, LINE_BYTES, LINE_WORDS};

@@ -148,3 +148,77 @@ fn direct_mapped_tlb_conflict_between_code_and_data_pages() {
     let fills = ev.iter().filter(|e| matches!(e, Event::TlbFill { core: 0, va: 0x40_0000, idx: 0, .. })).count();
     assert!(fills >= 2, "data page refilled entry 0 after the code page took it ({fills})");
 }
+
+// ── The panel's examples (memsys::examples) each show what they promise ──
+
+use cpu_sim::sim::memsys::examples::examples;
+use cpu_sim::sim::memsys::CacheId;
+
+fn run_example(i: usize, cycles: usize) -> (MemPanelSystem, Vec<Event>) {
+    let mut sys = MemPanelSystem::new();
+    (examples()[i].setup)(&mut sys);
+    let ev = run(&mut sys, cycles);
+    (sys, ev)
+}
+fn data_outcomes(ev: &[Event]) -> Vec<Outcome> {
+    ev.iter().filter_map(|e| match e { Event::Access { core: 0, port: Port::Load, outcome, .. } => Some(*outcome), _ => None }).collect()
+}
+
+#[test]
+fn example_l1_hits() {
+    let (sys, ev) = run_example(0, 1500);
+    assert_eq!(sys.cores[0].read_register(11), 8 * (1 + 2 + 3 + 4));
+    let o = data_outcomes(&ev);
+    assert_eq!(o[0], Outcome::Memory);
+    assert!(o[1..].iter().all(|x| *x == Outcome::L1Hit), "{o:?}");
+}
+
+#[test]
+fn example_l1_miss_l2_hit() {
+    let (_, ev) = run_example(1, 3000);
+    let o = data_outcomes(&ev);
+    assert_eq!(o.len(), 18);
+    assert!(o[..3].iter().all(|x| *x == Outcome::Memory));
+    assert!(o[3..].iter().all(|x| *x == Outcome::L2Hit), "{o:?}");
+}
+
+#[test]
+fn example_total_miss() {
+    let (_, ev) = run_example(2, 4000);
+    let o = data_outcomes(&ev);
+    assert_eq!(o.len(), 20);
+    assert!(o.iter().all(|x| *x == Outcome::Memory), "{o:?}");
+    assert!(ev.iter().any(|e| matches!(e, Event::Evict { cache: CacheId::L2, .. })));
+}
+
+#[test]
+fn example_mmu_walk_then_hits() {
+    let (sys, ev) = run_example(3, 2000);
+    assert_eq!((sys.cores[0].read_register(7), sys.cores[0].read_register(8)), (0x55, 0x66));
+    let walks = ev.iter().filter(|e| matches!(e, Event::Walk { core: 0, .. })).count();
+    assert!(walks >= 4, "code page + data page walks ({walks})");
+    assert!(ev.iter().filter(|e| matches!(e, Event::TlbHit { core: 0, va: 0x40_1000, .. })).count() >= 3);
+}
+
+#[test]
+fn example_page_fault_handler_maps_page() {
+    let (sys, ev) = run_example(4, 2000);
+    assert!(ev.iter().any(|e| matches!(e, Event::PageFault { core: 0, va: 0x80_0000, cause: 13 })));
+    assert!(ev.iter().any(|e| matches!(e, Event::TlbFill { core: 0, va: 0x80_0000, pa: 0x3000, .. })), "retry walked");
+    assert_eq!(sys.cores[0].read_register(7), 0x77);
+}
+
+#[test]
+fn example_flag_passing() {
+    let (sys, ev) = run_example(5, 2000);
+    assert_eq!(sys.cores[1].read_register(8), 42);
+    assert!(ev.iter().any(|e| matches!(e, Event::Snoop { from: 1, to: 0, flush: true, .. })));
+}
+
+#[test]
+fn example_false_sharing() {
+    let (sys, ev) = run_example(6, 4000);
+    assert_eq!((sys.peek(0x1000), sys.peek(0x1004)), (8, 8), "both counters correct");
+    let bounces = ev.iter().filter(|e| matches!(e, Event::Snoop { cache: CacheId::L1D, after: Mesi::I, .. })).count();
+    assert!(bounces >= 8, "the line ping-pongs ({bounces} invalidations)");
+}
