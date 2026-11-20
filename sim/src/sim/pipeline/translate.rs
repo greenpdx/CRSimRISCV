@@ -5,6 +5,7 @@
 //! satp.MODE = Bare both bypass translation.
 
 use super::state::PipelineState;
+use crate::sim::system::addr;
 use super::tlb::TlbEntry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,16 +30,16 @@ const MSTATUS_MXR: u32 = 1 << 19;
 /// sets D on stores. The updated PTE is written back to RAM.
 pub fn translate(state: &mut PipelineState, vaddr: u32, access: AccessKind) -> Result<u32, u32> {
     // Bypass translation in M-mode or when satp.MODE == 0 (Bare).
-    if state.priv_mode == 3 { return Ok(vaddr); }
-    if (state.csrs.satp >> 31) == 0 { return Ok(vaddr); }
+    if state.priv_bits() == 3 { return Ok(vaddr); }
+    if (state.sys.csrs.read(addr::SATP) >> 31) == 0 { return Ok(vaddr); }
 
     let fault_cause = match access {
         AccessKind::Fetch => 12,
         AccessKind::Load  => 13,
         AccessKind::Store => 15,
     };
-    let mstatus = state.csrs.mstatus;
-    let priv_mode = state.priv_mode;
+    let mstatus = state.sys.csrs.read(addr::MSTATUS);
+    let priv_mode = state.priv_bits();
     let vpn = vaddr >> 12;
     let off = vaddr & 0xfff;
 
@@ -59,7 +60,7 @@ pub fn translate(state: &mut PipelineState, vaddr: u32, access: AccessKind) -> R
         }
     }
 
-    let root_ppn = state.csrs.satp & 0x003f_ffff;
+    let root_ppn = state.sys.csrs.read(addr::SATP) & 0x003f_ffff;
     let root = root_ppn << 12;
     let vpn1 = (vaddr >> 22) & 0x3ff;
     let vpn0 = (vaddr >> 12) & 0x3ff;
@@ -109,7 +110,7 @@ fn update_ad_for_tlb_entry(state: &mut PipelineState, vpn: u32, mut entry: TlbEn
     if !need_a && !need_d { return; }
     // Re-locate the PTE in RAM to write the updated bits. We need
     // satp again because the entry doesn't store its PTE address.
-    let root_ppn = state.csrs.satp & 0x003f_ffff;
+    let root_ppn = state.sys.csrs.read(addr::SATP) & 0x003f_ffff;
     let root = root_ppn << 12;
     let pte_addr = if entry.is_super {
         let vpn1 = vpn >> 10;

@@ -68,21 +68,16 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
     // Zicsr: CSR read/modify/write happens in MA. The old value goes
     // into `mem_data` so the WB stage can write it to rd via wb_sel=3.
     if ex_ma.ctrl.csr_op != 0 {
+        // Shared Zicsr unit: funct3[1:0] = the op; rs1 = 0 marks "no
+        // write" for RS / RC (rs1 = x0 or zimm = 0, decided in EX).
         let addr = ex_ma.csr_addr;
-        let old = state.csrs.read(addr);
-        mem_data = old;
-        let new_val = match CsrOp::from_u8(ex_ma.ctrl.csr_op) {
-            CsrOp::Rw => Some(ex_ma.csr_write_val),
-            CsrOp::Rs => if ex_ma.csr_src_is_zero { None } else { Some(old |  ex_ma.csr_write_val) },
-            CsrOp::Rc => if ex_ma.csr_src_is_zero { None } else { Some(old & !ex_ma.csr_write_val) },
-            CsrOp::None => None,
-        };
-        if let Some(v) = new_val {
-            state.csrs.write(addr, v);
-            // Phase 4.4: writes to satp invalidate the entire TLB.
-            if addr == super::csr::CSR_SATP {
-                state.tlb.flush();
-            }
+        let f3 = CsrOp::from_u8(ex_ma.ctrl.csr_op).to_u8();
+        let rs1_marker = if ex_ma.csr_src_is_zero { 0 } else { 1 };
+        let r = state.sys.csr(addr, f3, rs1_marker, ex_ma.csr_write_val);
+        mem_data = r.old;
+        // Phase 4.4: writes to satp invalidate the entire TLB.
+        if r.write && addr == super::csr::CSR_SATP {
+            state.tlb.flush();
         }
     }
 

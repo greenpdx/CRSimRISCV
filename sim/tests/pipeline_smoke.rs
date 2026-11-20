@@ -1,6 +1,7 @@
 //! Tests for the 5-stage pipeline simulator.
 //! See `sim/docs/pipeline-plan.md` §13 for the full test plan.
 
+use cpu_sim::sim::system::{addr, PrivMode};
 use cpu_sim::sim::pipeline::PipelineState;
 
 /// Run the pipeline for `n` cycles (helper for readability).
@@ -347,7 +348,7 @@ fn pipeline_csrrw_round_trip() {
     let csrrw_x7 = enc_csr(0x340, 0, 0b001, 7);
     cpu.load_program(&[addi_x6, csrrw_x5, csrrw_x7]);
     run_until_done(&mut cpu, 30);
-    assert_eq!(cpu.csrs.read(0x340), 0); // 2nd csrrw wrote x0=0
+    assert_eq!(cpu.sys.csrs.read(0x340), 0); // 2nd csrrw wrote x0=0
     assert_eq!(cpu.read_register(5), 0); // first read saw initial 0
     assert_eq!(cpu.read_register(7), 0x123); // second read saw value from x6
 }
@@ -355,25 +356,25 @@ fn pipeline_csrrw_round_trip() {
 #[test]
 fn pipeline_csrrs_sets_bits() {
     let mut cpu = PipelineState::new();
-    cpu.csrs.write(0x340, 0x0000_00f0);
+    cpu.sys.csrs.write(0x340, 0x0000_00f0);
     let addi = 0x00f00313; // addi x6, x0, 0x0f
     let csrrs = enc_csr(0x340, 6, 0b010, 5); // csrrs x5, mscratch, x6
     cpu.load_program(&[addi, csrrs]);
     run_until_done(&mut cpu, 20);
     assert_eq!(cpu.read_register(5), 0xf0);     // old value
-    assert_eq!(cpu.csrs.read(0x340), 0xff);     // 0xf0 | 0x0f
+    assert_eq!(cpu.sys.csrs.read(0x340), 0xff);     // 0xf0 | 0x0f
 }
 
 #[test]
 fn pipeline_csrrc_clears_bits() {
     let mut cpu = PipelineState::new();
-    cpu.csrs.write(0x340, 0xff);
+    cpu.sys.csrs.write(0x340, 0xff);
     let addi = 0x00f00313; // x6 = 0x0f
     let csrrc = enc_csr(0x340, 6, 0b011, 5);
     cpu.load_program(&[addi, csrrc]);
     run_until_done(&mut cpu, 20);
     assert_eq!(cpu.read_register(5), 0xff);
-    assert_eq!(cpu.csrs.read(0x340), 0xf0);
+    assert_eq!(cpu.sys.csrs.read(0x340), 0xf0);
 }
 
 #[test]
@@ -383,7 +384,7 @@ fn pipeline_csrrwi_immediate() {
     let csrrwi = enc_csr(0x340, 0x1f, 0b101, 5);
     cpu.load_program(&[csrrwi]);
     run_until_done(&mut cpu, 10);
-    assert_eq!(cpu.csrs.read(0x340), 0x1f);
+    assert_eq!(cpu.sys.csrs.read(0x340), 0x1f);
     assert_eq!(cpu.read_register(5), 0);
 }
 
@@ -395,7 +396,7 @@ fn pipeline_pmpaddr_storage() {
     let csrrw = enc_csr(0x3b0, 6, 0b001, 0);
     cpu.load_program(&[addi, csrrw]);
     run_until_done(&mut cpu, 20);
-    assert_eq!(cpu.csrs.read(0x3b0), 0x7ff);
+    assert_eq!(cpu.sys.csrs.read(0x3b0), 0x7ff);
 }
 
 #[test]
@@ -405,7 +406,7 @@ fn pipeline_mhartid_read_only() {
     let csrrwi = enc_csr(0xf14, 0x1f, 0b101, 5);
     cpu.load_program(&[csrrwi]);
     run_until_done(&mut cpu, 10);
-    assert_eq!(cpu.csrs.read(0xf14), 0);
+    assert_eq!(cpu.sys.csrs.read(0xf14), 0);
     assert_eq!(cpu.read_register(5), 0);
 }
 
@@ -420,12 +421,12 @@ fn step_to_trap(cpu: &mut PipelineState) {
 #[test]
 fn pipeline_ecall_traps_to_mtvec() {
     let mut cpu = PipelineState::new();
-    cpu.csrs.mtvec = 0x80;
+    cpu.sys.csrs.write(addr::MTVEC, 0x80);
     // ecall ; addi x5, x0, 0xaa  (the addi must NOT execute)
     cpu.load_program(&[0x00000073, 0x0aa00293]);
     step_to_trap(&mut cpu);
-    assert_eq!(cpu.csrs.mcause, 11);
-    assert_eq!(cpu.csrs.mepc, 0);
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 11);
+    assert_eq!(cpu.sys.csrs.read(addr::MEPC), 0);
     assert_eq!(cpu.pc & !0x3, 0x80);
     // Drain a few more cycles; the addi was squashed.
     for _ in 0..5 { cpu.step(); }
@@ -435,21 +436,21 @@ fn pipeline_ecall_traps_to_mtvec() {
 #[test]
 fn pipeline_ebreak_traps_with_cause_3() {
     let mut cpu = PipelineState::new();
-    cpu.csrs.mtvec = 0x40;
+    cpu.sys.csrs.write(addr::MTVEC, 0x40);
     cpu.load_program(&[0x00100073]); // ebreak
     step_to_trap(&mut cpu);
-    assert_eq!(cpu.csrs.mcause, 3);
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 3);
     assert_eq!(cpu.pc & !0x3, 0x40);
 }
 
 #[test]
 fn pipeline_illegal_instr_traps_with_cause_2() {
     let mut cpu = PipelineState::new();
-    cpu.csrs.mtvec = 0x100;
+    cpu.sys.csrs.write(addr::MTVEC, 0x100);
     cpu.load_program(&[0x0000000B]); // unknown opcode
     step_to_trap(&mut cpu);
-    assert_eq!(cpu.csrs.mcause, 2);
-    assert_eq!(cpu.csrs.mtval, 0x0000000B);
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 2);
+    assert_eq!(cpu.sys.csrs.read(addr::MTVAL), 0x0000000B);
     assert_eq!(cpu.pc & !0x3, 0x100);
 }
 
@@ -457,7 +458,7 @@ fn pipeline_illegal_instr_traps_with_cause_2() {
 fn pipeline_mret_returns_to_mepc() {
     let mut cpu = PipelineState::new();
     // Preset mepc so mret jumps to a known target containing an addi.
-    cpu.csrs.mepc = 0x08;
+    cpu.sys.csrs.write(addr::MEPC, 0x08);
     // 0x00: mret ; 0x04: nop ; 0x08: addi x6, x0, 0xbb
     cpu.load_program(&[0x30200073, 0x00000013, 0x0bb00313]);
     for _ in 0..10 { cpu.step(); }
@@ -467,34 +468,34 @@ fn pipeline_mret_returns_to_mepc() {
 #[test]
 fn pipeline_external_interrupt_taken() {
     let mut cpu = PipelineState::new();
-    cpu.csrs.mtvec = 0x80;
-    cpu.csrs.mstatus = 1 << 3; // MIE = 1
-    cpu.csrs.mie = 1 << 11;    // MEIE
-    cpu.csrs.mip = 1 << 11;    // pending external interrupt
+    cpu.sys.csrs.write(addr::MTVEC, 0x80);
+    cpu.sys.csrs.write(addr::MSTATUS, 1 << 3); // MIE = 1
+    cpu.sys.csrs.write(addr::MIE, 1 << 11);    // MEIE
+    cpu.sys.csrs.write(addr::MIP, 1 << 11);    // pending external interrupt
     // Long stream of NOPs (addi x0, x0, 0)
     cpu.load_program(&vec![0x00000013u32; 32]);
     let pc_before = cpu.pc;
     cpu.step(); // takes interrupt at top of step(); pc then advances by 4
-    assert_eq!(cpu.csrs.mcause, 0x8000_000b);
-    assert_eq!(cpu.csrs.mepc, pc_before);
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0x8000_000b);
+    assert_eq!(cpu.sys.csrs.read(addr::MEPC), pc_before);
     // After redirect to mtvec=0x80 and IF runs, end-of-cycle pc++ → 0x84.
     assert_eq!(cpu.pc, 0x84);
     // mstatus.MIE cleared, MPIE = 1
-    assert_eq!((cpu.csrs.mstatus >> 3) & 1, 0);
-    assert_eq!((cpu.csrs.mstatus >> 7) & 1, 1);
+    assert_eq!((cpu.sys.csrs.read(addr::MSTATUS) >> 3) & 1, 0);
+    assert_eq!((cpu.sys.csrs.read(addr::MSTATUS) >> 7) & 1, 1);
 }
 
 #[test]
 fn pipeline_interrupt_disabled_when_mie_zero() {
     let mut cpu = PipelineState::new();
-    cpu.csrs.mtvec = 0x80;
-    cpu.csrs.mstatus = 0; // MIE = 0
-    cpu.csrs.mie = 1 << 11;
-    cpu.csrs.mip = 1 << 11;
+    cpu.sys.csrs.write(addr::MTVEC, 0x80);
+    cpu.sys.csrs.write(addr::MSTATUS, 0); // MIE = 0
+    cpu.sys.csrs.write(addr::MIE, 1 << 11);
+    cpu.sys.csrs.write(addr::MIP, 1 << 11);
     cpu.load_program(&[0x00100293]); // addi x5, x0, 1
     for _ in 0..6 { cpu.step(); }
     assert_eq!(cpu.read_register(5), 1);
-    assert_eq!(cpu.csrs.mcause, 0); // no trap
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0); // no trap
 }
 
 // ── Phase 4.1: privilege modes + delegation ──────────────────────────
@@ -502,51 +503,51 @@ fn pipeline_interrupt_disabled_when_mie_zero() {
 #[test]
 fn pipeline_ecall_from_s_mode_cause_9() {
     let mut cpu = PipelineState::new();
-    cpu.priv_mode = 1; // S
-    cpu.csrs.mtvec = 0x80;
+    cpu.sys.priv_mode = PrivMode::from_bits(1); // S
+    cpu.sys.csrs.write(addr::MTVEC, 0x80);
     cpu.load_program(&[0x00000073]); // ecall
     step_to_trap(&mut cpu);
-    assert_eq!(cpu.csrs.mcause, 9);  // env-call-from-S
-    assert_eq!(cpu.priv_mode, 3);    // escalated to M (no delegation)
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 9);  // env-call-from-S
+    assert_eq!(cpu.priv_bits(), 3);    // escalated to M (no delegation)
 }
 
 #[test]
 fn pipeline_ecall_from_u_delegated_to_s() {
     let mut cpu = PipelineState::new();
-    cpu.priv_mode = 0;               // U
-    cpu.csrs.medeleg = 1 << 8;       // delegate env-call-from-U
-    cpu.csrs.stvec   = 0xc0;
-    cpu.csrs.mtvec   = 0x80;
+    cpu.sys.priv_mode = PrivMode::from_bits(0);               // U
+    cpu.sys.csrs.write(addr::MEDELEG, 1 << 8);       // delegate env-call-from-U
+    cpu.sys.csrs.write(addr::STVEC, 0xc0);
+    cpu.sys.csrs.write(addr::MTVEC, 0x80);
     cpu.load_program(&[0x00000073]); // ecall
     step_to_trap(&mut cpu);
-    assert_eq!(cpu.csrs.scause, 8);
-    assert_eq!(cpu.csrs.mcause, 0);  // M side untouched
-    assert_eq!(cpu.priv_mode, 1);    // now in S
+    assert_eq!(cpu.sys.csrs.read(addr::SCAUSE), 8);
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0);  // M side untouched
+    assert_eq!(cpu.priv_bits(), 1);    // now in S
     assert_eq!(cpu.pc & !0x3, 0xc0);
 }
 
 #[test]
 fn pipeline_sret_returns_to_sepc_and_priv_u() {
     let mut cpu = PipelineState::new();
-    cpu.priv_mode = 1;          // executing in S
-    cpu.csrs.sepc = 0x10;
+    cpu.sys.priv_mode = PrivMode::from_bits(1);          // executing in S
+    cpu.sys.csrs.write(addr::SEPC, 0x10);
     // sstatus.SPP=0 (U) so SRET drops to U
-    cpu.csrs.mstatus = 0;
+    cpu.sys.csrs.write(addr::MSTATUS, 0);
     cpu.load_program(&[0x10200073]); // sret
     for _ in 0..5 { cpu.step(); }
-    assert_eq!(cpu.priv_mode, 0);
+    assert_eq!(cpu.priv_bits(), 0);
 }
 
 #[test]
 fn pipeline_mret_restores_prev_priv() {
     let mut cpu = PipelineState::new();
     // Set MPP=01 (S) so MRET drops to S.
-    cpu.csrs.mstatus = 1 << 11;
-    cpu.csrs.mepc = 0x10;
-    cpu.priv_mode = 3;
+    cpu.sys.csrs.write(addr::MSTATUS, 1 << 11);
+    cpu.sys.csrs.write(addr::MEPC, 0x10);
+    cpu.sys.priv_mode = PrivMode::from_bits(3);
     cpu.load_program(&[0x30200073]); // mret
     for _ in 0..5 { cpu.step(); }
-    assert_eq!(cpu.priv_mode, 1);
+    assert_eq!(cpu.priv_bits(), 1);
 }
 
 #[test]
@@ -556,18 +557,18 @@ fn pipeline_wfi_is_nop_in_v1() {
     cpu.load_program(&[0x10500073, 0x00700293]);
     for _ in 0..6 { cpu.step(); }
     assert_eq!(cpu.read_register(5), 7);
-    assert_eq!(cpu.csrs.mcause, 0); // not illegal
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0); // not illegal
 }
 
 #[test]
 fn pipeline_sstatus_is_view_of_mstatus() {
     let mut cpu = PipelineState::new();
     // Set SIE bit via sstatus, observe in mstatus.
-    cpu.csrs.write(0x100, 1 << 1);
-    assert_eq!(cpu.csrs.mstatus & (1 << 1), 1 << 1);
+    cpu.sys.csrs.write(0x100, 1 << 1);
+    assert_eq!(cpu.sys.csrs.read(addr::MSTATUS) & (1 << 1), 1 << 1);
     // Setting MIE in mstatus should NOT show through sstatus.
-    cpu.csrs.mstatus |= 1 << 3;
-    assert_eq!(cpu.csrs.read(0x100) & (1 << 3), 0);
+    { let v = cpu.sys.csrs.read(addr::MSTATUS) | (1 << 3); cpu.sys.csrs.write(addr::MSTATUS, v); }
+    assert_eq!(cpu.sys.csrs.read(0x100) & (1 << 3), 0);
 }
 
 // ── Phase 4.2: Sv32 page-table walker ────────────────────────────────
@@ -585,8 +586,8 @@ const U: u32 = 1 << 4;
 #[test]
 fn pipeline_sv32_bare_passthrough_in_s_mode() {
     let mut cpu = PipelineState::new();
-    cpu.priv_mode = 1;
-    cpu.csrs.satp = 0; // MODE = Bare
+    cpu.sys.priv_mode = PrivMode::from_bits(1);
+    cpu.sys.csrs.write(addr::SATP, 0); // MODE = Bare
     cpu.load_program(&[0x00700293]); // addi x5, x0, 7
     for _ in 0..6 { cpu.step(); }
     assert_eq!(cpu.read_register(5), 7);
@@ -596,19 +597,19 @@ fn pipeline_sv32_bare_passthrough_in_s_mode() {
 fn pipeline_sv32_load_traps_when_pte_invalid() {
     let mut cpu = PipelineState::new();
     let root = 0x10000u32;
-    cpu.csrs.mtvec = 0x80;
-    cpu.csrs.satp = (1 << 31) | (root >> 12);
+    cpu.sys.csrs.write(addr::MTVEC, 0x80);
+    cpu.sys.csrs.write(addr::SATP, (1 << 31) | (root >> 12));
     // L1[0] identity-maps the code page; L1[1] left invalid so that
     // a load to vaddr 0x00400000 page-faults.
     cpu.ram_write(root + 0*4, pte(0, V | R | W | X));
-    cpu.priv_mode = 1; // S
+    cpu.sys.priv_mode = PrivMode::from_bits(1); // S
     cpu.load_program(&[
         0x00400337, // lui x6, 0x400
         0x00032283, // lw x5, 0(x6)
     ]);
     for _ in 0..15 { cpu.step(); }
-    assert_eq!(cpu.csrs.mcause, 13);
-    assert_eq!(cpu.csrs.mtval, 0x00400000);
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 13);
+    assert_eq!(cpu.sys.csrs.read(addr::MTVAL), 0x00400000);
     assert_eq!(cpu.read_register(5), 0);
 }
 
@@ -617,14 +618,14 @@ fn pipeline_sv32_identity_map_load_succeeds() {
     let mut cpu = PipelineState::new();
     // Root page table at phys 0x10000.
     let root = 0x10000u32;
-    cpu.csrs.satp = (1 << 31) | (root >> 12);
+    cpu.sys.csrs.write(addr::SATP, (1 << 31) | (root >> 12));
     // L1[0] = leaf 4 MiB superpage at PPN1=0, perms RWX, valid
     let pte1 = pte(0, V | R | W | X);
-    cpu.csrs.mtvec = 0x80;
+    cpu.sys.csrs.write(addr::MTVEC, 0x80);
     // Use M-mode to set up RAM, then drop to S.
     cpu.ram_write(root + 0*4, pte1);
     cpu.user_ram_write(0x10010, 0xdeadbeef);
-    cpu.priv_mode = 1;
+    cpu.sys.priv_mode = PrivMode::from_bits(1);
     // lui x6, 0x10 ; lw x5, 0x10(x6)  — virtual = 0x10010
     cpu.load_program(&[
         0x00010337,            // lui x6, 0x10
@@ -632,43 +633,43 @@ fn pipeline_sv32_identity_map_load_succeeds() {
     ]);
     for _ in 0..10 { cpu.step(); }
     assert_eq!(cpu.read_register(5), 0xdeadbeef);
-    assert_eq!(cpu.csrs.mcause, 0);
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0);
 }
 
 #[test]
 fn pipeline_sv32_store_to_read_only_page_traps() {
     let mut cpu = PipelineState::new();
     let root = 0x10000u32;
-    cpu.csrs.satp = (1 << 31) | (root >> 12);
+    cpu.sys.csrs.write(addr::SATP, (1 << 31) | (root >> 12));
     // L1[0] superpage with R but not W
     cpu.ram_write(root + 0*4, pte(0, V | R | X));
-    cpu.csrs.mtvec = 0x80;
-    cpu.priv_mode = 1;
+    cpu.sys.csrs.write(addr::MTVEC, 0x80);
+    cpu.sys.priv_mode = PrivMode::from_bits(1);
     // lui x6, 0x10 ; sw x0, 16(x6)
     cpu.load_program(&[
         0x00010337,
         0x00032823,
     ]);
     for _ in 0..10 { cpu.step(); }
-    assert_eq!(cpu.csrs.mcause, 15); // store page fault
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 15); // store page fault
 }
 
 #[test]
 fn pipeline_sv32_user_page_blocks_s_access() {
     let mut cpu = PipelineState::new();
     let root = 0x10000u32;
-    cpu.csrs.satp = (1 << 31) | (root >> 12);
+    cpu.sys.csrs.write(addr::SATP, (1 << 31) | (root >> 12));
     // L1[0] identity-maps code (no U). L1[1] = U-page leaf with R+W.
     cpu.ram_write(root + 0*4, pte(0, V | R | W | X));
     cpu.ram_write(root + 1*4, pte(1 << 10, V | R | W | U)); // PPN1=1
-    cpu.csrs.mtvec = 0x80;
-    cpu.priv_mode = 1; // S — should NOT be able to access U page (no SUM in 4.2)
+    cpu.sys.csrs.write(addr::MTVEC, 0x80);
+    cpu.sys.priv_mode = PrivMode::from_bits(1); // S — should NOT be able to access U page (no SUM in 4.2)
     cpu.load_program(&[
         0x00400337,        // lui x6, 0x400
         0x00032283,        // lw x5, 0(x6)
     ]);
     for _ in 0..15 { cpu.step(); }
-    assert_eq!(cpu.csrs.mcause, 13);
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 13);
 }
 
 // ── Phase 4.3: A/D bits, SUM/MXR, SFENCE.VMA ─────────────────────────
@@ -680,10 +681,10 @@ const D_BIT: u32 = 1 << 7;
 fn pipeline_sv32_load_sets_a_bit() {
     let mut cpu = PipelineState::new();
     let root = 0x10000u32;
-    cpu.csrs.satp = (1 << 31) | (root >> 12);
+    cpu.sys.csrs.write(addr::SATP, (1 << 31) | (root >> 12));
     cpu.ram_write(root + 0*4, pte(0, V | R | W | X)); // identity, no A yet
     cpu.user_ram_write(0x10010, 0xcafebabe);
-    cpu.priv_mode = 1;
+    cpu.sys.priv_mode = PrivMode::from_bits(1);
     cpu.load_program(&[
         0x00010337, // lui x6, 0x10
         0x01032283, // lw x5, 16(x6)
@@ -699,9 +700,9 @@ fn pipeline_sv32_load_sets_a_bit() {
 fn pipeline_sv32_store_sets_a_and_d_bits() {
     let mut cpu = PipelineState::new();
     let root = 0x10000u32;
-    cpu.csrs.satp = (1 << 31) | (root >> 12);
+    cpu.sys.csrs.write(addr::SATP, (1 << 31) | (root >> 12));
     cpu.ram_write(root + 0*4, pte(0, V | R | W | X));
-    cpu.priv_mode = 1;
+    cpu.sys.priv_mode = PrivMode::from_bits(1);
     cpu.load_program(&[
         0x00010337, // lui x6, 0x10
         0x00100293, // addi x5, x0, 1
@@ -719,7 +720,7 @@ fn pipeline_sv32_sum_allows_s_to_access_u_page() {
     // Need a second RAM page for the L0 table.
     cpu.machine_ram.resize(2048, 0);
     let root = 0x10000u32;
-    cpu.csrs.satp = (1 << 31) | (root >> 12);
+    cpu.sys.csrs.write(addr::SATP, (1 << 31) | (root >> 12));
     // L1[0] = identity superpage covering code (no U).
     cpu.ram_write(root + 0*4, pte(0, V | R | W | X));
     // L1[1] = pointer to L0 table at phys 0x11000 (PPN = 0x11).
@@ -727,27 +728,27 @@ fn pipeline_sv32_sum_allows_s_to_access_u_page() {
     // L0[0] (vpn0=0) leaf: vaddr 0x00400000 → phys 0x10000, U/R/W.
     cpu.ram_write(0x11000 + 0*4, pte(0x10, V | R | W | U));
     cpu.user_ram_write(0x10010, 0x1234_5678);
-    cpu.csrs.mstatus = 1 << 18; // SUM
-    cpu.priv_mode = 1;
+    cpu.sys.csrs.write(addr::MSTATUS, 1 << 18); // SUM
+    cpu.sys.priv_mode = PrivMode::from_bits(1);
     cpu.load_program(&[
         0x00400337, // lui x6, 0x400
         0x01032283, // lw x5, 16(x6)  → vaddr 0x00400010 → phys 0x10010
     ]);
     for _ in 0..12 { cpu.step(); }
     assert_eq!(cpu.read_register(5), 0x1234_5678);
-    assert_eq!(cpu.csrs.mcause, 0);
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0);
 }
 
 #[test]
 fn pipeline_sv32_mxr_allows_load_from_x_only_page() {
     let mut cpu = PipelineState::new();
     let root = 0x10000u32;
-    cpu.csrs.satp = (1 << 31) | (root >> 12);
+    cpu.sys.csrs.write(addr::SATP, (1 << 31) | (root >> 12));
     // L1[0] is X-only (executable, NOT readable). Without MXR a load
     // would fault; with MXR set in mstatus it should succeed.
     cpu.ram_write(root + 0*4, pte(0, V | X));
-    cpu.csrs.mstatus = 1 << 19; // MXR
-    cpu.priv_mode = 1;
+    cpu.sys.csrs.write(addr::MSTATUS, 1 << 19); // MXR
+    cpu.sys.priv_mode = PrivMode::from_bits(1);
     cpu.user_ram_write(0x10010, 0xface_d00d);
     cpu.load_program(&[
         0x00010337, // lui x6, 0x10
@@ -755,7 +756,7 @@ fn pipeline_sv32_mxr_allows_load_from_x_only_page() {
     ]);
     for _ in 0..12 { cpu.step(); }
     assert_eq!(cpu.read_register(5), 0xface_d00d);
-    assert_eq!(cpu.csrs.mcause, 0);
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0);
 }
 
 #[test]
@@ -766,7 +767,7 @@ fn pipeline_sfence_vma_is_nop() {
     cpu.load_program(&[0x12000073, 0x00700293]); // sfence.vma; addi x5, x0, 7
     for _ in 0..6 { cpu.step(); }
     assert_eq!(cpu.read_register(5), 7);
-    assert_eq!(cpu.csrs.mcause, 0);
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0);
 }
 
 // ── Phase 4.4: TLB ───────────────────────────────────────────────────
@@ -775,10 +776,10 @@ fn pipeline_sfence_vma_is_nop() {
 fn pipeline_tlb_hit_after_first_walk() {
     let mut cpu = PipelineState::new();
     let root = 0x10000u32;
-    cpu.csrs.satp = (1 << 31) | (root >> 12);
+    cpu.sys.csrs.write(addr::SATP, (1 << 31) | (root >> 12));
     cpu.ram_write(root + 0*4, pte(0, V | R | W | X));
     cpu.user_ram_write(0x10010, 0xa1a2a3a4);
-    cpu.priv_mode = 1;
+    cpu.sys.priv_mode = PrivMode::from_bits(1);
     cpu.load_program(&[
         0x00010337, // lui x6, 0x10
         0x01032283, // lw x5, 16(x6)
@@ -844,13 +845,13 @@ fn pipeline_inject_irq_handler_returns() {
     // Run setup + a few demo instructions.
     for _ in 0..10 { cpu.step(); }
     // Inject IRQ exactly like the Vue button does.
-    cpu.csrs.mstatus |= 1 << 3;     // MIE
-    cpu.csrs.mie     |= 1 << 11;    // MEIE
-    cpu.csrs.mip     |= 1 << 11;    // MEIP
+    { let v = cpu.sys.csrs.read(addr::MSTATUS) | (1 << 3); cpu.sys.csrs.write(addr::MSTATUS, v); }     // MIE
+    { let v = cpu.sys.csrs.read(addr::MIE) | (1 << 11); cpu.sys.csrs.write(addr::MIE, v); }    // MEIE
+    { let v = cpu.sys.csrs.read(addr::MIP) | (1 << 11); cpu.sys.csrs.write(addr::MIP, v); }    // MEIP
 
     cpu.step();
-    assert_eq!(cpu.csrs.mcause, 0x8000_000b);
-    let mepc = cpu.csrs.mepc;
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0x8000_000b);
+    let mepc = cpu.sys.csrs.read(addr::MEPC);
     // Drain the handler — after ~15 cycles mret has resolved in EX
     // and PC is back near mepc.
     for _ in 0..15 { cpu.step(); }
@@ -955,4 +956,68 @@ fn pipeline_mode2_loop_then_spin() {
     assert!(cpu.pc == 0x4c || cpu.pc == 0x50,
             "demo escaped to pc=0x{:x}", cpu.pc);
     assert_eq!(cpu.read_register(18), 42); // s2 from `addi s2, x0, 42`
+}
+
+// ── Shared system unit (sim/system): what the pipeline gained ───────────
+
+#[test]
+fn pipeline_irq_line_via_raise_irq() {
+    // External line (not a CSR poke): raise_irq ORs into mip at sampling
+    let mut cpu = PipelineState::new();
+    cpu.sys.csrs.write(addr::MTVEC, 0x80);
+    cpu.sys.csrs.write(addr::MSTATUS, 1 << 3);
+    cpu.sys.csrs.write(addr::MIE, 1 << 7);         // MTIE
+    cpu.load_program(&vec![0x00000013u32; 32]);
+    cpu.step();
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0);
+    cpu.sys.raise_irq(1 << 7);                      // MTIP
+    cpu.step();
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0x8000_0007);
+    assert!(cpu.sys.in_trap());
+}
+
+#[test]
+fn pipeline_vectored_mtvec_for_interrupts() {
+    let mut cpu = PipelineState::new();
+    cpu.sys.csrs.write(addr::MTVEC, 0x100 | 1);     // vectored
+    cpu.sys.csrs.write(addr::MSTATUS, 1 << 3);
+    cpu.sys.csrs.write(addr::MIE, 1 << 7);
+    cpu.sys.csrs.write(addr::MIP, 1 << 7);
+    cpu.load_program(&vec![0x00000013u32; 32]);
+    cpu.step();
+    // handler at base + 4 × cause (7); IF then advances pc by 4
+    assert_eq!(cpu.pc, 0x100 + 4 * 7 + 4);
+}
+
+#[test]
+fn pipeline_s_interrupt_delegated_from_u() {
+    let mut cpu = PipelineState::new();
+    cpu.sys.priv_mode = PrivMode::U;
+    cpu.sys.csrs.write(addr::MIDELEG, 1 << 9);      // SEI → S
+    cpu.sys.csrs.write(addr::STVEC, 0xc0);
+    cpu.sys.csrs.write(addr::MTVEC, 0x80);
+    cpu.sys.csrs.write(addr::MIE, 1 << 9);          // SEIE
+    cpu.sys.csrs.write(addr::MIP, 1 << 9);          // SEIP
+    cpu.load_program(&vec![0x00000013u32; 64]);
+    cpu.step();
+    assert_eq!(cpu.priv_bits(), 1);                 // now in S
+    assert_eq!(cpu.sys.csrs.read(addr::SCAUSE), 0x8000_0009);
+    assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0);
+    assert_eq!(cpu.pc, 0xc4);
+}
+
+#[test]
+fn pipeline_counters_and_misa() {
+    let mut cpu = PipelineState::new();
+    cpu.load_program(&[0x00100293, 0x00200313, 0x00300393]);   // 3 × addi
+    for _ in 0..8 { cpu.step(); }
+    // 3 addi + the NOPs behind them have left WB by now; cycle = clocks done
+    assert_eq!(cpu.sys.csrs.read(addr::CYCLE), 7);
+    assert!(cpu.sys.csrs.read(addr::INSTRET) >= 3);
+    assert_eq!(cpu.sys.csrs.read(addr::MISA), 0x4000_0100);
+    cpu.sys.csrs.write(addr::MISA, 0);                          // read-only
+    assert_eq!(cpu.sys.csrs.read(addr::MISA), 0x4000_0100);
+    cpu.reset();
+    assert_eq!(cpu.sys.csrs.read(addr::MISA), 0x4000_0100);
+    assert_eq!(cpu.sys.csrs.read(addr::INSTRET), 0);
 }

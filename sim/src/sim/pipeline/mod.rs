@@ -27,6 +27,8 @@ pub mod stage_ex;
 pub mod stage_ma;
 pub mod stage_wb;
 
+use crate::sim::system::addr;
+
 pub use state::{
     BranchMode, ControlBits, ExMa, ForwardSrc, IdEx, IfId, MaWb, PipelineState,
 };
@@ -114,6 +116,8 @@ impl PipelineState {
     pub fn step(&mut self) {
         if self.halted { return; }
         self.clear_per_cycle_state();
+        // cycle counter CSR = clocks completed so far
+        self.sys.csrs.set_counter(addr::CYCLE, self.cycle_count as u32);
 
         // ── 0. Interrupt check ──────────────────────────────────
         self.last_trap_taken = false;
@@ -130,6 +134,7 @@ impl PipelineState {
 
         // ── Run stages in reverse order (WB → IF) ──────────────
         stage_wb::compute_wb(self, &prev_ma_wb);
+        if prev_ma_wb.valid { self.sys.csrs.bump(addr::INSTRET); }
         let new_ma_wb = stage_ma::compute_ma(self, &prev_ex_ma);
         let ex_result = stage_ex::compute_ex(&prev_id_ex, &prev_ex_ma, &prev_ma_wb);
         let new_ex_ma = ex_result.ex_ma;
@@ -162,8 +167,8 @@ impl PipelineState {
     // ── Private helpers for step() ──────────────────────────────
 
     fn clear_per_cycle_state(&mut self) {
-        for (i, &a) in csr::CsrFile::known_addrs().iter().enumerate() {
-            self.last_csr_snapshot[i] = self.csrs.read(a);
+        for (i, &a) in csr::known_addrs().iter().enumerate() {
+            self.last_csr_snapshot[i] = self.sys.csrs.read(a);
         }
         self.reg_read_mask = 0;
         self.reg_write_mask = 0;
@@ -199,12 +204,12 @@ impl PipelineState {
     fn resolve_ex_trap(&mut self, ex_ma: &mut ExMa) -> Option<u32> {
         if !ex_ma.valid || ex_ma.trap_kind == 0 { return None; }
         let redirect = match ex_ma.trap_kind {
-            4 => self.do_mret(),
-            5 => self.do_sret(),
+            4 => self.sys.xret(false),
+            5 => self.sys.xret(true),
             kind => {
                 let cause: u32 = match kind {
                     1 => 2,
-                    2 => match self.priv_mode { 3 => 11, 1 => 9, _ => 8 },
+                    2 => self.sys.ecall_cause(),
                     3 => 3,
                     6 => 12,
                     _ => 0,
@@ -298,96 +303,22 @@ impl PipelineState {
         }
     }
 
-    /// Take a synchronous trap (illegal/ECALL/EBREAK). Updates mepc,
-    /// mcause, mtval, mstatus.{MIE,MPIE,MPP=M}. Returns the redirect
-    /// PC (mtvec, direct mode).
+    /// Take a synchronous trap through the shared system unit (delegation,
+    /// mstatus stacking, xcause / xepc / xtval). Returns the handler PC.
     fn take_trap(&mut self, cause: u32, epc: u32, tval: u32) -> u32 {
-        // Decide delegation: cause's low bits index medeleg (sync) or
-        // mideleg (interrupts). Delegate only if current priv ≤ S.
-        let is_int = (cause & 0x8000_0000) != 0;
-        let bit = (cause & 0x1f) as u32;
-        let deleg = if is_int { self.csrs.mideleg } else { self.csrs.medeleg };
-        let to_s = self.priv_mode <= 1 && (deleg & (1 << bit)) != 0;
-
-        if to_s {
-            self.csrs.sepc   = epc & !1;
-            self.csrs.scause = cause;
-            self.csrs.stval  = tval;
-            let m = self.csrs.mstatus;
-            let sie = (m >> 1) & 1;
-            // sstatus.SPIE ← SIE; SIE ← 0; SPP ← current priv (0 or 1)
-            let mut nm = m & !((1 << 1) | (1 << 5) | (1 << 8));
-            nm |= sie << 5;                       // SPIE
-            nm |= ((self.priv_mode & 1) as u32) << 8; // SPP
-            self.csrs.mstatus = nm;
-            self.priv_mode = 1; // S
-            self.csrs.stvec & !0x3
-        } else {
-            self.csrs.mepc   = epc & !1;
-            self.csrs.mcause = cause;
-            self.csrs.mtval  = tval;
-            let m = self.csrs.mstatus;
-            let mie = (m >> 3) & 1;
-            let mut nm = m & !((1 << 3) | (1 << 7) | (3 << 11));
-            nm |= mie << 7;             // MPIE = old MIE
-            nm |= (self.priv_mode as u32) << 11; // MPP = previous priv
-            self.csrs.mstatus = nm;
-            self.priv_mode = 3; // M
-            self.csrs.mtvec & !0x3
-        }
+        self.sys.trap(cause, false, epc, tval, self.cycle_count)
     }
 
-    /// MRET: restore mstatus.MIE from MPIE; MPIE←1; MPP←M. Returns mepc.
-    fn do_mret(&mut self) -> u32 {
-        let m = self.csrs.mstatus;
-        let mpie = (m >> 7) & 1;
-        let mpp  = (m >> 11) & 0b11;
-        let mut nm = m & !((1 << 3) | (1 << 7) | (3 << 11));
-        nm |= mpie << 3;      // MIE = MPIE
-        nm |= 1 << 7;         // MPIE = 1
-        nm |= 0b11 << 11;     // MPP ← M (lowest supported is M for now)
-        self.csrs.mstatus = nm;
-        self.priv_mode = mpp as u8;
-        self.csrs.mepc
-    }
-
-    /// SRET: restore sstatus.{SIE←SPIE, SPIE←1, SPP←0}, priv ← SPP.
-    fn do_sret(&mut self) -> u32 {
-        let m = self.csrs.mstatus;
-        let spie = (m >> 5) & 1;
-        let spp  = (m >> 8) & 1;
-        let mut nm = m & !((1 << 1) | (1 << 5) | (1 << 8));
-        nm |= spie << 1;     // SIE = SPIE
-        nm |= 1 << 5;        // SPIE = 1
-        // SPP cleared above (=U); spec says ←lowest supported (we have U).
-        self.csrs.mstatus = nm;
-        self.priv_mode = spp as u8; // 0=U, 1=S
-        self.csrs.sepc
-    }
-
-    /// Asynchronous interrupt check, called at the top of `step()`.
-    /// If an enabled interrupt is pending, redirects PC to mtvec and
-    /// records the trap state. We do NOT squash any in-flight stages
-    /// — async interrupts have no urgency, so the instructions
-    /// already in IF/ID/EX/MA/WB drain naturally. The handler simply
-    /// starts fetching at mtvec on this same cycle (the IF stage
-    /// will see the new PC), and the older in-flight instructions
-    /// complete behind it. `mepc` is set to the address that was
-    /// about to be fetched (`self.pc` at trap time) so `mret` resumes
-    /// exactly where the program would have continued.
-    /// Direct mtvec mode only. Priority: MEI (11) > MSI (3) > MTI (7).
+    /// Asynchronous interrupt check, called at the top of `step()`: the
+    /// shared system unit merges the external lines into mip and picks the
+    /// highest-priority enabled interrupt (M and S, mideleg). If one is
+    /// taken, PC is redirected to the handler. In-flight instructions are
+    /// not squashed — they drain behind it; `mepc` is the address that was
+    /// about to be fetched, so `mret` resumes exactly there.
     fn check_and_take_interrupt(&mut self) -> bool {
-        let mie_global = (self.csrs.mstatus >> 3) & 1 != 0;
-        if !mie_global { return false; }
-        let pending = self.csrs.mip & self.csrs.mie;
-        if pending == 0 { return false; }
-        let cause = if pending & (1 << 11) != 0 { 11 }
-                    else if pending & (1 << 3) != 0 { 3 }
-                    else if pending & (1 << 7) != 0 { 7 }
-                    else { return false; };
-        let int_cause = 0x8000_0000u32 | cause;
+        let Some(cause) = self.sys.sample_irq() else { return false };
         let epc = self.pc;
-        self.pc = self.take_trap(int_cause, epc, 0);
+        self.pc = self.sys.trap(cause, true, epc, 0, self.cycle_count);
         true
     }
 
@@ -403,9 +334,8 @@ impl PipelineState {
         self.last_ram_addr = 0;
         self.last_ram_kind = 0;
         self.last_ram_side = 0;
-        self.csrs = csr::CsrFile::default();
+        self.sys = state::pipeline_sys();
         self.tlb.flush();
-        self.priv_mode = 3;
         self.cycle_count = 0;
         self.halted = false;
         self.if_id = IfId::default();

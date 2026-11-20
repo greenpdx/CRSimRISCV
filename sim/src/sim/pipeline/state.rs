@@ -6,7 +6,8 @@
 //!
 //! See `sim/docs/pipeline-plan.md` for the full design discussion.
 
-use super::csr::CsrFile;
+use super::csr::known_addrs;
+use crate::sim::system::{addr, PrivMode, SysUnit};
 use super::tlb::Tlb;
 
 /// Branch resolution strategy.
@@ -209,10 +210,10 @@ pub struct PipelineState {
     pub machine_ram: Vec<u32>,
     pub user_ram: Vec<u32>,
     pub io_data: u32,
-    pub csrs: CsrFile,
+    /// Privilege mode, CSRs, trap entry / return, IRQ sampling — the
+    /// system unit shared with the other cores (sim/system).
+    pub sys: SysUnit,
     pub tlb: Tlb,
-    /// Current privilege mode: 3=M, 1=S, 0=U. Reset = M.
-    pub priv_mode: u8,
     /// Branch resolution strategy.
     pub branch_mode: BranchMode,
     pub cycle_count: u64,
@@ -266,9 +267,8 @@ impl Default for PipelineState {
             machine_ram: vec![0; MEM_WORDS],
             user_ram: vec![0; MEM_WORDS],
             io_data: 0,
-            csrs: CsrFile::default(),
+            sys: pipeline_sys(),
             tlb: Tlb::default(),
-            priv_mode: 3,
             branch_mode: BranchMode::default(),
             cycle_count: 0,
             halted: false,
@@ -288,7 +288,7 @@ impl Default for PipelineState {
             last_ram_addr: 0,
             last_ram_kind: 0,
             last_ram_side: 0,
-            last_csr_snapshot: vec![0; CsrFile::known_addrs().len()],
+            last_csr_snapshot: vec![0; known_addrs().len()],
         }
     }
 }
@@ -335,7 +335,7 @@ impl PipelineState {
     /// for the visualizer.
     pub fn priv_ram_read(&mut self, addr: u32) -> u32 {
         let v;
-        if self.priv_mode == 3 {
+        if self.sys.priv_mode == PrivMode::M {
             v = self.ram_read(addr);
             self.last_ram_side = 0;
         } else {
@@ -348,7 +348,7 @@ impl PipelineState {
     }
 
     pub fn priv_ram_write(&mut self, addr: u32, val: u32) {
-        if self.priv_mode == 3 {
+        if self.sys.priv_mode == PrivMode::M {
             self.ram_write(addr, val);
             self.last_ram_side = 0;
         } else {
@@ -368,4 +368,16 @@ impl PipelineState {
     pub fn read_register(&self, idx: u8) -> u32 {
         self.registers[(idx as usize) & 0x1f]
     }
+}
+
+/// The pipeline's system unit at reset: M-mode, misa = RV32I.
+pub fn pipeline_sys() -> SysUnit {
+    let mut s = SysUnit::new();
+    s.csrs.set_counter(addr::MISA, 0x4000_0100);   // MXL = 1 (RV32), I
+    s
+}
+
+impl PipelineState {
+    /// Current privilege mode as bits: 3 = M, 1 = S, 0 = U.
+    pub fn priv_bits(&self) -> u8 { self.sys.priv_mode as u8 }
 }

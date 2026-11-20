@@ -470,7 +470,7 @@ impl JsPipelineState {
     #[wasm_bindgen(getter)] pub fn last_ram_addr(&self) -> u32 { self.inner.last_ram_addr }
     #[wasm_bindgen(getter)] pub fn last_ram_kind(&self) -> u8 { self.inner.last_ram_kind }
     #[wasm_bindgen(getter)] pub fn last_ram_side(&self) -> u8 { self.inner.last_ram_side }
-    #[wasm_bindgen(getter)] pub fn priv_mode(&self) -> u8 { self.inner.priv_mode }
+    #[wasm_bindgen(getter)] pub fn priv_mode(&self) -> u8 { self.inner.priv_bits() }
     #[wasm_bindgen(getter)] pub fn branch_mode(&self) -> u8 { self.inner.branch_mode.to_u8() }
     pub fn set_branch_mode(&mut self, mode: u8) { self.inner.branch_mode = BranchMode::from_u8(mode); }
 
@@ -505,10 +505,10 @@ impl JsPipelineState {
             ma:  pipeline::active_components(&self.inner, Stage::MA),
             wb:  pipeline::active_components(&self.inner, Stage::WB),
         };
-        let csrs: Vec<CsrEntryJson> = crate::sim::pipeline::csr::CsrFile::known_addrs()
+        let csrs: Vec<CsrEntryJson> = crate::sim::pipeline::csr::known_addrs()
             .iter().enumerate()
             .map(|(i, &a)| {
-                let v = self.inner.csrs.read(a);
+                let v = self.inner.sys.csrs.read(a);
                 let prev = self.inner.last_csr_snapshot.get(i).copied().unwrap_or(0);
                 CsrEntryJson { addr: a, value: v, changed: v != prev }
             })
@@ -517,7 +517,7 @@ impl JsPipelineState {
             cycle: self.inner.cycle_count,
             pc: self.inner.pc,
             halted: self.inner.halted,
-            priv_mode: self.inner.priv_mode,
+            priv_mode: self.inner.priv_bits(),
             branch_mode: self.inner.branch_mode.to_u8(),
             registers: self.inner.registers.to_vec(),
             reg_read_mask: self.inner.reg_read_mask,
@@ -565,15 +565,15 @@ impl JsPipelineState {
     }
 
     // ── Zicsr CSR accessors ────────────────────────────────────────────
-    pub fn csr_read(&self, addr: u16) -> u32 { self.inner.csrs.read(addr) }
-    pub fn poke_csr(&mut self, addr: u16, val: u32) { self.inner.csrs.write(addr, val); }
+    pub fn csr_read(&self, addr: u16) -> u32 { self.inner.sys.csrs.read(addr) }
+    pub fn poke_csr(&mut self, addr: u16, val: u32) { self.inner.sys.csrs.write(addr, val); }
     /// Returns a JS array of `{ addr, value }` for every CSR known to the file.
     pub fn csr_snapshot(&self) -> JsValue {
         #[derive(Serialize)]
         struct Entry { addr: u16, value: u32 }
-        let v: Vec<Entry> = crate::sim::pipeline::csr::CsrFile::known_addrs()
+        let v: Vec<Entry> = crate::sim::pipeline::csr::known_addrs()
             .iter()
-            .map(|&a| Entry { addr: a, value: self.inner.csrs.read(a) })
+            .map(|&a| Entry { addr: a, value: self.inner.sys.csrs.read(a) })
             .collect();
         serde_wasm_bindgen::to_value(&v).unwrap_or(JsValue::NULL)
     }
