@@ -214,6 +214,11 @@ fn encode_instruction(
         "sra"  => return r_type(&operands, 0b0110011, 0b101, 0b0100000),
         "slt"  => return r_type(&operands, 0b0110011, 0b010, 0b0000000),
         "sltu" => return r_type(&operands, 0b0110011, 0b011, 0b0000000),
+        // Zmmul (M-extension multiplies, no divide)
+        "mul"    => return r_type(&operands, 0b0110011, 0b000, 0b0000001),
+        "mulh"   => return r_type(&operands, 0b0110011, 0b001, 0b0000001),
+        "mulhsu" => return r_type(&operands, 0b0110011, 0b010, 0b0000001),
+        "mulhu"  => return r_type(&operands, 0b0110011, 0b011, 0b0000001),
         _ => {}
     }
 
@@ -442,4 +447,16 @@ fn branch_type(
     let rs2 = parse_reg(operands, 1)?;
     let imm = resolve_imm(operands, 2, current_addr, labels)?;
     Ok(encode_b(opcode, funct3, rs1, rs2, imm))
+}
+
+#[cfg(test)]
+mod zmmul_tests {
+    use super::*;
+
+    #[test]
+    fn assembles_zmmul() {
+        let out = assemble("mul x10, x5, x6\nmulh x11, x5, x6\nmulhsu x12, x5, x6\nmulhu x13, x5, x6\n");
+        let words: Vec<u32> = out.instructions.iter().map(|i| i.value).collect();
+        assert_eq!(words, vec![0x0262_8533, 0x0262_95b3, 0x0262_a633, 0x0262_b6b3]);
+    }
 }
