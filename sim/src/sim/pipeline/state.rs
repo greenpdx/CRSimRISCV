@@ -9,6 +9,18 @@
 use super::csr::known_addrs;
 use crate::sim::system::{addr, PrivMode, SysUnit};
 use super::tlb::Tlb;
+use crate::sim::memsys::{Event, MemSystem, Port};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+/// Memory-panel mode: this pipeline is core `core` of a shared memory
+/// system (caches, coherence, one physical memory). Its fetch, loads /
+/// stores and page-table walks go through `sys`; its MMU reports events.
+#[derive(Debug, Clone)]
+pub struct Hier {
+    pub core: u8,
+    pub sys: Rc<RefCell<MemSystem>>,
+}
 
 /// Branch resolution strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,6 +226,8 @@ pub struct PipelineState {
     /// system unit shared with the other cores (sim/system).
     pub sys: SysUnit,
     pub tlb: Tlb,
+    /// Memory-panel mode (None = the flat ROM / RAM model, as always).
+    pub hier: Option<Hier>,
     /// Branch resolution strategy.
     pub branch_mode: BranchMode,
     pub cycle_count: u64,
@@ -268,6 +282,7 @@ impl Default for PipelineState {
             user_ram: vec![0; MEM_WORDS],
             io_data: 0,
             sys: pipeline_sys(),
+            hier: None,
             tlb: Tlb::default(),
             branch_mode: BranchMode::default(),
             cycle_count: 0,
@@ -303,6 +318,7 @@ impl PipelineState {
     }
 
     pub fn rom_read(&self, addr: u32) -> u32 {
+        if let Some(h) = &self.hier { return h.sys.borrow_mut().read(h.core as usize, addr, Port::Fetch); }
         let idx = ((addr.wrapping_sub(ROM_BASE)) >> 2) as usize;
         self.rom.get(idx).copied().unwrap_or(0)
     }
@@ -334,6 +350,12 @@ impl PipelineState {
     /// machine RAM; U/S-mode hits user RAM. Records `last_ram_*`
     /// for the visualizer.
     pub fn priv_ram_read(&mut self, addr: u32) -> u32 {
+        if let Some(h) = self.hier.clone() {
+            let v = h.sys.borrow_mut().read(h.core as usize, addr, Port::Load);
+            self.last_ram_addr = addr & !3;
+            self.last_ram_kind = 1;
+            return v;
+        }
         let v;
         if self.sys.priv_mode == PrivMode::M {
             v = self.ram_read(addr);
@@ -348,6 +370,12 @@ impl PipelineState {
     }
 
     pub fn priv_ram_write(&mut self, addr: u32, val: u32) {
+        if let Some(h) = self.hier.clone() {
+            h.sys.borrow_mut().write(h.core as usize, addr, val, Port::Store);
+            self.last_ram_addr = addr & !3;
+            self.last_ram_kind = 2;
+            return;
+        }
         if self.sys.priv_mode == PrivMode::M {
             self.ram_write(addr, val);
             self.last_ram_side = 0;
@@ -380,4 +408,38 @@ pub fn pipeline_sys() -> SysUnit {
 impl PipelineState {
     /// Current privilege mode as bits: 3 = M, 1 = S, 0 = U.
     pub fn priv_bits(&self) -> u8 { self.sys.priv_mode as u8 }
+}
+
+// ── Memory-panel mode helpers (no-ops / flat RAM without `hier`) ──────────
+impl PipelineState {
+    /// Page-table read at `level` (1 = root table, 0 = leaf table).
+    pub fn pte_read(&self, addr: u32, level: u8) -> u32 {
+        match &self.hier {
+            Some(h) => {
+                let mut m = h.sys.borrow_mut();
+                let pte = m.read(h.core as usize, addr, Port::Walk);
+                m.event(Event::Walk { core: h.core, level, pte_addr: addr, pte });
+                pte
+            }
+            None => self.ram_read(addr),
+        }
+    }
+
+    /// Page-table write (A / D bits).
+    pub fn pte_write(&mut self, addr: u32, val: u32) {
+        match &self.hier {
+            Some(h) => h.sys.borrow_mut().write(h.core as usize, addr, val, Port::Walk),
+            None => self.ram_write(addr, val),
+        }
+    }
+
+    /// Report an MMU event to the memory system (memory-panel mode only).
+    pub fn mem_event(&self, e: impl FnOnce(u8) -> Event) {
+        if let Some(h) = &self.hier { h.sys.borrow_mut().event(e(h.core)); }
+    }
+
+    /// The next page-table reads translate a fetch (true) or a load / store.
+    pub fn walk_for_fetch(&self, fetch: bool) {
+        if let Some(h) = &self.hier { h.sys.borrow_mut().set_walk_for_fetch(h.core as usize, fetch); }
+    }
 }

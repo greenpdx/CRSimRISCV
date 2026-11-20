@@ -115,6 +115,22 @@ impl PipelineState {
     /// Advance the simulator by one clock cycle.
     pub fn step(&mut self) {
         if self.halted { return; }
+        // Memory-panel mode: frozen while an earlier access is still in
+        // flight; otherwise run the cycle and freeze for the rest of the
+        // slower side's latency.
+        let hier = self.hier.clone();
+        if let Some(h) = &hier {
+            if h.sys.borrow_mut().core_begin(h.core as usize) {
+                self.cycle_count += 1;
+                return;
+            }
+        }
+        self.step_cycle();
+        if let Some(h) = &hier { h.sys.borrow_mut().core_end(h.core as usize); }
+    }
+
+    /// One clock of the pipeline (the body of `step`).
+    fn step_cycle(&mut self) {
         self.clear_per_cycle_state();
         // cycle counter CSR = clocks completed so far
         self.sys.csrs.set_counter(addr::CYCLE, self.cycle_count as u32);

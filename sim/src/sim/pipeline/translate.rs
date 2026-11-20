@@ -6,6 +6,7 @@
 
 use super::state::PipelineState;
 use crate::sim::system::addr;
+use crate::sim::memsys::Event;
 use super::tlb::TlbEntry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,9 +30,21 @@ const MSTATUS_MXR: u32 = 1 << 19;
 /// On success, hardware-manages A/D bits: sets A on every access,
 /// sets D on stores. The updated PTE is written back to RAM.
 pub fn translate(state: &mut PipelineState, vaddr: u32, access: AccessKind) -> Result<u32, u32> {
+    if state.hier.is_none() { return translate_inner(state, vaddr, access); }
+    state.walk_for_fetch(access == AccessKind::Fetch);
+    let r = translate_inner(state, vaddr, access);
+    if let Err(cause) = r {
+        state.mem_event(|core| Event::PageFault { core, va: vaddr, cause });
+    }
+    r
+}
+
+fn translate_inner(state: &mut PipelineState, vaddr: u32, access: AccessKind) -> Result<u32, u32> {
     // Bypass translation in M-mode or when satp.MODE == 0 (Bare).
-    if state.priv_bits() == 3 { return Ok(vaddr); }
-    if (state.sys.csrs.read(addr::SATP) >> 31) == 0 { return Ok(vaddr); }
+    if state.priv_bits() == 3 || (state.sys.csrs.read(addr::SATP) >> 31) == 0 {
+        state.mem_event(|core| Event::Bare { core, va: vaddr });
+        return Ok(vaddr);
+    }
 
     let fault_cause = match access {
         AccessKind::Fetch => 12,
@@ -52,13 +65,16 @@ pub fn translate(state: &mut PipelineState, vaddr: u32, access: AccessKind) -> R
             return Err(fault_cause);
         }
         update_ad_for_tlb_entry(state, vpn, entry, access);
-        if entry.is_super {
-            let ppn1 = entry.ppn >> 10;
-            return Ok((ppn1 << 22) | (vaddr & 0x003f_ffff));
+        let pa = if entry.is_super {
+            ((entry.ppn >> 10) << 22) | (vaddr & 0x003f_ffff)
         } else {
-            return Ok((entry.ppn << 12) | off);
-        }
+            (entry.ppn << 12) | off
+        };
+        let idx = state.tlb.last_index;
+        state.mem_event(|core| Event::TlbHit { core, idx, va: vaddr, pa });
+        return Ok(pa);
     }
+    state.mem_event(|core| Event::TlbMiss { core, va: vaddr });
 
     let root_ppn = state.sys.csrs.read(addr::SATP) & 0x003f_ffff;
     let root = root_ppn << 12;
@@ -67,7 +83,7 @@ pub fn translate(state: &mut PipelineState, vaddr: u32, access: AccessKind) -> R
 
     // Level 1 PTE
     let pte1_addr = root.wrapping_add(vpn1 * 4);
-    let pte1 = state.ram_read(pte1_addr);
+    let pte1 = state.pte_read(pte1_addr, 1);
     if !pte_valid(pte1) { return Err(fault_cause); }
 
     let leaf1 = (pte1 & (PTE_R | PTE_W | PTE_X)) != 0;
@@ -81,13 +97,16 @@ pub fn translate(state: &mut PipelineState, vaddr: u32, access: AccessKind) -> R
         // Install superpage TLB entry. ppn stored as full-PPN form
         // (ppn1 in upper 10 bits, 0 in lower 10).
         state.tlb.install(vpn, ppn1 << 10, pte1, true);
-        return Ok((ppn1 << 22) | (vaddr & 0x003f_ffff));
+        let pa = (ppn1 << 22) | (vaddr & 0x003f_ffff);
+        let idx = ((vpn >> 10) & 7) as u8;
+        state.mem_event(|core| Event::TlbFill { core, idx, va: vaddr, pa });
+        return Ok(pa);
     }
 
     // Not a leaf — walk to L0.
     let next_ppn = (pte1 >> 10) & 0x003f_ffff;
     let pte0_addr = (next_ppn << 12).wrapping_add(vpn0 * 4);
-    let pte0 = state.ram_read(pte0_addr);
+    let pte0 = state.pte_read(pte0_addr, 0);
     if !pte_valid(pte0) { return Err(fault_cause); }
 
     let leaf0 = (pte0 & (PTE_R | PTE_W | PTE_X)) != 0;
@@ -97,7 +116,10 @@ pub fn translate(state: &mut PipelineState, vaddr: u32, access: AccessKind) -> R
 
     let ppn = (pte0 >> 10) & 0x003f_ffff;
     state.tlb.install(vpn, ppn, pte0, false);
-    Ok((ppn << 12) | off)
+    let pa = (ppn << 12) | off;
+    let idx = (vpn & 7) as u8;
+    state.mem_event(|core| Event::TlbFill { core, idx, va: vaddr, pa });
+    Ok(pa)
 }
 
 /// Replay the A/D writeback for a TLB hit. Updates the in-memory PTE
@@ -118,13 +140,13 @@ fn update_ad_for_tlb_entry(state: &mut PipelineState, vpn: u32, mut entry: TlbEn
     } else {
         let vpn1 = vpn >> 10;
         let vpn0 = vpn & 0x3ff;
-        let pte1 = state.ram_read(root.wrapping_add(vpn1 * 4));
+        let pte1 = state.pte_read(root.wrapping_add(vpn1 * 4), 1);
         let next_ppn = (pte1 >> 10) & 0x003f_ffff;
         (next_ppn << 12).wrapping_add(vpn0 * 4)
     };
     let mut new_pte = entry.pte | PTE_A;
     if access == AccessKind::Store { new_pte |= PTE_D; }
-    state.ram_write(pte_addr, new_pte);
+    state.pte_write(pte_addr, new_pte);
     entry.pte = new_pte;
     // Re-install with updated pte. (install slot is deterministic.)
     state.tlb.install(vpn, entry.ppn, new_pte, entry.is_super);
@@ -166,6 +188,6 @@ fn update_ad(state: &mut PipelineState, pte_addr: u32, pte: u32, access: AccessK
     let mut new_pte = pte | PTE_A;
     if access == AccessKind::Store { new_pte |= PTE_D; }
     if new_pte != pte {
-        state.ram_write(pte_addr, new_pte);
+        state.pte_write(pte_addr, new_pte);
     }
 }
