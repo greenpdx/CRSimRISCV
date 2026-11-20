@@ -93,6 +93,14 @@ mod tests {
         let r = d(r_type(0b0000001, 7, 6, 0b000, 5));
         assert_eq!((r.class, r.mnemonic.as_str(), r.operands.as_str()), ("M", "MUL", "x5, x6, x7"));
     }
+    #[test] fn zmmul_all_four() {
+        // the words the assembler emits for mul / mulh / mulhsu / mulhu x10..x13, x5, x6
+        for (w, m, ops) in [(0x0262_8533, "MUL", "x10, x5, x6"), (0x0262_95b3, "MULH", "x11, x5, x6"),
+                            (0x0262_a633, "MULHSU", "x12, x5, x6"), (0x0262_b6b3, "MULHU", "x13, x5, x6")] {
+            let r = d(w);
+            assert_eq!((r.class, r.mnemonic.as_str(), r.operands.as_str()), ("M", m, ops));
+        }
+    }
     #[test] fn divu_x5_x6_x7() {
         assert_eq!(mnem(r_type(0b0000001, 7, 6, 0b101, 5)), "DIVU");
     }

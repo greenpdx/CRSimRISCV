@@ -214,6 +214,11 @@ fn encode_instruction(
         "sra"  => return r_type(&operands, 0b0110011, 0b101, 0b0100000),
         "slt"  => return r_type(&operands, 0b0110011, 0b010, 0b0000000),
         "sltu" => return r_type(&operands, 0b0110011, 0b011, 0b0000000),
+        // Zmmul (M-extension multiplies, no divide)
+        "mul"    => return r_type(&operands, 0b0110011, 0b000, 0b0000001),
+        "mulh"   => return r_type(&operands, 0b0110011, 0b001, 0b0000001),
+        "mulhsu" => return r_type(&operands, 0b0110011, 0b010, 0b0000001),
+        "mulhu"  => return r_type(&operands, 0b0110011, 0b011, 0b0000001),
         _ => {}
     }
 
@@ -266,6 +271,30 @@ fn encode_instruction(
         "sb" => return store_type(&operands, 0b0100011, 0b000),
         "sh" => return store_type(&operands, 0b0100011, 0b001),
         "sw" => return store_type(&operands, 0b0100011, 0b010),
+        _ => {}
+    }
+
+    // Branch pseudo-instructions: one real branch each (x0 filled in or
+    // operands swapped), so they are one word and never shift labels.
+    let pseudo_branch = |f3: u32, rs1: &str, rs2: &str, n: usize| -> Result<u32, String> {
+        if operands.len() != n {
+            return Err(format!("{} expects {} operands, got {}", mnemonic, n, operands.len()));
+        }
+        let target = operands[n - 1];
+        branch_type(&[rs1, rs2, target], 0b1100011, f3, current_addr, labels)
+    };
+    let op = |i: usize| operands.get(i).copied().unwrap_or("");
+    match mnemonic.as_str() {
+        "beqz" => return pseudo_branch(0b000, op(0), "x0", 2),
+        "bnez" => return pseudo_branch(0b001, op(0), "x0", 2),
+        "bltz" => return pseudo_branch(0b100, op(0), "x0", 2),
+        "bgez" => return pseudo_branch(0b101, op(0), "x0", 2),
+        "bgtz" => return pseudo_branch(0b100, "x0", op(0), 2),
+        "blez" => return pseudo_branch(0b101, "x0", op(0), 2),
+        "bgt"  => return pseudo_branch(0b100, op(1), op(0), 3),
+        "ble"  => return pseudo_branch(0b101, op(1), op(0), 3),
+        "bgtu" => return pseudo_branch(0b110, op(1), op(0), 3),
+        "bleu" => return pseudo_branch(0b111, op(1), op(0), 3),
         _ => {}
     }
 
@@ -442,4 +471,58 @@ fn branch_type(
     let rs2 = parse_reg(operands, 1)?;
     let imm = resolve_imm(operands, 2, current_addr, labels)?;
     Ok(encode_b(opcode, funct3, rs1, rs2, imm))
+}
+
+#[cfg(test)]
+mod zmmul_tests {
+    use super::*;
+
+    #[test]
+    fn assembles_zmmul() {
+        let out = assemble("mul x10, x5, x6\nmulh x11, x5, x6\nmulhsu x12, x5, x6\nmulhu x13, x5, x6\n");
+        let words: Vec<u32> = out.instructions.iter().map(|i| i.value).collect();
+        assert_eq!(words, vec![0x0262_8533, 0x0262_95b3, 0x0262_a633, 0x0262_b6b3]);
+    }
+}
+
+#[cfg(test)]
+mod branch_pseudo_tests {
+    use super::*;
+
+    fn words(src: &str) -> Vec<u32> {
+        let out = assemble(src);
+        assert!(out.success, "{:?}", out.errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+        out.instructions.iter().map(|i| i.value).collect()
+    }
+
+    #[test]
+    fn each_pseudo_matches_its_real_branch() {
+        let pairs = [
+            ("beqz x5, 8", "beq x5, x0, 8"),     ("bnez x5, 8", "bne x5, x0, 8"),
+            ("bltz x5, 8", "blt x5, x0, 8"),     ("bgez x5, 8", "bge x5, x0, 8"),
+            ("bgtz x5, 8", "blt x0, x5, 8"),     ("blez x5, 8", "bge x0, x5, 8"),
+            ("bgt x5, x6, 8", "blt x6, x5, 8"),  ("ble x5, x6, 8", "bge x6, x5, 8"),
+            ("bgtu x5, x6, 8", "bltu x6, x5, 8"), ("bleu x5, x6, 8", "bgeu x6, x5, 8"),
+        ];
+        for (p, r) in pairs {
+            assert_eq!(words(p), words(r), "{p} vs {r}");
+        }
+    }
+
+    #[test]
+    fn labels_forward_and_backward() {
+        let src = "top:\nbnez x5, done\naddi x5, x5, -1\nbgtz x5, top\nble x5, x6, top\ndone:\nnop\n";
+        let real = "top:\nbne x5, x0, done\naddi x5, x5, -1\nblt x0, x5, top\nbge x6, x5, top\ndone:\nnop\n";
+        assert_eq!(words(src), words(real));
+        assert_eq!(words(src).len(), 5);
+    }
+
+    #[test]
+    fn wrong_operand_count_is_an_error() {
+        for src in ["beqz x5, x6, 8", "bgt x5, 8", "bnez"] {
+            let out = assemble(src);
+            assert!(!out.success, "{src} should fail");
+            assert!(out.errors[0].message.contains("expects"), "{src}: {}", out.errors[0].message);
+        }
+    }
 }
