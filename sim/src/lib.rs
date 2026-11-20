@@ -40,6 +40,7 @@ pub mod sim {
     pub mod trace;
     pub mod micro;
     pub mod trap;
+    pub mod system;
     pub mod decode;
     pub mod forwarding;
     pub mod execute;
