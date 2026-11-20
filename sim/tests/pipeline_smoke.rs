@@ -1021,3 +1021,52 @@ fn pipeline_counters_and_misa() {
     assert_eq!(cpu.sys.csrs.read(addr::MISA), 0x4000_0100);
     assert_eq!(cpu.sys.csrs.read(addr::INSTRET), 0);
 }
+
+// ── Data hazards in every branch mode (regression) ──────────────────────
+// Each program's dependent instruction must see the producer's value, by
+// EX/MA or MA/WB forwarding, WB-before-ID, or a load-use / CSR stall.
+
+mod hazards {
+    use cpu_sim::sim::pipeline::{BranchMode, PipelineState};
+
+    fn addi(rd: u32, rs1: u32, imm: i32) -> u32 { ((imm as u32 & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x13 }
+    fn add(rd: u32, rs1: u32, rs2: u32) -> u32 { (rs2 << 20) | (rs1 << 15) | (rd << 7) | 0x33 }
+    fn jal(rd: u32, off: i32) -> u32 {
+        let i = off as u32;
+        ((i >> 20) & 1) << 31 | ((i >> 1) & 0x3ff) << 21 | ((i >> 11) & 1) << 20 | ((i >> 12) & 0xff) << 12 | rd << 7 | 0x6f
+    }
+    fn jalr(rd: u32, rs1: u32, imm: i32) -> u32 { ((imm as u32 & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x67 }
+    fn branch(f3: u32, rs1: u32, rs2: u32, off: i32) -> u32 {
+        let o = off as u32;
+        ((o >> 12) & 1) << 31 | ((o >> 5) & 0x3f) << 25 | rs2 << 20 | rs1 << 15 | f3 << 12 | ((o >> 1) & 0xf) << 8 | ((o >> 11) & 1) << 7 | 0x63
+    }
+    fn csr(f3: u32, rd: u32, c: u32, rs1: u32) -> u32 { c << 20 | rs1 << 15 | f3 << 12 | rd << 7 | 0x73 }
+    const NOP: u32 = 0x13;
+    const MODES: [BranchMode; 3] = [BranchMode::Eager, BranchMode::AlwaysTarget, BranchMode::EarlyResolve];
+
+    /// Run `prog` (+ spin) in every branch mode; check (reg, value) pairs.
+    fn check(prog: &[u32], want: &[(u8, u32)]) {
+        for mode in MODES {
+            let mut p = prog.to_vec();
+            p.push(0x0000_006f);
+            p.resize(64, NOP);
+            let mut cpu = PipelineState::new();
+            cpu.branch_mode = mode;
+            cpu.load_program(&p);
+            for _ in 0..60 { cpu.step(); }
+            for &(r, v) in want {
+                assert_eq!(cpu.read_register(r), v, "{mode:?}: x{r}");
+            }
+        }
+    }
+
+    #[test] fn raw_1_apart_ex_ma_forward() { check(&[addi(5, 0, 9), addi(6, 5, 1)], &[(6, 10)]); }
+    #[test] fn raw_2_apart_ma_wb_forward() { check(&[addi(5, 0, 9), NOP, addi(6, 5, 1)], &[(6, 10)]); }
+    #[test] fn raw_3_apart_wb_before_id()  { check(&[addi(5, 0, 9), NOP, NOP, addi(6, 5, 1)], &[(6, 10)]); }
+    #[test] fn both_operands_forwarded()    { check(&[addi(5, 0, 9), addi(6, 0, 4), add(7, 5, 6)], &[(7, 13)]); }
+    #[test] fn jal_link_used_at_target()    { check(&[jal(1, 8), NOP, addi(5, 1, 0)], &[(5, 4)]); }
+    #[test] fn jalr_link_used_at_target()   { check(&[addi(2, 0, 12), jalr(1, 2, 0), NOP, addi(5, 1, 0)], &[(5, 8)]); }
+    #[test] fn branch_on_fresh_reg_taken()  { check(&[addi(5, 0, 1), branch(1, 5, 0, 8), addi(6, 0, 7), addi(7, 0, 3)], &[(6, 0), (7, 3)]); }
+    #[test] fn branch_on_fresh_reg_not_taken() { check(&[addi(5, 0, 1), branch(0, 5, 0, 8), addi(6, 0, 7), addi(7, 0, 3)], &[(6, 7), (7, 3)]); }
+    #[test] fn csrr_result_used_next()      { check(&[addi(5, 0, 5), csr(1, 0, 0x340, 5), csr(2, 6, 0x340, 0), addi(7, 6, 1)], &[(7, 6)]); }
+}
