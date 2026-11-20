@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import CpuLayout from './components/CpuLayout.vue'
+import MulticycleLayout from './components/MulticycleLayout.vue'
+import { useCpuConfig } from './stores/cpuConfig'
 import EditorView from './views/EditorView.vue'
 import PipelineView from './views/PipelineView.vue'
 import MicroStepView from './views/MicroStepView.vue'
 import MicroStepPipelineView from './views/MicroStepPipelineView.vue'
 import MicroStepBarrelView from './views/MicroStepBarrelView.vue'
+
+const config = useCpuConfig()
 
 const activeTab = ref<'cpu' | 'editor' | 'pipeline' | 'microstep' | 'microstep-pipeline' | 'microstep-barrel'>('cpu')
 </script>
@@ -13,7 +17,17 @@ const activeTab = ref<'cpu' | 'editor' | 'pipeline' | 'microstep' | 'microstep-p
 <template>
   <div class="app">
     <div v-show="activeTab === 'cpu'">
+      <!-- Config → Multicycle picks which datapath panel is shown -->
+      <MulticycleLayout
+        v-if="config.multicycle"
+        @switch-tab="activeTab = 'editor'"
+        @switch-pipeline="activeTab = 'pipeline'"
+        @switch-microstep="activeTab = 'microstep'"
+        @switch-microstep-pipeline="activeTab = 'microstep-pipeline'"
+        @switch-microstep-barrel="activeTab = 'microstep-barrel'"
+      />
       <CpuLayout
+        v-else
         @switch-tab="activeTab = 'editor'"
         @switch-pipeline="activeTab = 'pipeline'"
         @switch-microstep="activeTab = 'microstep'"
