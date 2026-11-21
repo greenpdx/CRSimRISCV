@@ -30,7 +30,7 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
     // translation (IO is M-mode-only in our model). On fault, return
     // a MaWb carrying the trap kind so step() delivers the trap.
     let needs_xlat = ex_ma.ctrl.mem_read || ex_ma.ctrl.mem_write;
-    let phys_addr = if needs_xlat && !PipelineState::is_io(vaddr) {
+    let phys_addr = if needs_xlat && !state.io_at(vaddr) {
         let access = if ex_ma.ctrl.mem_write { AccessKind::Store } else { AccessKind::Load };
         match translate(state, vaddr, access) {
             Ok(p) => p,
@@ -57,7 +57,7 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
     let addr = phys_addr;
 
     if ex_ma.ctrl.mem_read {
-        let raw = if PipelineState::is_io(vaddr) {
+        let raw = if state.io_at(vaddr) {
             state.io_data
         } else {
             state.priv_ram_read(addr)
@@ -75,19 +75,22 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
         let rs1_marker = if ex_ma.csr_src_is_zero { 0 } else { 1 };
         let r = state.sys.csr(addr, f3, rs1_marker, ex_ma.csr_write_val);
         mem_data = r.old;
-        // Phase 4.4: writes to satp invalidate the entire TLB.
-        if r.write && addr == super::csr::CSR_SATP {
-            state.tlb.flush();
-        }
+        // A satp write does not flush the TLBs (as in the spec and CVA6):
+        // entries are tagged with their ASID; software runs SFENCE.VMA.
     }
 
-    // Phase 4.4: SFENCE.VMA flushes the entire TLB (no ASID support).
+    // SFENCE.VMA rs1, rs2: rs1 ≠ x0 → only that page; rs2 ≠ x0 → only
+    // that ASID (global entries kept). rs1 / rs2 = x0 → all.
     if ex_ma.ctrl.is_sfence {
-        state.tlb.flush();
+        let rs1 = (ex_ma.instr >> 15) & 0x1f;
+        let rs2 = (ex_ma.instr >> 20) & 0x1f;
+        let va = (rs1 != 0).then_some(ex_ma.csr_write_val);
+        let asid = (rs2 != 0).then_some((ex_ma.rs2_data & 0x1ff) as u16);
+        state.sfence(va, asid);
     }
 
     if ex_ma.ctrl.mem_write {
-        if PipelineState::is_io(vaddr) {
+        if state.io_at(vaddr) {
             state.io_data = ex_ma.rs2_data;
         } else {
             // Sub-word writes are not modeled in the visualizer; treat

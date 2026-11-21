@@ -96,13 +96,14 @@ fn paging_walks_once_then_hits_the_tlb() {
     assert_eq!(sys.cores[0].read_register(9), 0x55);
     // data page: miss → 2 walk reads → fill, then a hit
     let data: Vec<&Event> = ev.iter().filter(|e| match e {
-        Event::TlbMiss { core: 0, va } | Event::TlbHit { core: 0, va, .. } | Event::TlbFill { core: 0, va, .. } => *va == 0x40_1000,
+        Event::TlbMiss { core: 0, va, .. } | Event::TlbHit { core: 0, va, .. } | Event::TlbFill { core: 0, va, .. } => *va == 0x40_1000,
         Event::Walk { core: 0, pte_addr, .. } => *pte_addr == 0x8004 || *pte_addr == 0xa004,
         _ => false }).collect();
     assert!(matches!(data[0], Event::TlbMiss { .. }), "{data:?}");
-    assert!(matches!(data[1], Event::Walk { level: 1, pte_addr: 0x8004, .. }));
+    assert!(matches!(data[0], Event::TlbMiss { port: Port::Load, .. }), "tagged as the data side");
+    assert!(matches!(data[1], Event::Walk { level: 1, pte_addr: 0x8004, port: Port::Load, .. }));
     assert!(matches!(data[2], Event::Walk { level: 0, pte_addr: 0xa004, .. }));
-    assert!(matches!(data[3], Event::TlbFill { idx: 1, pa: 0x2000, .. }));
+    assert!(matches!(data[3], Event::TlbFill { idx: 0, pa: 0x2000, .. }), "first free DTLB entry");
     assert!(matches!(data[4], Event::TlbHit { pa: 0x2000, .. }));
     // the page-table reads went through the data cache
     assert!(ev.iter().any(|e| matches!(e, Event::Access { core: 0, port: Port::Walk, .. })));
@@ -117,7 +118,7 @@ fn unmapped_page_faults_into_the_handler() {
     sys.load(0, &split(&[lui(10, 0x800), lw(8, 10, 0), SPIN], &[SPIN]));
     sys.load(0x80, &[addi(20, 0, 7), SPIN]);                           // handler (M-mode, bare)
     let ev = run(&mut sys, 800);
-    assert!(ev.iter().any(|e| matches!(e, Event::PageFault { core: 0, va: 0x80_0000, cause: 13 })));
+    assert!(ev.iter().any(|e| matches!(e, Event::PageFault { core: 0, port: Port::Load, va: 0x80_0000, cause: 13 })));
     assert_eq!(sys.cores[0].sys.csrs.read(addr::MCAUSE), 13);
     assert_eq!(sys.cores[0].read_register(20), 7, "handler ran");
 }
@@ -137,16 +138,20 @@ fn flag_passing_between_cores_is_coherent() {
 }
 
 #[test]
-fn direct_mapped_tlb_conflict_between_code_and_data_pages() {
-    // VA 0x0040_0000 (page 0x400) and the code page 0 share TLB entry 0:
-    // each fetch evicts the data translation and the next load walks again.
+fn split_itlb_dtlb_code_and_data_pages_do_not_conflict() {
+    // VA 0x0040_0000 (page 0x400) and the code page 0 both index entry 0,
+    // but code goes in the ITLB and data in the DTLB: one walk each.
     let mut sys = MemPanelSystem::new();
     page_tables(&mut sys);
     sys.load(0xa000, &[((0x3000u32 >> 12) << 10) | 0xc7]);             // VA 0x40_0000 → PA 0x3000 (VRW AD)
     sys.load(0, &split(&[lui(10, 0x400), lw(8, 10, 0), lw(9, 10, 0), SPIN], &[SPIN]));
     let ev = run(&mut sys, 600);
-    let fills = ev.iter().filter(|e| matches!(e, Event::TlbFill { core: 0, va: 0x40_0000, idx: 0, .. })).count();
-    assert!(fills >= 2, "data page refilled entry 0 after the code page took it ({fills})");
+    let fills = ev.iter().filter(|e| matches!(e, Event::TlbFill { core: 0, va: 0x40_0000, idx: 0, port: Port::Load, .. })).count();
+    assert_eq!(fills, 1, "data page walked once");
+    assert!(ev.iter().any(|e| matches!(e, Event::TlbHit { core: 0, va: 0x40_0000, port: Port::Load, .. })));
+    let c = &sys.cores[0];
+    assert!(c.itlb.entries[0].valid && c.itlb.entries[0].vpn == 0, "code page in ITLB[0]");
+    assert!(c.dtlb.entries[0].valid && c.dtlb.entries[0].vpn == 0x400, "data page in DTLB[0]");
 }
 
 // ── The panel's examples (memsys::examples) each show what they promise ──
@@ -166,7 +171,7 @@ fn data_outcomes(ev: &[Event]) -> Vec<Outcome> {
 
 #[test]
 fn example_l1_hits() {
-    let (sys, ev) = run_example(0, 1500);
+    let (sys, ev) = run_example(1, 1500);
     assert_eq!(sys.cores[0].read_register(11), 8 * (1 + 2 + 3 + 4));
     let o = data_outcomes(&ev);
     assert_eq!(o[0], Outcome::Memory);
@@ -175,7 +180,7 @@ fn example_l1_hits() {
 
 #[test]
 fn example_l1_miss_l2_hit() {
-    let (_, ev) = run_example(1, 3000);
+    let (_, ev) = run_example(2, 3000);
     let o = data_outcomes(&ev);
     assert_eq!(o.len(), 18);
     assert!(o[..3].iter().all(|x| *x == Outcome::Memory));
@@ -184,7 +189,7 @@ fn example_l1_miss_l2_hit() {
 
 #[test]
 fn example_total_miss() {
-    let (_, ev) = run_example(2, 4000);
+    let (_, ev) = run_example(3, 4000);
     let o = data_outcomes(&ev);
     assert_eq!(o.len(), 20);
     assert!(o.iter().all(|x| *x == Outcome::Memory), "{o:?}");
@@ -193,7 +198,7 @@ fn example_total_miss() {
 
 #[test]
 fn example_mmu_walk_then_hits() {
-    let (sys, ev) = run_example(3, 2000);
+    let (sys, ev) = run_example(4, 2000);
     assert_eq!((sys.cores[0].read_register(7), sys.cores[0].read_register(8)), (0x55, 0x66));
     let walks = ev.iter().filter(|e| matches!(e, Event::Walk { core: 0, .. })).count();
     assert!(walks >= 4, "code page + data page walks ({walks})");
@@ -202,23 +207,118 @@ fn example_mmu_walk_then_hits() {
 
 #[test]
 fn example_page_fault_handler_maps_page() {
-    let (sys, ev) = run_example(4, 2000);
-    assert!(ev.iter().any(|e| matches!(e, Event::PageFault { core: 0, va: 0x80_0000, cause: 13 })));
+    let (sys, ev) = run_example(5, 2000);
+    assert!(ev.iter().any(|e| matches!(e, Event::PageFault { core: 0, port: Port::Load, va: 0x80_0000, cause: 13 })));
     assert!(ev.iter().any(|e| matches!(e, Event::TlbFill { core: 0, va: 0x80_0000, pa: 0x3000, .. })), "retry walked");
     assert_eq!(sys.cores[0].read_register(7), 0x77);
 }
 
 #[test]
 fn example_flag_passing() {
-    let (sys, ev) = run_example(5, 2000);
+    let (sys, ev) = run_example(9, 2000);
     assert_eq!(sys.cores[1].read_register(8), 42);
     assert!(ev.iter().any(|e| matches!(e, Event::Snoop { from: 1, to: 0, flush: true, .. })));
 }
 
 #[test]
 fn example_false_sharing() {
-    let (sys, ev) = run_example(6, 4000);
+    let (sys, ev) = run_example(10, 4000);
     assert_eq!((sys.peek(0x1000), sys.peek(0x1004)), (8, 8), "both counters correct");
     let bounces = ev.iter().filter(|e| matches!(e, Event::Snoop { cache: CacheId::L1D, after: Mesi::I, .. })).count();
     assert!(bounces >= 8, "the line ping-pongs ({bounces} invalidations)");
+}
+
+// ── TLB: phases, ASIDs, SFENCE.VMA, PLRU ──
+
+use cpu_sim::sim::memsys::PteVerdict;
+
+/// Core 0's DTLB lookups as 'H' (hit) / 'M' (miss), in order.
+fn load_lookups(ev: &[Event]) -> String {
+    ev.iter().filter_map(|e| match e {
+        Event::TlbLookup { core: 0, port: Port::Load, hit, .. } => Some(if hit.is_some() { 'H' } else { 'M' }),
+        _ => None }).collect()
+}
+
+#[test]
+fn tlb_miss_reports_every_walk_phase_in_order() {
+    let (_, ev) = run_example(4, 2000);
+    let i = ev.iter().position(|e| matches!(e, Event::TlbLookup { core: 0, port: Port::Load, hit: None, .. })).unwrap();
+    let phases: Vec<&Event> = ev[i..].iter().filter(|e| matches!(e,
+        Event::TlbLookup { core: 0, .. } | Event::TlbMiss { core: 0, .. } | Event::PteAddr { core: 0, .. } | Event::Walk { core: 0, .. }
+        | Event::PteCheck { core: 0, .. } | Event::PermCheck { core: 0, .. } | Event::TlbVictim { core: 0, .. } | Event::TlbFill { core: 0, .. }))
+        .take(11).collect();
+    assert!(matches!(phases[1], Event::TlbMiss { .. }));
+    assert!(matches!(phases[2], Event::PteAddr { level: 1, base: 0x8000, vpn: 1, addr: 0x8004, .. }), "{:?}", phases[2]);
+    assert!(matches!(phases[3], Event::Walk { level: 1, .. }));
+    assert!(matches!(phases[4], Event::PteCheck { level: 1, verdict: PteVerdict::Pointer, .. }));
+    assert!(matches!(phases[5], Event::PteAddr { level: 0, base: 0xa000, vpn: 1, addr: 0xa004, .. }));
+    assert!(matches!(phases[6], Event::Walk { level: 0, .. }));
+    assert!(matches!(phases[7], Event::PteCheck { level: 0, verdict: PteVerdict::Leaf, .. }));
+    assert!(matches!(phases[8], Event::PermCheck { ok: true, .. }));
+    assert!(matches!(phases[9], Event::TlbVictim { idx: 0, was_invalid: true, .. }));
+    assert!(matches!(phases[10], Event::TlbFill { idx: 0, pa: 0x2000, .. }));
+}
+
+#[test]
+fn example_asids_and_global_page() {
+    let (sys, ev) = run_example(6, 2000);
+    let c = &sys.cores[0];
+    assert_eq!((c.read_register(7), c.read_register(8), c.read_register(9)), (0x11, 0x22, 0x11));
+    assert_eq!(load_lookups(&ev), "MMH", "ASID 2 misses, ASID 1's entry survives the satp switch");
+    let code_fills = ev.iter().filter(|e| matches!(e, Event::TlbFill { core: 0, port: Port::Fetch, .. })).count();
+    assert_eq!(code_fills, 1, "global code page: one ITLB walk for both ASIDs");
+    let asid2 = ev.iter().find_map(|e| match e { Event::TlbLookup { core: 0, port: Port::Load, asid: 2, cmp, .. } => Some(cmp[0]), _ => None }).unwrap();
+    assert!(asid2.valid && asid2.vpn_match && !asid2.asid_match && !asid2.global && !asid2.hit);
+}
+
+#[test]
+fn example_sfence_four_cases() {
+    let (_, ev) = run_example(7, 3000);
+    assert_eq!(load_lookups(&ev), "MMMMMHMMM");
+    let fences: Vec<_> = ev.iter().filter_map(|e| match e {
+        Event::Sfence { core: 0, va, asid, itlb, dtlb } => Some((*va, *asid, itlb.map(|f| f.inval), dtlb.map(|f| f.inval))), _ => None }).collect();
+    assert_eq!(fences.len(), 4);
+    assert_eq!((fences[0].0, fences[0].1, fences[0].3), (Some(0x40_1000), None, [true, false, false, false]));
+    assert_eq!(fences[1].1, Some(1));
+    assert!(fences[1].2.contains(&true), "the ASID flush drops the (non-global) code page from the ITLB");
+    assert_eq!(fences[1].3, [true, true, true, false], "global page 0x404 survives");
+    assert_eq!(fences[2].3, [true, false, false, false], "page 0x402 in ASID 1 (refilled into entry 0)");
+    assert_eq!(fences[3].3, [true, false, false, true], "x0, x0 flushes every valid entry, global 0x404 too");
+}
+
+#[test]
+fn example_plru_replacement() {
+    let (_, ev) = run_example(8, 3000);
+    assert_eq!(load_lookups(&ev), "MMMMHMMM");
+    let victims: Vec<(u8, bool)> = ev.iter().filter_map(|e| match e {
+        Event::TlbVictim { core: 0, port: Port::Load, idx, was_invalid, .. } => Some((*idx, *was_invalid)), _ => None }).collect();
+    assert_eq!(victims, [(0, true), (1, true), (2, true), (3, true), (2, false), (1, false), (3, false)]);
+}
+
+// ── Boot from ROM ──
+
+use cpu_sim::sim::memsys::ROM_BASE;
+
+#[test]
+fn example_boot_from_rom() {
+    let (sys, ev) = run_example(0, 3000);
+    let c0 = &sys.cores[0];
+    assert_eq!(c0.read_register(8), 15, "program ran in S-mode and read its DMEM store back");
+    assert_eq!(c0.sys.priv_mode, PrivMode::S);
+    assert_eq!(sys.peek(0x2000), 15, "DMEM VA 0x1001_0000 → PA 0x2000");
+    // boot fetches were uncached ROM reads, by both harts
+    assert!(ev.iter().any(|e| matches!(e, Event::RomRead { core: 0, .. })));
+    assert!(ev.iter().any(|e| matches!(e, Event::RomRead { core: 1, .. })));
+    assert!(!ev.iter().any(|e| matches!(e, Event::Fill { pa, .. } if *pa >= ROM_BASE)), "ROM is never cached");
+    // first translated fetch: ITLB miss, walk; the PTE reads come from the cache hierarchy, not memory
+    let i = ev.iter().position(|e| matches!(e, Event::TlbMiss { core: 0, port: Port::Fetch, va: 0x40_0000 })).expect("ITLB miss at the entry point");
+    let walk_reads: Vec<Outcome> = ev[i..].iter().filter_map(|e| match e {
+        Event::Access { core: 0, port: Port::Walk, outcome, .. } => Some(*outcome), _ => None }).take(2).collect();
+    assert_eq!(walk_reads.len(), 2);
+    assert!(walk_reads.iter().all(|o| *o != Outcome::Memory), "PTEs were just written by the boot code: {walk_reads:?}");
+    assert!(ev.iter().any(|e| matches!(e, Event::TlbFill { core: 0, port: Port::Fetch, va: 0x40_0000, pa: 0x1000, .. })));
+    // the store to DMEM walks and sets D
+    assert!(ev.iter().any(|e| matches!(e, Event::AdUpdate { core: 0, port: Port::Store, .. })));
+    // hart 1 parked in RAM
+    assert!(sys.cores[1].pc >= 0x40 && sys.cores[1].pc < 0x50, "hart 1 parked at 0x40 (pc {:#x})", sys.cores[1].pc);
 }

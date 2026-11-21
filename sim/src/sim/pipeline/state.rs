@@ -225,7 +225,10 @@ pub struct PipelineState {
     /// Privilege mode, CSRs, trap entry / return, IRQ sampling — the
     /// system unit shared with the other cores (sim/system).
     pub sys: SysUnit,
-    pub tlb: Tlb,
+    /// Fetch-side TLB.
+    pub itlb: Tlb,
+    /// Load / store TLB.
+    pub dtlb: Tlb,
     /// Memory-panel mode (None = the flat ROM / RAM model, as always).
     pub hier: Option<Hier>,
     /// Branch resolution strategy.
@@ -283,7 +286,8 @@ impl Default for PipelineState {
             io_data: 0,
             sys: pipeline_sys(),
             hier: None,
-            tlb: Tlb::default(),
+            itlb: Tlb::default(),
+            dtlb: Tlb::default(),
             branch_mode: BranchMode::default(),
             cycle_count: 0,
             halted: false,
@@ -389,6 +393,10 @@ impl PipelineState {
 
     pub fn is_io(addr: u32) -> bool { addr >= IO_BASE }
 
+    /// I/O at `addr` for this core? The memory-panel machine (`hier`) has no
+    /// I/O: its whole physical space is RAM plus the boot ROM.
+    pub fn io_at(&self, addr: u32) -> bool { self.hier.is_none() && Self::is_io(addr) }
+
     pub fn write_register(&mut self, idx: u8, val: u32) {
         if idx != 0 && (idx as usize) < 32 { self.registers[idx as usize] = val; }
     }
@@ -418,7 +426,8 @@ impl PipelineState {
             Some(h) => {
                 let mut m = h.sys.borrow_mut();
                 let pte = m.read(h.core as usize, addr, Port::Walk);
-                m.event(Event::Walk { core: h.core, level, pte_addr: addr, pte });
+                let port = m.xlat_port[h.core as usize];
+                m.event(Event::Walk { core: h.core, port, level, pte_addr: addr, pte });
                 pte
             }
             None => self.ram_read(addr),
@@ -433,13 +442,33 @@ impl PipelineState {
         }
     }
 
-    /// Report an MMU event to the memory system (memory-panel mode only).
-    pub fn mem_event(&self, e: impl FnOnce(u8) -> Event) {
-        if let Some(h) = &self.hier { h.sys.borrow_mut().event(e(h.core)); }
+    /// Report an MMU event to the memory system (memory-panel mode only):
+    /// `e(core, port)` with the access being translated.
+    pub fn mem_event(&self, e: impl FnOnce(u8, Port) -> Event) {
+        if let Some(h) = &self.hier {
+            let mut m = h.sys.borrow_mut();
+            let port = m.xlat_port[h.core as usize];
+            m.event(e(h.core, port));
+        }
     }
 
-    /// The next page-table reads translate a fetch (true) or a load / store.
-    pub fn walk_for_fetch(&self, fetch: bool) {
-        if let Some(h) = &self.hier { h.sys.borrow_mut().set_walk_for_fetch(h.core as usize, fetch); }
+    /// The access about to be translated (Fetch / Load / Store).
+    pub fn set_xlat_port(&self, port: Port) {
+        if let Some(h) = &self.hier { h.sys.borrow_mut().set_xlat_port(h.core as usize, port); }
+    }
+
+    /// Reset: invalidate the ITLB and the DTLB.
+    pub fn flush_tlbs(&mut self) {
+        self.itlb.flush();
+        self.dtlb.flush();
+    }
+
+    /// SFENCE.VMA on both TLBs (`va` / `asid` = None for rs1 / rs2 = x0).
+    pub fn sfence(&mut self, va: Option<u32>, asid: Option<u16>) {
+        let itlb = self.itlb.sfence(va, asid);
+        let dtlb = self.dtlb.sfence(va, asid);
+        if let Some(h) = &self.hier {
+            h.sys.borrow_mut().event(Event::Sfence { core: h.core, va, asid, itlb, dtlb });
+        }
     }
 }

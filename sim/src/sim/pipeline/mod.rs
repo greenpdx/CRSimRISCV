@@ -351,7 +351,7 @@ impl PipelineState {
         self.last_ram_kind = 0;
         self.last_ram_side = 0;
         self.sys = state::pipeline_sys();
-        self.tlb.flush();
+        self.flush_tlbs();
         self.cycle_count = 0;
         self.halted = false;
         self.if_id = IfId::default();

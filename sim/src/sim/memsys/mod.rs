@@ -2,6 +2,8 @@
 //! an L1D, one shared inclusive L2 and one physical memory, with MESI
 //! coherence between the L1Ds over a snooping bus.
 //!
+//! - Memory map: the boot ROM at `ROM_BASE` (uncached, read-only, one bus
+//!   read per word); everything else is RAM of any size (sparse pages).
 //! - Lines are 16 bytes. L1I / L1D: 2-way × 4 sets. L2: 4-way × 8 sets.
 //!   LRU replacement, write-back, write-allocate.
 //! - L2 is inclusive: an L2 eviction removes the line from every L1 (a
@@ -27,17 +29,33 @@ pub mod examples;
 pub mod system;
 
 pub use cache::{Cache, Line, Mesi, LINE_BYTES, LINE_WORDS};
+pub use crate::sim::pipeline::tlb::{EntryCmp, EntryFlush, TLB_ENTRIES};
 
-/// Physical memory size (bytes), from address 0.
-pub const MEM_BYTES: u32 = 64 * 1024;
 pub const N_CORES: usize = 2;
+
+/// Boot ROM (flash): uncached, read-only, read word by word over the bus.
+/// Everything else in the 32-bit physical space is RAM.
+pub const ROM_BASE: u32 = 0xF000_0000;
+pub const ROM_BYTES: u32 = 0x1_0000;
+pub fn is_rom(pa: u32) -> bool { pa.wrapping_sub(ROM_BASE) < ROM_BYTES }
 
 #[cfg_attr(feature = "wasm", derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy)]
-pub struct Latency { pub l1: u64, pub l2: u64, pub mem: u64 }
+pub struct Latency { pub l1: u64, pub l2: u64, pub mem: u64, /** per ROM word (uncached) */ pub rom: u64 }
 
 impl Default for Latency {
-    fn default() -> Self { Self { l1: 1, l2: 4, mem: 20 } }
+    fn default() -> Self { Self { l1: 1, l2: 4, mem: 20, rom: 8 } }
+}
+
+/// Physical RAM of any size: sparse 4 KiB pages, made on first write;
+/// words never written read 0.
+#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[derive(Debug, Clone, Default)]
+pub struct Ram { pages: std::collections::HashMap<u32, Vec<u32>> }
+
+impl Ram {
+    pub fn get(&self, pa: u32) -> u32 { self.pages.get(&(pa >> 12)).map_or(0, |p| p[((pa >> 2) & 0x3ff) as usize]) }
+    pub fn set(&mut self, pa: u32, v: u32) { self.pages.entry(pa >> 12).or_insert_with(|| vec![0; 1024])[((pa >> 2) & 0x3ff) as usize] = v; }
 }
 
 #[cfg_attr(feature = "wasm", derive(serde::Serialize))]
@@ -55,7 +73,25 @@ pub enum BusReq { BusRd, BusRdX, BusUpgr }
 /// Where an access was satisfied.
 #[cfg_attr(feature = "wasm", derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Outcome { L1Hit, L2Hit, Memory }
+pub enum Outcome { L1Hit, L2Hit, Memory, /** uncached boot ROM */ Rom }
+
+/// What the page-table walker found in a PTE.
+#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PteVerdict {
+    /// V = 1, R = W = X = 0: points to the next-level table.
+    Pointer,
+    /// V = 1 and R / X set: a leaf (the translation).
+    Leaf,
+    /// V = 0: page fault.
+    Invalid,
+    /// W = 1 without R: reserved encoding, page fault.
+    Reserved,
+    /// Level-1 leaf with PPN[0] ≠ 0: misaligned superpage, page fault.
+    Misaligned,
+    /// A pointer at level 0 (no more levels): page fault.
+    NoLeaf,
+}
 
 /// What happened, for the panel. `set` / `way` locate cache lines; `pa`
 /// is the line (or word) physical address.
@@ -63,16 +99,35 @@ pub enum Outcome { L1Hit, L2Hit, Memory }
 #[cfg_attr(feature = "wasm", serde(tag = "kind"))]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    // ── MMU (reported by the core) ──
+    // ── MMU (reported by the core; `port` = the access being translated:
+    //    Fetch, or Load / Store) ──
     /// No translation (M-mode or satp = Bare).
-    Bare { core: u8, va: u32 },
-    TlbHit { core: u8, idx: u8, va: u32, pa: u32 },
-    TlbMiss { core: u8, va: u32 },
+    Bare { core: u8, port: Port, va: u32 },
+    /// Every translation starts here: VPN + ASID compared against all
+    /// entries of the ITLB (Fetch) or DTLB (Load / Store) at once.
+    /// `plru_*` = the replacement tree before / after (a hit touches it).
+    TlbLookup { core: u8, port: Port, va: u32, asid: u16, cmp: [EntryCmp; TLB_ENTRIES], hit: Option<u8>, plru_before: u8, plru_after: u8 },
+    /// Permission check of the leaf PTE (R / W / X, U with SUM, MXR).
+    PermCheck { core: u8, port: Port, pte: u32, priv_mode: u8, sum: bool, mxr: bool, ok: bool },
+    /// Walker: address of the PTE at `level` = base (satp.PPN or the
+    /// pointer PTE's PPN, × 4096) + VPN[level] × 4.
+    PteAddr { core: u8, port: Port, level: u8, base: u32, vpn: u32, addr: u32 },
+    /// Walker: what the PTE read at `level` is.
+    PteCheck { core: u8, port: Port, level: u8, pte: u32, verdict: PteVerdict },
+    /// Hardware A / D update written back to the PTE.
+    AdUpdate { core: u8, port: Port, pte_addr: u32, old: u32, new: u32 },
+    /// Walker: the TLB entry the new translation goes into.
+    TlbVictim { core: u8, port: Port, idx: u8, was_invalid: bool, plru_before: u8, plru_after: u8 },
+    /// SFENCE.VMA rs1, rs2 (`va` / `asid` = None for x0): each entry's
+    /// match gates in the ITLB and DTLB, and which were invalidated.
+    Sfence { core: u8, va: Option<u32>, asid: Option<u16>, itlb: [EntryFlush; TLB_ENTRIES], dtlb: [EntryFlush; TLB_ENTRIES] },
+    TlbHit { core: u8, port: Port, idx: u8, va: u32, pa: u32 },
+    TlbMiss { core: u8, port: Port, va: u32 },
     /// One page-table read (level 1 = root, 0 = leaf table).
-    Walk { core: u8, level: u8, pte_addr: u32, pte: u32 },
+    Walk { core: u8, port: Port, level: u8, pte_addr: u32, pte: u32 },
     /// Walk finished: TLB entry `idx` filled with VA → PA.
-    TlbFill { core: u8, idx: u8, va: u32, pa: u32 },
-    PageFault { core: u8, va: u32, cause: u32 },
+    TlbFill { core: u8, port: Port, idx: u8, va: u32, pa: u32 },
+    PageFault { core: u8, port: Port, va: u32, cause: u32 },
 
     // ── caches / bus ──
     /// One access by a core: where it was satisfied and how long it took.
@@ -84,6 +139,8 @@ pub enum Event {
     MemRead { core: u8, pa: u32 },
     /// A dirty L2 line written to memory (eviction).
     MemWrite { pa: u32 },
+    /// One uncached word read from the boot ROM over the bus.
+    RomRead { core: u8, pa: u32, val: u32 },
     /// A line filled into `cache` (owner `core`; L2: the requester).
     Fill { core: u8, cache: CacheId, set: u8, way: u8, pa: u32, state: Mesi },
     /// A line removed from `cache` (owner `core`; L2: the requester).
@@ -106,7 +163,7 @@ pub enum Event {
 pub struct Stats {
     pub tlb_hits: u32, pub tlb_misses: u32, pub walks: u32, pub page_faults: u32,
     pub l1i_hits: u32, pub l1i_misses: u32, pub l1d_hits: u32, pub l1d_misses: u32,
-    pub l2_hits: u32, pub l2_misses: u32,
+    pub l2_hits: u32, pub l2_misses: u32, pub rom_reads: u32,
     pub accesses: u32, pub total_latency: u64,
     pub stall_cycles: u32, pub bus_wait_cycles: u32,
 }
@@ -114,8 +171,10 @@ pub struct Stats {
 #[cfg_attr(feature = "wasm", derive(serde::Serialize))]
 #[derive(Debug, Clone)]
 pub struct MemSystem {
-    /// Physical memory, word-addressed (`MEM_BYTES / 4` words from 0).
-    pub mem: Vec<u32>,
+    /// Physical RAM (any size, sparse).
+    pub ram: Ram,
+    /// Boot ROM contents (`ROM_BYTES` from `ROM_BASE`).
+    pub rom: Vec<u32>,
     pub l1i: [Cache; N_CORES],
     pub l1d: [Cache; N_CORES],
     pub l2: Cache,
@@ -127,8 +186,8 @@ pub struct MemSystem {
     /// Cycle each core's fetch-side / data-side work of this cycle finishes.
     chain_i: [u64; N_CORES],
     chain_d: [u64; N_CORES],
-    /// The core's current walk belongs to its fetch side.
-    walk_for_fetch: [bool; N_CORES],
+    /// The access the core is translating now (fetch side if Fetch).
+    pub xlat_port: [Port; N_CORES],
     /// Cycles each core stays frozen.
     pub stall: [u32; N_CORES],
     pub events: Vec<Event>,
@@ -142,25 +201,32 @@ impl Default for MemSystem {
 impl MemSystem {
     pub fn new() -> Self {
         Self {
-            mem: vec![0; (MEM_BYTES / 4) as usize],
+            ram: Ram::default(),
+            rom: vec![0; (ROM_BYTES / 4) as usize],
             l1i: [Cache::new(4, 2), Cache::new(4, 2)],
             l1d: [Cache::new(4, 2), Cache::new(4, 2)],
             l2: Cache::new(8, 4),
             lat: Latency::default(),
             now: 0, bus_free: 0,
             chain_i: [0; N_CORES], chain_d: [0; N_CORES],
-            walk_for_fetch: [false; N_CORES],
+            xlat_port: [Port::Load; N_CORES],
             stall: [0; N_CORES],
             events: Vec::new(),
             stats: [Stats::default(); N_CORES],
         }
     }
 
-    /// Write words into physical memory at byte address `pa` (no caches).
+    /// Write words into physical memory (RAM or ROM) at byte address `pa` (no caches).
     pub fn load(&mut self, pa: u32, words: &[u32]) {
         for (i, &w) in words.iter().enumerate() {
-            if let Some(slot) = self.mem.get_mut((pa / 4) as usize + i) { *slot = w; }
+            let a = pa.wrapping_add(4 * i as u32);
+            if is_rom(a) { self.rom[((a - ROM_BASE) / 4) as usize] = w } else { self.ram.set(a, w) }
         }
+    }
+
+    /// The word in ROM / RAM itself (no caches).
+    pub fn raw(&self, pa: u32) -> u32 {
+        if is_rom(pa) { self.rom[((pa - ROM_BASE) / 4) as usize] } else { self.ram.get(pa) }
     }
 
     /// Memory word as the whole system sees it (a Modified L1D or dirty L2
@@ -170,8 +236,9 @@ impl MemSystem {
         for c in &self.l1d {
             if let Some((s, way)) = c.find(pa) { if c.line(s, way).state == Mesi::M { return c.line(s, way).data[w]; } }
         }
+        if is_rom(pa) { return self.raw(pa); }
         if let Some((s, way)) = self.l2.find(pa) { return self.l2.line(s, way).data[w]; }
-        self.mem.get((pa / 4) as usize).copied().unwrap_or(0)
+        self.ram.get(pa)
     }
 
     // ── cycle protocol (driven by system::MemPanelSystem / the cores) ──
@@ -202,8 +269,9 @@ impl MemSystem {
         self.stall[core] = done.saturating_sub(self.now + 1) as u32;
     }
 
-    /// The core's next page-table reads translate a fetch (true) or a load / store.
-    pub fn set_walk_for_fetch(&mut self, core: usize, fetch: bool) { self.walk_for_fetch[core] = fetch; }
+    /// The access the core is about to translate (its page-table reads
+    /// belong to that side; its MMU events carry it).
+    pub fn set_xlat_port(&mut self, core: usize, port: Port) { self.xlat_port[core] = port; }
 
     pub fn event(&mut self, e: Event) {
         match &e {
@@ -224,17 +292,23 @@ impl MemSystem {
     /// One word access by `core` at physical address `pa` (`Some(v)` writes).
     fn access(&mut self, core: usize, pa: u32, wval: Option<u32>, port: Port) -> u32 {
         let fetch = port == Port::Fetch;
-        let on_i_chain = fetch || (port == Port::Walk && self.walk_for_fetch[core]);
+        let on_i_chain = fetch || (port == Port::Walk && self.xlat_port[core] == Port::Fetch);
         let start = (if on_i_chain { self.chain_i[core] } else { self.chain_d[core] }).max(self.now);
         let c = core as u8;
         let word = ((pa / 4) as usize) % LINE_WORDS;
         let line_pa = pa & !(LINE_BYTES - 1);
 
-        // Outside physical memory: uncached, reads 0
-        if pa >= MEM_BYTES {
-            let done = start + self.lat.mem;
-            self.finish(core, on_i_chain, start, done, port, pa, Outcome::Memory);
-            return 0;
+        // Boot ROM: uncached — one bus transaction per word, no cache fill.
+        // Writes are ignored (read-only).
+        if is_rom(pa) {
+            let bus = self.bus_start(core, start);
+            let done = bus + self.lat.rom;
+            self.bus_free = done;
+            let val = self.raw(pa & !3);
+            self.stats[core].rom_reads += 1;
+            self.events.push(Event::RomRead { core: c, pa: pa & !3, val });
+            self.finish(core, on_i_chain, start, done, port, pa, Outcome::Rom);
+            return if wval.is_none() { val } else { 0 };
         }
 
         let cid = if fetch { CacheId::L1I } else { CacheId::L1D };
@@ -387,9 +461,8 @@ impl MemSystem {
             self.events.push(Event::Evict { core: c, cache: CacheId::L2, set: set as u8, way: way as u8, pa: vpa, dirty: v.state == Mesi::M });
         }
         self.events.push(Event::MemRead { core: c, pa: line_pa });
-        let base = (line_pa / 4) as usize;
         let mut data = [0u32; LINE_WORDS];
-        for (i, d) in data.iter_mut().enumerate() { *d = self.mem.get(base + i).copied().unwrap_or(0); }
+        for (i, d) in data.iter_mut().enumerate() { *d = self.ram.get(line_pa + 4 * i as u32); }
         *self.l2.line_mut(set, way) = Line { state: Mesi::E, tag, lru: 0, data };
         self.l2.touch(set, way);
         self.events.push(Event::Fill { core: c, cache: CacheId::L2, set: set as u8, way: way as u8, pa: line_pa, state: Mesi::E });

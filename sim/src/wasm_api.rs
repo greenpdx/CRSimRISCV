@@ -844,15 +844,21 @@ use crate::sim::memsys::{self, system::MemPanelSystem, Mesi};
 #[derive(Serialize)]
 struct MpStage { valid: bool, pc: u32, instr: u32, bubble: bool }
 #[derive(Serialize)]
-struct MpTlb { valid: bool, vpn: u32, ppn: u32, pte: u32, is_super: bool }
+struct MpTlb { valid: bool, vpn: u32, ppn: u32, pte: u32, is_super: bool, asid: u16, global: bool }
 #[derive(Serialize)]
 struct MpCore {
-    pc: u32, priv_mode: u8, satp: u32, mcause: u32,
+    pc: u32, priv_mode: u8,
+    /// CSRs the MMU and the trap path use.
+    satp: u32, mstatus: u32, mtvec: u32, mepc: u32, mcause: u32, mtval: u32, mhartid: u32,
     /// Frozen waiting for memory, and for how many more cycles.
     stalled: bool, stall_left: u32,
     /// IF, ID, EX, MA, WB.
     stages: Vec<MpStage>,
-    tlb: Vec<MpTlb>,
+    itlb: Vec<MpTlb>,
+    dtlb: Vec<MpTlb>,
+    /// PLRU tree bits of the ITLB / DTLB.
+    itlb_plru: u8,
+    dtlb_plru: u8,
 }
 #[derive(Serialize)]
 struct MpLine { state: Mesi, tag: u32, lru: u8, addr: u32, data: [u32; 4] }
@@ -862,6 +868,10 @@ struct MpCache { sets: usize, ways: usize, lines: Vec<MpLine> }
 struct MpCaches { l1i: Vec<MpCache>, l1d: Vec<MpCache>, l2: MpCache }
 #[derive(Serialize)]
 struct MpExample { name: &'static str, about: &'static str }
+
+fn tlb(t: &crate::sim::pipeline::tlb::Tlb) -> Vec<MpTlb> {
+    t.entries.iter().map(|e| MpTlb { valid: e.valid, vpn: e.vpn, ppn: e.ppn, pte: e.pte, is_super: e.is_super, asid: e.asid, global: e.global }).collect()
+}
 
 fn mp_cache(c: &memsys::Cache) -> MpCache {
     let lines = (0..c.sets).flat_map(|s| (0..c.ways).map(move |w| (s, w))).map(|(s, w)| {
@@ -920,14 +930,16 @@ impl JsMemPanel {
         serde_wasm_bindgen::to_value(&self.inner.mem.borrow().events).unwrap_or(JsValue::NULL)
     }
 
-    /// Per core: pc, mode, satp, mcause, stall, the instruction in each stage, the TLB.
+    /// Per core: pc, mode, CSRs, stall, the instruction in each stage, the ITLB and DTLB.
     pub fn cores(&self) -> JsValue {
         let m = self.inner.mem.borrow();
         let v: Vec<MpCore> = self.inner.cores.iter().enumerate().map(|(i, c)| {
             let st = |valid: bool, pc: u32, instr: u32, bubble: bool| MpStage { valid, pc, instr, bubble };
             MpCore {
                 pc: c.pc, priv_mode: c.priv_bits(),
-                satp: c.sys.csrs.read(0x180), mcause: c.sys.csrs.read(0x342),
+                satp: c.sys.csrs.read(0x180), mstatus: c.sys.csrs.read(0x300), mtvec: c.sys.csrs.read(0x305),
+                mepc: c.sys.csrs.read(0x341), mcause: c.sys.csrs.read(0x342), mtval: c.sys.csrs.read(0x343),
+                mhartid: c.sys.csrs.read(0xf14),
                 stalled: m.stall[i] > 0, stall_left: m.stall[i],
                 stages: vec![
                     st(c.if_id.valid, c.if_id.pc, c.if_id.instr, c.if_id.flush_bubble),
@@ -936,7 +948,7 @@ impl JsMemPanel {
                     st(c.ma_wb.valid, c.ma_wb.trap_pc, c.ma_wb.instr, c.ma_wb.flush_bubble || c.ma_wb.stall_reg != 0),
                     st(c.last_wb.valid, c.last_wb.trap_pc, c.last_wb.instr, c.last_wb.flush_bubble || c.last_wb.stall_reg != 0),
                 ],
-                tlb: c.tlb.entries.iter().map(|e| MpTlb { valid: e.valid, vpn: e.vpn, ppn: e.ppn, pte: e.pte, is_super: e.is_super }).collect(),
+                itlb: tlb(&c.itlb), dtlb: tlb(&c.dtlb), itlb_plru: c.itlb.plru, dtlb_plru: c.dtlb.plru,
             }
         }).collect();
         serde_wasm_bindgen::to_value(&v).unwrap_or(JsValue::NULL)
@@ -966,7 +978,7 @@ impl JsMemPanel {
     /// Words straight from physical memory (no caches) — shows what is stale.
     pub fn mem_raw(&self, pa: u32, n: u32) -> Vec<u32> {
         let m = self.inner.mem.borrow();
-        (0..n).map(|i| m.mem.get(((pa / 4) + i) as usize).copied().unwrap_or(0)).collect()
+        (0..n).map(|i| m.raw(pa.wrapping_add(i * 4))).collect()
     }
 
     #[wasm_bindgen(getter)] pub fn latency(&self) -> JsValue {

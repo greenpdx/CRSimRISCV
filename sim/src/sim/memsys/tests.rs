@@ -54,11 +54,11 @@ fn dirty_lines_write_back_to_l2_then_memory() {
     // two more lines in L1D set 0 → the M line is evicted and written back to L2
     for (i, a) in [0x040u32, 0x080].iter().enumerate() { cyc(&mut m, 100 + i as u64 * 100, |m| { m.read(0, *a, Port::Load); }); }
     assert!(has(&m, |e| matches!(e, Event::WriteBack { pa: 0x000, .. })));
-    assert_eq!(m.mem[0], 0, "memory not yet updated");
+    assert_eq!(m.ram.get(0), 0, "memory not yet updated");
     assert_eq!(m.peek(0x000), 0xaa);
     // L2 set 0 (8 sets → stride 0x80): 0x000, 0x080 there already; 0x100, 0x180, 0x200 evict 0x000
     for (i, a) in [0x100u32, 0x180, 0x200].iter().enumerate() { cyc(&mut m, 500 + i as u64 * 100, |m| { m.read(0, *a, Port::Load); }); }
-    assert_eq!(m.mem[0], 0xaa, "dirty L2 victim reached memory");
+    assert_eq!(m.ram.get(0), 0xaa, "dirty L2 victim reached memory");
 }
 
 #[test]

@@ -53,6 +53,12 @@ pub fn compute_id(state: &PipelineState, if_id: &IfId) -> Option<IdEx> {
     // is unknown → illegal trap.
     let is_system = f.opcode == 0b1110011;
 
+    // MISC-MEM (FENCE, FENCE.I): a NOP here — memory is in order, and in
+    // memory-panel mode a store already invalidates the matching L1I line.
+    if f.opcode == 0b0001111 {
+        return Some(IdEx { valid: true, pc: if_id.pc, pc_plus4: if_id.pc_plus4, instr, opcode: f.opcode, ..IdEx::default() });
+    }
+
     if !is_system {
         match decode::decode_standard(&regs, instr, &f) {
             Some(d) => {
@@ -135,10 +141,13 @@ pub fn compute_id(state: &PipelineState, if_id: &IfId) -> Option<IdEx> {
         trap_kind = system_trap_kind(funct12);
     }
 
+    // SFENCE.VMA rs1, rs2 reads its operands (vaddr, ASID); EX forwards
+    // them: rs1 → ex_ma.csr_write_val, rs2 → ex_ma.rs2_data.
+    let (rs1_num, rs2_num) = if is_sfence { (f.rs1, f.rs2) } else { (0, 0) };
     Some(IdEx {
         valid: true, pc: if_id.pc, pc_plus4: if_id.pc_plus4, instr,
-        rs1_data: 0, rs2_data: 0, imm: 0,
-        rs1_num: 0, rs2_num: 0, rd_num: 0,
+        rs1_data: regs.read_reg(rs1_num), rs2_data: regs.read_reg(rs2_num), imm: 0,
+        rs1_num, rs2_num, rd_num: 0,
         funct3: f.funct3, funct7b30: f.funct7b30, opcode: f.opcode,
         ctrl: ControlBits { is_sfence, ..ControlBits::default() },
         csr_addr: 0, csr_uimm: 0, csr_imm_form: false,

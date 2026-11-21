@@ -788,34 +788,54 @@ fn pipeline_tlb_hit_after_first_walk() {
     for _ in 0..15 { cpu.step(); }
     assert_eq!(cpu.read_register(5), 0xa1a2a3a4);
     // After running, the TLB superpage entry for vpn1=0 should be installed.
-    let any_valid = cpu.tlb.entries.iter().any(|e| e.valid);
+    let any_valid = cpu.dtlb.entries.iter().any(|e| e.valid);
     assert!(any_valid, "TLB should have at least one entry installed");
 }
 
 #[test]
-fn pipeline_tlb_flushed_on_satp_write() {
-    // Run in M-mode so fetches don't go through the walker (which
-    // would trip on the stale entry we install for the test).
+fn pipeline_satp_write_keeps_asid_tagged_tlb() {
+    // A satp write does not flush (spec / CVA6): entries carry their ASID.
     let mut cpu = PipelineState::new();
-    cpu.tlb.install(0, 0, V | R, true);
-    assert!(cpu.tlb.entries.iter().any(|e| e.valid));
-    // csrrw x0, satp, x0
-    let csrrw = enc_csr(0x180, 0, 0b001, 0);
+    cpu.dtlb.install(0, 0, V | R, true, 0, false);
+    let csrrw = enc_csr(0x180, 0, 0b001, 0);   // csrrw x0, satp, x0
     cpu.load_program(&[csrrw]);
     for _ in 0..6 { cpu.step(); }
-    assert!(cpu.tlb.entries.iter().all(|e| !e.valid),
-            "satp write must flush TLB");
+    assert!(cpu.dtlb.entries.iter().any(|e| e.valid), "satp write must not flush the TLB");
 }
 
 #[test]
 fn pipeline_tlb_flushed_on_sfence_vma() {
     let mut cpu = PipelineState::new();
-    cpu.tlb.install(0x10, 0x10, V | R | X, false);
-    assert!(cpu.tlb.entries.iter().any(|e| e.valid));
+    cpu.dtlb.install(0x10, 0x10, V | R | X, false, 0, false);
+    cpu.itlb.install(0x10, 0x10, V | R | X, false, 0, true);
     cpu.load_program(&[0x12000073]); // sfence.vma x0, x0
     for _ in 0..6 { cpu.step(); }
-    assert!(cpu.tlb.entries.iter().all(|e| !e.valid),
-            "sfence.vma must flush TLB");
+    assert!(cpu.dtlb.entries.iter().chain(&cpu.itlb.entries).all(|e| !e.valid),
+            "sfence.vma x0, x0 must flush everything, global too");
+}
+
+#[test]
+fn pipeline_sfence_vma_by_address_and_asid() {
+    let sfence = |rs1: u32, rs2: u32| (0x09 << 25) | (rs2 << 20) | (rs1 << 15) | 0x73;
+    let lui = |rd: u32, imm: u32| (imm << 12) | (rd << 7) | 0x37;
+    let addi = |rd: u32, rs1: u32, imm: u32| (imm << 20) | (rs1 << 15) | (rd << 7) | 0x13;
+    // sfence.vma x5, x0 with x5 = 0x10000 just written (forwarded from EX/MA)
+    let mut cpu = PipelineState::new();
+    cpu.dtlb.install(0x10, 0x10, V | R, false, 1, false);
+    cpu.dtlb.install(0x20, 0x20, V | R, false, 1, false);
+    cpu.load_program(&[lui(5, 0x10), sfence(5, 0)]);
+    for _ in 0..8 { cpu.step(); }
+    let v: Vec<bool> = cpu.dtlb.entries.iter().map(|e| e.valid).collect();
+    assert_eq!(&v[..2], &[false, true], "only page 0x10 flushed");
+    // sfence.vma x0, x6 with x6 = 2: ASID 2 only, global kept
+    let mut cpu = PipelineState::new();
+    cpu.dtlb.install(0x10, 0x10, V | R, false, 1, false);
+    cpu.dtlb.install(0x11, 0x11, V | R, false, 2, false);
+    cpu.dtlb.install(0x12, 0x12, V | R, false, 2, true);
+    cpu.load_program(&[addi(6, 0, 2), sfence(0, 6)]);
+    for _ in 0..8 { cpu.step(); }
+    let v: Vec<bool> = cpu.dtlb.entries.iter().map(|e| e.valid).collect();
+    assert_eq!(&v[..3], &[true, false, true], "ASID 2 flushed, ASID 1 and the global entry kept");
 }
 
 #[test]
