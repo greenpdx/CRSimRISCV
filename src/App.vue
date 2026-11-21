@@ -8,10 +8,11 @@ import PipelineView from './views/PipelineView.vue'
 import MicroStepView from './views/MicroStepView.vue'
 import MicroStepPipelineView from './views/MicroStepPipelineView.vue'
 import MicroStepBarrelView from './views/MicroStepBarrelView.vue'
+import MemoryView from './views/MemoryView.vue'
 
 const config = useCpuConfig()
 
-const activeTab = ref<'cpu' | 'editor' | 'pipeline' | 'microstep' | 'microstep-pipeline' | 'microstep-barrel'>('cpu')
+const activeTab = ref<'cpu' | 'editor' | 'pipeline' | 'microstep' | 'microstep-pipeline' | 'microstep-barrel' | 'memory'>('cpu')
 </script>
 
 <template>
@@ -22,6 +23,7 @@ const activeTab = ref<'cpu' | 'editor' | 'pipeline' | 'microstep' | 'microstep-p
         v-if="config.multicycle"
         @switch-tab="activeTab = 'editor'"
         @switch-pipeline="activeTab = 'pipeline'"
+        @switch-memory="activeTab = 'memory'"
         @switch-microstep="activeTab = 'microstep'"
         @switch-microstep-pipeline="activeTab = 'microstep-pipeline'"
         @switch-microstep-barrel="activeTab = 'microstep-barrel'"
@@ -30,6 +32,7 @@ const activeTab = ref<'cpu' | 'editor' | 'pipeline' | 'microstep' | 'microstep-p
         v-else
         @switch-tab="activeTab = 'editor'"
         @switch-pipeline="activeTab = 'pipeline'"
+        @switch-memory="activeTab = 'memory'"
         @switch-microstep="activeTab = 'microstep'"
         @switch-microstep-pipeline="activeTab = 'microstep-pipeline'"
         @switch-microstep-barrel="activeTab = 'microstep-barrel'"
@@ -46,6 +49,9 @@ const activeTab = ref<'cpu' | 'editor' | 'pipeline' | 'microstep' | 'microstep-p
     </div>
     <div v-if="activeTab === 'microstep-pipeline'">
       <MicroStepPipelineView @switch-cpu="activeTab = 'cpu'" />
+    </div>
+    <div v-if="activeTab === 'memory'">
+      <MemoryView @switch-cpu="activeTab = 'cpu'" />
     </div>
     <div v-if="activeTab === 'microstep-barrel'">
       <MicroStepBarrelView @switch-cpu="activeTab = 'cpu'" />
