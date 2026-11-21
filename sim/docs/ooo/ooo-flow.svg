@@ -1,0 +1,212 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="960" viewBox="0 0 1500 960" font-family="Inter, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">
+  <title>Out-of-order core (Tomasulo + ROB): instruction flow</title>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
+    <marker id="aO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
+    <marker id="aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#15803d"/></marker>
+    <marker id="aR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker>
+    <marker id="aS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
+    <style>
+      .t { fill: #1f2937; font-size: 11.5px; }
+      .s { fill: #374151; font-size: 11px; }
+      .ht { fill: #fff; font-size: 12.5px; font-weight: 700; letter-spacing: 0.5px; }
+      .m { font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; }
+      .lbl { font-size: 11px; font-weight: 600; }
+      .sec { fill: #0f172a; font-size: 15px; font-weight: 700; }
+    </style>
+  </defs>
+  <rect width="1500" height="960" fill="#fafafa"/>
+  <text x="20" y="30" font-size="20" font-weight="700" fill="#0f172a">Out-of-order core — the life of one instruction</text>
+  <text x="20" y="50" class="s">Tomasulo + reorder buffer (32), single issue, 2 CDBs. Instructions enter and leave in program order (dispatch, commit); in between they wait, execute and finish in any order.</text>
+
+  <rect x="20" y="72" width="172" height="236" rx="4" fill="#fff" stroke="#2aacbe" stroke-width="1.8"/>
+  <rect x="20" y="72" width="172" height="24" rx="4" fill="#2aacbe"/><text x="28" y="89" class="ht">1 FETCH</text>
+  <text x="28" y="116" class="t">PC → instruction memory</text>
+  <text x="28" y="138" class="t">&#160;&#160;(2 cycles, or L1I cache)</text>
+  <text x="28" y="160" class="t">BTB + BHT predict the next</text>
+  <text x="28" y="182" class="t">&#160;&#160;PC: taken → target, else +4</text>
+  <text x="28" y="204" class="t">→ instruction queue (8)</text>
+  <text x="28" y="226" class="t">stall: queue full</text>
+  <path d="M192,112 H205" stroke="#334155" stroke-width="2" fill="none" marker-end="url(#a)"/>
+  <rect x="205" y="72" width="172" height="236" rx="4" fill="#fff" stroke="#2aacbe" stroke-width="1.8"/>
+  <rect x="205" y="72" width="172" height="24" rx="4" fill="#2aacbe"/><text x="213" y="89" class="ht">2 DECODE</text>
+  <text x="213" y="116" class="t">opcode → which unit:</text>
+  <text x="213" y="138" class="t">&#160;&#160;ALU · MUL · BR · LSU</text>
+  <text x="213" y="160" class="t">fields rd, rs1, rs2, imm</text>
+  <text x="213" y="182" class="t">CSR / FENCE / ECALL:</text>
+  <text x="213" y="204" class="t">&#160;&#160;wait for an empty ROB</text>
+  <path d="M377,112 H390" stroke="#334155" stroke-width="2" fill="none" marker-end="url(#a)"/>
+  <rect x="390" y="72" width="172" height="236" rx="4" fill="#fff" stroke="#0e7490" stroke-width="1.8"/>
+  <rect x="390" y="72" width="172" height="24" rx="4" fill="#0e7490"/><text x="398" y="89" class="ht">3 RENAME · DISPATCH</text>
+  <text x="398" y="116" class="t">alloc ROB entry (tail, 32)</text>
+  <text x="398" y="138" class="t">&#160;&#160;+ RS / LSQ entry</text>
+  <text x="398" y="160" class="t">each source via the RAT:</text>
+  <text x="398" y="182" class="t">&#160;&#160;RF → value</text>
+  <text x="398" y="204" class="t">&#160;&#160;ROB done → value</text>
+  <text x="398" y="226" class="t">&#160;&#160;else → wait on its tag</text>
+  <text x="398" y="248" class="t">RAT[rd] ← this ROB tag</text>
+  <text x="398" y="270" class="t">stall: ROB / RS / LSQ full</text>
+  <path d="M562,112 H575" stroke="#334155" stroke-width="2" fill="none" marker-end="url(#a)"/>
+  <rect x="575" y="72" width="172" height="236" rx="4" fill="#fff" stroke="#b45309" stroke-width="1.8"/>
+  <rect x="575" y="72" width="172" height="24" rx="4" fill="#b45309"/><text x="583" y="89" class="ht">4 WAIT IN RS</text>
+  <text x="583" y="116" class="t">sit in the reservation</text>
+  <text x="583" y="138" class="t">&#160;&#160;station until both</text>
+  <text x="583" y="160" class="t">&#160;&#160;operands are values</text>
+  <text x="583" y="182" class="t">watch both CDBs: tag</text>
+  <text x="583" y="204" class="t">&#160;&#160;match → take the value</text>
+  <text x="583" y="226" class="t">(RAW hazards wait here;</text>
+  <text x="583" y="248" class="t">&#160;&#160;WAR / WAW are gone —</text>
+  <text x="583" y="270" class="t">&#160;&#160;renaming)</text>
+  <path d="M747,112 H760" stroke="#334155" stroke-width="2" fill="none" marker-end="url(#a)"/>
+  <rect x="760" y="72" width="172" height="236" rx="4" fill="#fff" stroke="#0e7490" stroke-width="1.8"/>
+  <rect x="760" y="72" width="172" height="24" rx="4" fill="#0e7490"/><text x="768" y="89" class="ht">5 ISSUE</text>
+  <text x="768" y="116" class="t">each unit picks the</text>
+  <text x="768" y="138" class="t">&#160;&#160;oldest ready entry</text>
+  <text x="768" y="160" class="t">→ a free unit:</text>
+  <text x="768" y="182" class="t">&#160;&#160;ALU ×2, MUL (pipelined),</text>
+  <text x="768" y="204" class="t">&#160;&#160;BRU, LSU (AGU)</text>
+  <text x="768" y="226" class="t">free the RS entry</text>
+  <text x="768" y="248" class="t" font-weight="700">out of program order!</text>
+  <path d="M932,112 H945" stroke="#334155" stroke-width="2" fill="none" marker-end="url(#a)"/>
+  <rect x="945" y="72" width="172" height="236" rx="4" fill="#fff" stroke="#0e7490" stroke-width="1.8"/>
+  <rect x="945" y="72" width="172" height="24" rx="4" fill="#0e7490"/><text x="953" y="89" class="ht">6 EXECUTE</text>
+  <text x="953" y="116" class="t">ALU, BRU: 1 cycle</text>
+  <text x="953" y="138" class="t">MUL: 3 cycles</text>
+  <text x="953" y="160" class="t">load: address 1 + memory</text>
+  <text x="953" y="182" class="t">&#160;&#160;(2 cycles or L1D→L2)</text>
+  <text x="953" y="204" class="t">&#160;&#160;or forward from an older</text>
+  <text x="953" y="226" class="t">&#160;&#160;store in the LSQ</text>
+  <text x="953" y="248" class="t">branch: actual vs predicted</text>
+  <text x="953" y="270" class="t" font-weight="700" style="fill:#dc2626">&#160;&#160;wrong → FLUSH NOW</text>
+  <path d="M1117,112 H1130" stroke="#334155" stroke-width="2" fill="none" marker-end="url(#a)"/>
+  <rect x="1130" y="72" width="172" height="236" rx="4" fill="#fff" stroke="#d97706" stroke-width="1.8"/>
+  <rect x="1130" y="72" width="172" height="24" rx="4" fill="#d97706"/><text x="1138" y="89" class="ht">7 WRITEBACK (CDB ×2)</text>
+  <text x="1138" y="116" class="t">result + ROB tag on a</text>
+  <text x="1138" y="138" class="t">&#160;&#160;common data bus</text>
+  <text x="1138" y="160" class="t">2 per cycle, oldest first</text>
+  <text x="1138" y="182" class="t">&#160;&#160;(a third waits a cycle)</text>
+  <text x="1138" y="204" class="t">→ waiting RS entries wake</text>
+  <text x="1138" y="226" class="t">→ ROB entry: value, done</text>
+  <text x="1138" y="248" class="t">(stores: done when address</text>
+  <text x="1138" y="270" class="t">&#160;&#160;and data are known)</text>
+  <path d="M1302,112 H1315" stroke="#334155" stroke-width="2" fill="none" marker-end="url(#a)"/>
+  <rect x="1315" y="72" width="172" height="236" rx="4" fill="#fff" stroke="#15803d" stroke-width="1.8"/>
+  <rect x="1315" y="72" width="172" height="24" rx="4" fill="#15803d"/><text x="1323" y="89" class="ht">8 COMMIT</text>
+  <text x="1323" y="116" class="t">only the ROB head, in</text>
+  <text x="1323" y="138" class="t">&#160;&#160;program order, 1 / cycle</text>
+  <text x="1323" y="160" class="t">done → RF[rd] ← value</text>
+  <text x="1323" y="182" class="t">&#160;&#160;RAT → RF if still this tag</text>
+  <text x="1323" y="204" class="t">store → write memory now</text>
+  <text x="1323" y="226" class="t">exception → trap (precise)</text>
+  <text x="1323" y="248" class="t">&#160;&#160;flush all, PC ← mtvec</text>
+  <path d="M20,330 H562" stroke="#0f766e" stroke-width="3"/><path d="M20,324 V336 M562,324 V336" stroke="#0f766e" stroke-width="3"/>
+  <text x="291.0" y="324" text-anchor="middle" class="lbl" fill="#0f766e">IN ORDER — front end</text>
+  <path d="M575,330 H1302" stroke="#b45309" stroke-width="3"/><path d="M575,324 V336 M1302,324 V336" stroke="#b45309" stroke-width="3"/>
+  <text x="585" y="324" text-anchor="start" class="lbl" fill="#b45309">OUT OF ORDER — as soon as operands and a unit are ready</text>
+  <path d="M1315,330 H1487" stroke="#15803d" stroke-width="3"/><path d="M1315,324 V336 M1487,324 V336" stroke="#15803d" stroke-width="3"/>
+  <text x="1401.0" y="324" text-anchor="middle" class="lbl" fill="#15803d">IN ORDER — commit</text>
+  <path d="M1216.0,308 V378 H661.0 V336" stroke="#d97706" stroke-width="2.5" fill="none" marker-end="url(#aO)"/>
+  <text x="671.0" y="374" class="lbl" fill="#b45309">CDB broadcasts wake up waiting instructions (tag match, either bus)</text>
+  <path d="M1333,308 V408 H476.0 V336" stroke="#15803d" stroke-width="2.5" fill="none" marker-end="url(#aG)"/>
+  <text x="595" y="404" class="lbl" fill="#15803d">commit frees the ROB entry → dispatch can continue · RAT entry back to the register file</text>
+  <path d="M1097,308 V438 H118.0 V336" stroke="#dc2626" stroke-width="2.5" stroke-dasharray="8 4" fill="none" marker-end="url(#aR)"/>
+  <text x="215" y="434" class="lbl" fill="#dc2626">mispredict found at execute: flush every younger entry (IQ, RS, LSQ, ROB), rebuild the RAT, fetch from the actual target</text>
+  <path d="M1479,308 V460 H94.0 V336" stroke="#991b1b" stroke-width="2" stroke-dasharray="3 3" fill="none" marker-end="url(#aR)"/>
+  <text x="215" y="456" class="lbl" fill="#991b1b">exception at the ROB head: flush everything, trap → mtvec (precise)</text>
+  <path d="M420,308 V356 H162 V336" stroke="#64748b" stroke-width="1.8" stroke-dasharray="3 3" fill="none" marker-end="url(#aS)"/>
+  <text x="172" y="352" class="lbl" fill="#475569">ROB / RS / LSQ full → stall</text>
+  <text x="20" y="486" class="sec">How each hazard is handled</text>
+  <rect x="20" y="494" width="1460" height="19" fill="#f1f5f9"/>
+  <text x="28" y="508" class="t" font-weight="700">RAW (read after write)</text><text x="200" y="508" class="t">the reader holds the producer&#x27;s ROB tag and waits in its RS until a CDB broadcasts that tag</text>
+  <rect x="20" y="515" width="1460" height="19" fill="#fafafa"/>
+  <text x="28" y="529" class="t" font-weight="700">WAR, WAW</text><text x="200" y="529" class="t">gone: every result gets its own ROB entry (renaming), so a later write never touches an earlier reader&#x27;s value</text>
+  <rect x="20" y="536" width="1460" height="19" fill="#f1f5f9"/>
+  <text x="28" y="550" class="t" font-weight="700">structural</text><text x="200" y="550" class="t">RS / LSQ / ROB full → dispatch stalls; 2 ALUs; MUL is pipelined; 2 CDBs → up to 2 results per cycle, oldest first</text>
+  <rect x="20" y="557" width="1460" height="19" fill="#fafafa"/>
+  <text x="28" y="571" class="t" font-weight="700">control (branches)</text><text x="200" y="571" class="t">predicted at fetch (BHT + BTB); younger instructions run speculatively; a mispredict is flushed as soon as the branch executes</text>
+  <rect x="20" y="578" width="1460" height="19" fill="#f1f5f9"/>
+  <text x="28" y="592" class="t" font-weight="700">memory</text><text x="200" y="592" class="t">loads wait until all older store addresses are known; same address → take the store&#x27;s data (forwarding); stores write at commit</text>
+  <rect x="20" y="599" width="1460" height="19" fill="#fafafa"/>
+  <text x="28" y="613" class="t" font-weight="700">exceptions / traps</text><text x="200" y="613" class="t">marked in the ROB entry, taken only at the head → precise: older instructions done, younger never committed</text>
+  <text x="20" y="662" class="sec">Example: cycle by cycle</text>
+  <text x="250" y="662" class="s">load and MUL take 3 cycles; ALU 1 · 2 CDB broadcasts per cycle (oldest first) · a waiting instruction can issue the cycle after its value is broadcast</text>
+  <text x="28" y="694" class="t" font-weight="700">#  instruction</text><text x="250" y="694" class="t" font-weight="700">unit</text>
+  <text x="370.0" y="694" text-anchor="middle" class="t" font-weight="700">1</text>
+  <text x="450.0" y="694" text-anchor="middle" class="t" font-weight="700">2</text>
+  <text x="530.0" y="694" text-anchor="middle" class="t" font-weight="700">3</text>
+  <text x="610.0" y="694" text-anchor="middle" class="t" font-weight="700">4</text>
+  <text x="690.0" y="694" text-anchor="middle" class="t" font-weight="700">5</text>
+  <text x="770.0" y="694" text-anchor="middle" class="t" font-weight="700">6</text>
+  <text x="850.0" y="694" text-anchor="middle" class="t" font-weight="700">7</text>
+  <text x="930.0" y="694" text-anchor="middle" class="t" font-weight="700">8</text>
+  <text x="1010.0" y="694" text-anchor="middle" class="t" font-weight="700">9</text>
+  <text x="1090.0" y="694" text-anchor="middle" class="t" font-weight="700">10</text>
+  <text x="1170.0" y="694" text-anchor="middle" class="t" font-weight="700">11</text>
+  <text x="1250.0" y="694" text-anchor="middle" class="t" font-weight="700">12</text>
+  <rect x="20" y="702" width="1270" height="24" fill="#f8fafc"/>
+  <text x="28" y="719" class="t m">1&#160;&#160;lw&#160;&#160; x4, 0(x10)</text><text x="250" y="719" class="t">LSU</text>
+  <rect x="332" y="703" width="76" height="22" rx="3" fill="#94a3b8"/><text x="370.0" y="718" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">IF</text>
+  <rect x="412" y="703" width="76" height="22" rx="3" fill="#0f766e"/><text x="450.0" y="718" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">DI</text>
+  <rect x="492" y="703" width="76" height="22" rx="3" fill="#0891b2"/><text x="530.0" y="718" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">issue+EX</text>
+  <rect x="572" y="703" width="76" height="22" rx="3" fill="#0891b2"/><text x="610.0" y="718" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">EX</text>
+  <rect x="652" y="703" width="76" height="22" rx="3" fill="#0891b2"/><text x="690.0" y="718" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">EX</text>
+  <rect x="732" y="703" width="76" height="22" rx="3" fill="#d97706"/><text x="770.0" y="718" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">WB</text>
+  <rect x="812" y="703" width="76" height="22" rx="3" fill="#15803d"/><text x="850.0" y="718" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">CM</text>
+  <rect x="20" y="728" width="1270" height="24" fill="#fff"/>
+  <text x="28" y="745" class="t m">2&#160;&#160;mul&#160;&#160;x6, x2, x3</text><text x="250" y="745" class="t">MUL</text>
+  <rect x="412" y="729" width="76" height="22" rx="3" fill="#94a3b8"/><text x="450.0" y="744" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">IF</text>
+  <rect x="492" y="729" width="76" height="22" rx="3" fill="#0f766e"/><text x="530.0" y="744" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">DI</text>
+  <rect x="572" y="729" width="76" height="22" rx="3" fill="#0891b2"/><text x="610.0" y="744" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">issue+EX</text>
+  <rect x="652" y="729" width="76" height="22" rx="3" fill="#0891b2"/><text x="690.0" y="744" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">EX</text>
+  <rect x="732" y="729" width="76" height="22" rx="3" fill="#0891b2"/><text x="770.0" y="744" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">EX</text>
+  <rect x="812" y="729" width="76" height="22" rx="3" fill="#d97706"/><text x="850.0" y="744" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">WB</text>
+  <rect x="892" y="729" width="76" height="22" rx="3" fill="#15803d"/><text x="930.0" y="744" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">CM</text>
+  <rect x="20" y="754" width="1270" height="24" fill="#f8fafc"/>
+  <text x="28" y="771" class="t m">3&#160;&#160;add&#160;&#160;x5, x4, x1</text><text x="250" y="771" class="t">ALU</text>
+  <rect x="492" y="755" width="76" height="22" rx="3" fill="#94a3b8"/><text x="530.0" y="770" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">IF</text>
+  <rect x="572" y="755" width="76" height="22" rx="3" fill="#0f766e"/><text x="610.0" y="770" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">DI</text>
+  <rect x="652" y="755" width="76" height="22" rx="3" fill="#fde68a"/><text x="690.0" y="770" text-anchor="middle" font-size="10.5" font-weight="700" fill="#374151">wait</text>
+  <rect x="732" y="755" width="76" height="22" rx="3" fill="#fde68a"/><text x="770.0" y="770" text-anchor="middle" font-size="10.5" font-weight="700" fill="#374151">wait</text>
+  <rect x="812" y="755" width="76" height="22" rx="3" fill="#0891b2"/><text x="850.0" y="770" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">issue+EX</text>
+  <rect x="892" y="755" width="76" height="22" rx="3" fill="#d97706"/><text x="930.0" y="770" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">WB</text>
+  <rect x="972" y="755" width="76" height="22" rx="3" fill="#15803d"/><text x="1010.0" y="770" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">CM</text>
+  <rect x="20" y="780" width="1270" height="24" fill="#fff"/>
+  <text x="28" y="797" class="t m">4&#160;&#160;addi x7, x0, 5</text><text x="250" y="797" class="t">ALU</text>
+  <rect x="572" y="781" width="76" height="22" rx="3" fill="#94a3b8"/><text x="610.0" y="796" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">IF</text>
+  <rect x="652" y="781" width="76" height="22" rx="3" fill="#0f766e"/><text x="690.0" y="796" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">DI</text>
+  <rect x="732" y="781" width="76" height="22" rx="3" fill="#0891b2"/><text x="770.0" y="796" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">issue+EX</text>
+  <rect x="812" y="781" width="76" height="22" rx="3" fill="#d97706"/><text x="850.0" y="796" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">WB</text>
+  <rect x="892" y="781" width="76" height="22" rx="3" fill="#e2e8f0"/><text x="930.0" y="796" text-anchor="middle" font-size="10.5" font-weight="700" fill="#374151">wait head</text>
+  <rect x="972" y="781" width="76" height="22" rx="3" fill="#e2e8f0"/><text x="1010.0" y="796" text-anchor="middle" font-size="10.5" font-weight="700" fill="#374151">wait head</text>
+  <rect x="1052" y="781" width="76" height="22" rx="3" fill="#15803d"/><text x="1090.0" y="796" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">CM</text>
+  <rect x="20" y="806" width="1270" height="24" fill="#f8fafc"/>
+  <text x="28" y="823" class="t m">5&#160;&#160;sub&#160;&#160;x8, x6, x7</text><text x="250" y="823" class="t">ALU</text>
+  <rect x="652" y="807" width="76" height="22" rx="3" fill="#94a3b8"/><text x="690.0" y="822" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">IF</text>
+  <rect x="732" y="807" width="76" height="22" rx="3" fill="#0f766e"/><text x="770.0" y="822" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">DI</text>
+  <rect x="812" y="807" width="76" height="22" rx="3" fill="#fde68a"/><text x="850.0" y="822" text-anchor="middle" font-size="10.5" font-weight="700" fill="#374151">wait</text>
+  <rect x="892" y="807" width="76" height="22" rx="3" fill="#0891b2"/><text x="930.0" y="822" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">issue+EX</text>
+  <rect x="972" y="807" width="76" height="22" rx="3" fill="#d97706"/><text x="1010.0" y="822" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">WB</text>
+  <rect x="1052" y="807" width="76" height="22" rx="3" fill="#e2e8f0"/><text x="1090.0" y="822" text-anchor="middle" font-size="10.5" font-weight="700" fill="#374151">wait head</text>
+  <rect x="1132" y="807" width="76" height="22" rx="3" fill="#15803d"/><text x="1170.0" y="822" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">CM</text>
+  <rect x="20" y="832" width="1270" height="24" fill="#fff"/>
+  <text x="28" y="849" class="t m">6&#160;&#160;sw&#160;&#160; x8, 4(x10)</text><text x="250" y="849" class="t">LSU</text>
+  <rect x="732" y="833" width="76" height="22" rx="3" fill="#94a3b8"/><text x="770.0" y="848" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">IF</text>
+  <rect x="812" y="833" width="76" height="22" rx="3" fill="#0f766e"/><text x="850.0" y="848" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">DI</text>
+  <rect x="892" y="833" width="76" height="22" rx="3" fill="#fde68a"/><text x="930.0" y="848" text-anchor="middle" font-size="10.5" font-weight="700" fill="#374151">wait</text>
+  <rect x="972" y="833" width="76" height="22" rx="3" fill="#fde68a"/><text x="1010.0" y="848" text-anchor="middle" font-size="10.5" font-weight="700" fill="#374151">wait</text>
+  <rect x="1052" y="833" width="76" height="22" rx="3" fill="#0891b2"/><text x="1090.0" y="848" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">issue+EX</text>
+  <rect x="1132" y="833" width="76" height="22" rx="3" fill="#e2e8f0"/><text x="1170.0" y="848" text-anchor="middle" font-size="10.5" font-weight="700" fill="#374151">wait head</text>
+  <rect x="1212" y="833" width="76" height="22" rx="3" fill="#15803d"/><text x="1250.0" y="848" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">CM</text>
+  <text x="28" y="878" class="t">• #4 addi executes in cycle 6 and broadcasts in 7 — before the older #3 add (EX 7, WB 8), which waits for x4 from the load</text>
+  <text x="28" y="897" class="t">• two CDBs: #2 mul and #4 addi broadcast in the same cycle (7), nobody waits for the bus</text>
+  <text x="28" y="916" class="t">• commit stays in program order 7, 8, 9, 10, 11, 12 — the register file only sees the program&#x27;s order</text>
+  <text x="28" y="935" class="t">• the store #6 writes memory at its commit (12), never speculatively</text>
+  <rect x="1080" y="866" width="22" height="14" rx="2" fill="#94a3b8"/><text x="1110" y="877" class="s">fetch</text>
+  <rect x="1280" y="866" width="22" height="14" rx="2" fill="#0f766e"/><text x="1310" y="877" class="s">decode + dispatch</text>
+  <rect x="1080" y="886" width="22" height="14" rx="2" fill="#fde68a"/><text x="1110" y="897" class="s">wait in RS</text>
+  <rect x="1280" y="886" width="22" height="14" rx="2" fill="#0891b2"/><text x="1310" y="897" class="s">issue / execute</text>
+  <rect x="1080" y="906" width="22" height="14" rx="2" fill="#fdba74"/><text x="1110" y="917" class="s">wait for a CDB</text>
+  <rect x="1280" y="906" width="22" height="14" rx="2" fill="#d97706"/><text x="1310" y="917" class="s">CDB broadcast</text>
+  <rect x="1080" y="926" width="22" height="14" rx="2" fill="#e2e8f0"/><text x="1110" y="937" class="s">done, wait for head</text>
+  <rect x="1280" y="926" width="22" height="14" rx="2" fill="#15803d"/><text x="1310" y="937" class="s">commit</text>
+</svg>

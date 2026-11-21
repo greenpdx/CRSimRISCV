@@ -1,0 +1,255 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="940" viewBox="0 0 1500 940" font-family="Inter, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">
+  <title>Out-of-order core (Tomasulo + ROB): components</title>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
+    <marker id="aCdb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
+    <marker id="aRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker>
+    <marker id="aGrn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#15803d"/></marker>
+    <style>
+      .blk { fill: #fff; stroke: #2aacbe; stroke-width: 1.6; }
+      .hd { fill: #2aacbe; }
+      .ht { fill: #fff; font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+      .t { fill: #1f2937; font-size: 12px; }
+      .s { fill: #374151; font-size: 11px; }
+      .m { font-family: 'JetBrains Mono', 'DejaVu Sans Mono', monospace; }
+      .cell { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1; }
+      .w { fill: none; stroke: #334155; stroke-width: 1.8; }
+      .cdb { fill: none; stroke: #d97706; stroke-width: 5; }
+      .cdbw { fill: none; stroke: #d97706; stroke-width: 2; }
+      .red { fill: none; stroke: #dc2626; stroke-width: 1.8; stroke-dasharray: 7 4; }
+      .grn { fill: none; stroke: #15803d; stroke-width: 2; }
+      .lbl { fill: #334155; font-size: 11px; font-weight: 600; }
+      .stage { fill: #64748b; font-size: 12px; font-weight: 700; letter-spacing: 2px; }
+      .zone { fill: #f1f5f9; stroke: #cbd5e1; stroke-width: 1; }
+      .fu { fill: #ecfeff; stroke: #0e7490; stroke-width: 1.6; }
+      .note { fill: #92400e; font-size: 11px; }
+    </style>
+  </defs>
+
+  <rect width="1500" height="940" fill="#fafafa"/>
+  <text x="20" y="30" font-size="20" font-weight="700" fill="#0f172a">Out-of-order core — Tomasulo + reorder buffer (single issue, RV32I + Zmmul)</text>
+  <text x="20" y="50" class="s">Components and the main data paths. Dark lines: instructions and operands. Orange: the common data bus (results + ROB tag). Green: in-order commit. Red dashed: flush / redirect.</text>
+
+  <!-- stage bands -->
+  <rect x="15" y="65" width="430" height="300" rx="6" class="zone"/>
+  <text x="25" y="83" class="stage">FETCH</text>
+  <rect x="460" y="65" width="330" height="300" rx="6" class="zone"/>
+  <text x="470" y="83" class="stage">DECODE · RENAME · DISPATCH</text>
+  <rect x="805" y="65" width="680" height="560" rx="6" class="zone"/>
+  <text x="815" y="83" class="stage">ISSUE (reservation stations) · EXECUTE</text>
+  <rect x="15" y="380" width="775" height="545" rx="6" class="zone"/>
+  <text x="25" y="398" class="stage">REORDER BUFFER · COMMIT (in order)</text>
+
+  <!-- ═══ FETCH ═══ -->
+  <rect x="30" y="100" width="90" height="56" rx="3" class="blk"/>
+  <rect x="30" y="100" width="90" height="20" rx="3" class="hd"/><text x="40" y="115" class="ht">PC</text>
+  <text x="40" y="142" class="t m">0x00400000</text>
+
+  <rect x="150" y="100" width="135" height="80" rx="3" class="blk"/>
+  <rect x="150" y="100" width="135" height="20" rx="3" class="hd"/><text x="160" y="115" class="ht">BTB</text>
+  <text x="160" y="137" class="s">16 entries</text>
+  <text x="160" y="153" class="s">PC → branch target</text>
+  <text x="160" y="169" class="s">hit = predicted branch</text>
+
+  <rect x="300" y="100" width="130" height="80" rx="3" class="blk"/>
+  <rect x="300" y="100" width="130" height="20" rx="3" class="hd"/><text x="310" y="115" class="ht">BHT</text>
+  <text x="310" y="137" class="s">64 × 2-bit counters</text>
+  <text x="310" y="153" class="s">index PC[7:2]</text>
+  <text x="310" y="169" class="s">≥ 2 → predict taken</text>
+
+  <rect x="30" y="200" width="400" height="58" rx="3" class="blk"/>
+  <rect x="30" y="200" width="400" height="20" rx="3" class="hd"/><text x="40" y="215" class="ht">INSTRUCTION MEMORY</text>
+  <text x="40" y="238" class="s">selectable: fixed 2 cycles  |  L1I → L2 → memory (memory-panel caches)</text>
+  <text x="40" y="252" class="s">1 instruction per cycle (single issue)</text>
+
+  <rect x="30" y="278" width="400" height="74" rx="3" class="blk"/>
+  <rect x="30" y="278" width="400" height="20" rx="3" class="hd"/><text x="40" y="293" class="ht">INSTRUCTION QUEUE · 8</text>
+  <g class="m" font-size="11">
+    <rect x="40" y="306" width="45" height="36" class="cell"/><text x="44" y="328" class="t">add</text>
+    <rect x="88" y="306" width="45" height="36" class="cell"/><text x="92" y="328" class="t">mul</text>
+    <rect x="136" y="306" width="45" height="36" class="cell"/><text x="140" y="328" class="t">lw</text>
+    <rect x="184" y="306" width="45" height="36" class="cell"/><text x="188" y="328" class="t">bne</text>
+    <rect x="232" y="306" width="45" height="36" class="cell"/><text x="236" y="328" class="t">sub</text>
+    <rect x="280" y="306" width="45" height="36" class="cell"/><text x="284" y="328" class="t">addi</text>
+    <rect x="328" y="306" width="45" height="36" class="cell"/><text x="332" y="328" class="t"></text>
+    <rect x="376" y="306" width="45" height="36" class="cell"/><text x="380" y="328" class="t"></text>
+  </g>
+  <text x="40" y="364" class="s">head → oldest · + predicted next PC per entry · 6 / 8 full</text>
+
+  <!-- fetch wires -->
+  <path class="w" d="M120,128 H150" marker-end="url(#a)"/>
+  <path class="w" d="M75,156 V200" marker-end="url(#a)"/>
+  <path class="w" d="M230,258 V278" marker-end="url(#a)"/>
+  <path class="w" d="M285,140 H300"/>
+  <path class="w" d="M365,180 V190 H100 V156" marker-end="url(#a)"/>
+  <rect x="136" y="183" width="196" height="14" fill="#f1f5f9"/><text x="140" y="194" class="lbl">next PC = taken ? BTB target : PC+4</text>
+
+  <!-- ═══ DECODE / RENAME / DISPATCH ═══ -->
+  <rect x="475" y="100" width="300" height="50" rx="3" class="blk"/>
+  <rect x="475" y="100" width="300" height="20" rx="3" class="hd"/><text x="485" y="115" class="ht">DECODE</text>
+  <text x="485" y="138" class="s">opcode → unit (ALU · MUL · BR · LSU), rd, rs1, rs2, imm</text>
+
+  <rect x="475" y="165" width="140" height="185" rx="3" class="blk"/>
+  <rect x="475" y="165" width="140" height="20" rx="3" class="hd"/><text x="485" y="180" class="ht">RAT</text>
+  <text x="485" y="199" class="s">register → producer</text>
+  <g class="m" font-size="11">
+    <text x="485" y="219" class="t">x5 → ROB 3</text>
+    <text x="485" y="236" class="t">x6 → ROB 4</text>
+    <text x="485" y="253" class="t">x7 → RF</text>
+    <text x="485" y="270" class="t">…</text>
+  </g>
+  <text x="485" y="292" class="s">RF = value is final</text>
+  <text x="485" y="308" class="s">tag = still in flight</text>
+  <text x="485" y="324" class="s">(renaming removes</text>
+  <text x="485" y="340" class="s"> WAR / WAW hazards)</text>
+
+  <rect x="630" y="165" width="145" height="185" rx="3" class="blk"/>
+  <rect x="630" y="165" width="145" height="20" rx="3" class="hd"/><text x="640" y="180" class="ht">REGISTER FILE</text>
+  <text x="640" y="199" class="s">x0 … x31 (architectural)</text>
+  <text x="640" y="219" class="s">written only at commit</text>
+  <text x="640" y="245" class="lbl">operand read at dispatch:</text>
+  <text x="640" y="262" class="s">RAT says RF → value</text>
+  <text x="640" y="278" class="s">ROB entry done → value</text>
+  <text x="640" y="294" class="s">else → wait for tag</text>
+  <text x="640" y="310" class="s">     on the CDB</text>
+
+  <path class="w" d="M430,315 H452 V125 H475" marker-end="url(#a)"/>
+  <path class="w" d="M545,150 V165" marker-end="url(#a)"/>
+
+  <!-- dispatch bus to the RS -->
+  <path class="w" d="M775,125 H795 V110 H820"/>
+  <text x="680" y="95" class="lbl">dispatch: 1 / cycle</text>
+
+  <!-- ═══ RESERVATION STATIONS + FUs ═══ -->
+  <!-- ALU RS -->
+  <rect x="820" y="100" width="330" height="118" rx="3" class="blk"/>
+  <rect x="820" y="100" width="330" height="20" rx="3" class="hd"/><text x="830" y="115" class="ht">ALU RS · 4</text>
+  <g class="m" font-size="10.5">
+    <text x="830" y="136" class="s">busy  op    Vj / Qj     Vk / Qk     dest</text>
+    <rect x="828" y="142" width="314" height="17" class="cell"/><text x="834" y="155" class="t">1     add   0000002a    ROB 2       ROB 3</text>
+    <rect x="828" y="161" width="314" height="17" class="cell"/><text x="834" y="174" class="t">1     sub   ROB 4       00000001    ROB 5</text>
+    <rect x="828" y="180" width="314" height="17" class="cell"/><text x="834" y="193" class="t">0</text>
+    <rect x="828" y="199" width="314" height="17" class="cell"/><text x="834" y="212" class="t">0</text>
+  </g>
+
+  <!-- MUL RS -->
+  <rect x="820" y="232" width="330" height="80" rx="3" class="blk"/>
+  <rect x="820" y="232" width="330" height="20" rx="3" class="hd"/><text x="830" y="247" class="ht">MUL RS · 4</text>
+  <text x="830" y="270" class="s">same fields: op, Vj/Qj, Vk/Qk, dest ROB tag</text>
+  <text x="830" y="288" class="s">ready = both operands are values (Q empty)</text>
+  <text x="830" y="304" class="s">select: oldest ready entry issues</text>
+
+  <!-- BR RS -->
+  <rect x="820" y="326" width="330" height="80" rx="3" class="blk"/>
+  <rect x="820" y="326" width="330" height="20" rx="3" class="hd"/><text x="830" y="341" class="ht">BRANCH RS · 8</text>
+  <text x="830" y="364" class="s">+ predicted taken / target, PC</text>
+  <text x="830" y="382" class="s">JAL / JALR / Bxx</text>
+  <text x="830" y="398" class="s">link value (PC+4) goes on the CDB</text>
+
+  <!-- LSQ -->
+  <rect x="820" y="420" width="330" height="120" rx="3" class="blk"/>
+  <rect x="820" y="420" width="330" height="20" rx="3" class="hd"/><text x="830" y="435" class="ht">LOAD / STORE QUEUE · 4</text>
+  <text x="830" y="457" class="s">in program order; address = base + imm</text>
+  <text x="830" y="475" class="s">load waits until every older store address</text>
+  <text x="830" y="491" class="s">  is known; same address → forward its data</text>
+  <text x="830" y="509" class="s">  (store-to-load forwarding), else read memory</text>
+  <text x="830" y="527" class="s">store writes memory only at commit</text>
+
+  <!-- FUs -->
+  <rect x="1190" y="100" width="130" height="50" rx="3" class="fu"/><text x="1205" y="122" class="ht" fill="#0e7490" style="fill:#0e7490">ALU 0</text><text x="1205" y="140" class="s">1 cycle</text>
+  <rect x="1190" y="162" width="130" height="50" rx="3" class="fu"/><text x="1205" y="184" class="ht" style="fill:#0e7490">ALU 1</text><text x="1205" y="202" class="s">1 cycle</text>
+  <rect x="1190" y="240" width="250" height="62" rx="3" class="fu"/><text x="1205" y="260" class="ht" style="fill:#0e7490">MUL · pipelined</text>
+  <g><rect x="1205" y="270" width="68" height="22" class="cell"/><text x="1215" y="285" class="s">M1</text>
+     <rect x="1281" y="270" width="68" height="22" class="cell"/><text x="1291" y="285" class="s">M2</text>
+     <rect x="1357" y="270" width="68" height="22" class="cell"/><text x="1367" y="285" class="s">M3 · 3 cyc</text></g>
+  <rect x="1190" y="334" width="250" height="62" rx="3" class="fu"/><text x="1205" y="354" class="ht" style="fill:#0e7490">BRANCH UNIT · 1 cyc</text>
+  <text x="1205" y="374" class="s">compare, target; actual vs predicted</text>
+  <text x="1205" y="390" class="s">→ update BHT / BTB · mispredict → flush now</text>
+  <rect x="1190" y="430" width="250" height="92" rx="3" class="fu"/><text x="1205" y="450" class="ht" style="fill:#0e7490">LOAD / STORE UNIT</text>
+  <text x="1205" y="470" class="s">AGU: address (1 cyc)</text>
+  <text x="1205" y="486" class="s">DATA MEMORY — selectable:</text>
+  <text x="1205" y="502" class="s">fixed 2 cycles | L1D → L2 → memory</text>
+
+  <!-- RS → FU -->
+  <path class="w" d="M1150,159 H1170 V125 H1190" marker-end="url(#a)"/>
+  <path class="w" d="M1170,159 V187 H1190" marker-end="url(#a)"/>
+  <path class="w" d="M1150,272 H1190" marker-end="url(#a)"/>
+  <path class="w" d="M1150,366 H1190" marker-end="url(#a)"/>
+  <path class="w" d="M1150,476 H1190" marker-end="url(#a)"/>
+  <text x="1153" y="96" class="lbl">issue</text>
+  <path class="w" d="M795,110 V475 H820" marker-end="url(#a)"/>
+  <path class="w" d="M795,159 H820" marker-end="url(#a)"/>
+  <path class="w" d="M795,272 H820" marker-end="url(#a)"/>
+  <path class="w" d="M795,366 H820" marker-end="url(#a)"/>
+
+  <!-- ═══ CDB ═══ -->
+  <path class="cdb" d="M1470,125 V600 H400"/>
+  <path class="cdb" d="M1478,125 V608 H400"/>
+  <text x="820" y="621" font-size="13" font-weight="800" fill="#b45309">2 COMMON DATA BUSES (CDB 0, CDB 1) — result + ROB tag · 2 broadcasts / cycle</text>
+  <path class="cdbw" d="M1320,125 H1470"/>
+  <path class="cdbw" d="M1320,187 H1470"/>
+  <path class="cdbw" d="M1440,281 H1470"/>
+  <path class="cdbw" d="M1440,375 H1470"/>
+  <path class="cdbw" d="M1440,476 H1470"/>
+  <!-- wake-up: CDB back into the RS / LSQ -->
+  <path class="cdbw" d="M1000,600 V560 H808 V205 H820" marker-end="url(#aCdb)"/>
+  <path class="cdbw" d="M808,300 H820" marker-end="url(#aCdb)"/>
+  <path class="cdbw" d="M808,394 H820" marker-end="url(#aCdb)"/>
+  <path class="cdbw" d="M808,520 H820" marker-end="url(#aCdb)"/>
+  <text x="815" y="575" class="note">wake-up: every RS entry whose Qj / Qk = a broadcast tag (either bus) takes the value</text>
+  <!-- CDB → ROB -->
+  <path class="cdbw" d="M600,600 V650" marker-end="url(#aCdb)"/>
+  <text x="608" y="635" class="note">ROB[tag].value ← result, done = 1</text>
+
+  <!-- ═══ ROB ═══ -->
+  <rect x="30" y="655" width="745" height="180" rx="3" class="blk"/>
+  <rect x="30" y="655" width="745" height="20" rx="3" class="hd"/><text x="40" y="670" class="ht">REORDER BUFFER · 32 (circular)</text>
+  <g class="m" font-size="10.5">
+    <text x="40" y="692" class="s">#   instr          dest  value      done  exc   branch: pred / actual</text>
+    <rect x="38" y="698" width="728" height="17" class="cell" style="fill:#dcfce7"/><text x="44" y="711" class="t">2   lw  x4,0(x10)  x4    0000002a   1     —     ◀ HEAD (oldest): commit when done</text>
+    <rect x="38" y="717" width="728" height="17" class="cell"/><text x="44" y="730" class="t">3   add x5,x4,x1   x5    —          0     —</text>
+    <rect x="38" y="736" width="728" height="17" class="cell"/><text x="44" y="749" class="t">4   mul x6,x2,x3   x6    —          0     —</text>
+    <rect x="38" y="755" width="728" height="17" class="cell" style="fill:#fef3c7"/><text x="44" y="768" class="t">5   bne x6,x0,..   —     —          0     —     T / ?</text>
+    <rect x="38" y="774" width="728" height="17" class="cell"/><text x="44" y="787" class="t">6   sub x7,x6,x1   x7    —          0     —     ◀ TAIL (next free) · speculative after #5</text>
+  </g>
+  <text x="40" y="812" class="s">dispatch allocates at TAIL (stall if full or the unit's RS is full) · the CDB fills value / done · commit retires from HEAD, one per cycle</text>
+  <text x="40" y="828" class="s">ROB tags rename the registers: an instruction's result is "ROB n" until it commits</text>
+
+  <!-- dispatch → ROB -->
+  <path class="w" d="M545,350 V655" marker-end="url(#a)"/>
+  <text x="552" y="420" class="lbl">alloc ROB entry,</text>
+  <text x="552" y="435" class="lbl">RAT[rd] ← its tag</text>
+
+  <!-- ═══ COMMIT ═══ -->
+  <rect x="30" y="850" width="745" height="66" rx="3" class="blk" style="stroke:#15803d"/>
+  <rect x="30" y="850" width="745" height="20" rx="3" style="fill:#15803d"/><text x="40" y="865" class="ht">COMMIT (ROB head, in order)</text>
+  <text x="40" y="887" class="s">done → RF[rd] ← value; RAT[rd] → RF if it still names this tag · store → write memory · then free the entry</text>
+  <text x="40" y="905" class="s">exception at head → trap (precise): flush ROB, RS, LSQ, IQ, PC ← mtvec · (mispredicts are flushed earlier, at execute)</text>
+  <path class="grn" d="M770,707 H785 V250 H775" marker-end="url(#aGrn)"/>
+  <text x="796" y="560" class="lbl" fill="#15803d" style="fill:#15803d" transform="rotate(-90 796 560)">commit: RF write</text>
+
+  <!-- ═══ flush / redirect ═══ -->
+  <path class="red" d="M1315,396 V412 H795"/>
+  <path class="red" d="M20,905 H22 V128 H30" marker-end="url(#aRed)"/>
+  <path class="red" d="M30,905 H22"/>
+  <text x="26" y="720" class="lbl" fill="#dc2626" style="fill:#dc2626" transform="rotate(-90 26 720)">exception at commit: flush, PC ← mtvec</text>
+  <path class="red" d="M1315,412 V420"/>
+  <text x="1160" y="406" class="lbl" fill="#dc2626" style="fill:#dc2626">flush younger</text>
+  <path class="red" d="M1440,352 H1458 V60 H105 V100" marker-end="url(#aRed)"/>
+  <text x="930" y="57" class="lbl" fill="#dc2626" style="fill:#dc2626">mispredict at execute: flush younger · restore RAT · PC ← actual target</text>
+
+  <!-- assumptions -->
+  <rect x="805" y="640" width="680" height="285" rx="6" fill="#fffbeb" stroke="#f59e0b"/>
+  <text x="820" y="662" font-size="13" font-weight="700" fill="#92400e">Sizes and policies</text>
+  <text x="820" y="684" class="t">chosen: single issue · 2 ALU (1 cyc) · MUL (3 cyc, pipelined) · BRU (1 cyc) · LSU</text>
+  <text x="820" y="702" class="t">RS 4 (ALU, MUL) · branch RS 8 · LSQ 4 · ROB 32 · instruction queue 8 · 2 CDBs</text>
+  <text x="820" y="720" class="t">memory selectable: fixed 2 cycles | memory-panel caches (L1I / L1D → L2)</text>
+  <text x="820" y="748" class="t" font-weight="700" style="fill:#92400e">policies:</text>
+  <text x="820" y="768" class="t">· 2 CDBs: up to 2 results per cycle, oldest first; a third waits in its unit</text>
+  <text x="820" y="786" class="t">· BTB 16 entries · BHT 64 × 2-bit (index PC[7:2]) — defaults, not yet confirmed</text>
+  <text x="820" y="804" class="t">· mispredict flushed at execute: younger ROB / RS / LSQ / IQ entries dropped,</text>
+  <text x="820" y="822" class="t">  RAT rebuilt from the older ROB entries still in flight, fetch from the target</text>
+  <text x="820" y="840" class="t">· CSR / FENCE / ECALL: wait until the ROB is empty, then run alone</text>
+  <text x="820" y="858" class="t">· traps: taken at commit (precise); mtvec / mepc / mcause via the shared SysUnit</text>
+  <text x="820" y="876" class="t">· one commit per cycle</text>
+</svg>
