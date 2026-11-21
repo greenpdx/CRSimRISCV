@@ -48,6 +48,7 @@ pub mod sim {
     pub mod pipeline;
     pub mod barrel;
     pub mod memsys;
+    pub mod ooo;
 }
 
 pub mod verify {
