@@ -672,6 +672,7 @@
       <button class="clock-btn clock-btn--edit" @click="openEditor">Edit</button>
       <button class="clock-btn clock-btn--edit" @click="emit('switch-pipeline')">Pipeline</button>
       <button class="clock-btn clock-btn--edit" @click="emit('switch-memory')">Memory</button>
+      <button class="clock-btn clock-btn--edit" @click="emit('switch-ooo')">OoO</button>
 
       <span class="clock-divider">|</span>
 
@@ -877,6 +878,7 @@ const emit = defineEmits<{
   'switch-tab': []
   'switch-pipeline': []
   'switch-memory': []
+  'switch-ooo': []
   'switch-microstep': []
   'switch-microstep-pipeline': [],
   'switch-microstep-barrel': []
