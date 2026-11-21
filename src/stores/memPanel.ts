@@ -16,6 +16,8 @@ export type Port = 'Fetch' | 'Load' | 'Store' | 'Walk'
 export type Outcome = 'L1Hit' | 'L2Hit' | 'Memory' | 'Rom'
 
 /** One event from the Rust memory system (serde tag = kind) */
+export interface WayCmp { valid: boolean; tag: number; hit: boolean }
+export type LookupEv = Extract<MemEvent, { kind: 'Lookup' }>
 export interface EntryCmp { valid: boolean; vpn_match: boolean; asid_match: boolean; global: boolean; hit: boolean }
 export interface EntryFlush { valid: boolean; va_match: boolean; asid_match: boolean; global: boolean; inval: boolean }
 export type PteVerdict = 'Pointer' | 'Leaf' | 'Invalid' | 'Reserved' | 'Misaligned' | 'NoLeaf'
@@ -35,6 +37,7 @@ export type MemEvent =
   | { kind: 'TlbFill'; core: number; port: Port; idx: number; va: number; pa: number }
   | { kind: 'PageFault'; core: number; port: Port; va: number; cause: number }
   | { kind: 'Access'; core: number; port: Port; pa: number; outcome: Outcome; latency: number }
+  | { kind: 'Lookup'; core: number; cache: CacheId; pa: number; set: number; tag: number; ways: WayCmp[] }
   | { kind: 'L1Hit'; core: number; cache: CacheId; set: number; way: number; pa: number }
   | { kind: 'L1Miss'; core: number; cache: CacheId; set: number; pa: number }
   | { kind: 'L2Hit'; core: number; set: number; way: number; pa: number }
@@ -63,6 +66,8 @@ export interface MpCore {
 export type Side = 'I' | 'D'
 export type PhaseKind = 'bare' | 'split' | 'compare' | 'perm' | 'hit' | 'miss' | 'pteaddr' | 'pteread' | 'ptecheck'
   | 'ad' | 'victim' | 'fill' | 'fault' | 'sfence-gates' | 'sfence-inval'
+  // cache lookups: address split, set select, tag compare, then what came of it
+  | 'c-split' | 'c-set' | 'c-cmp' | 'c-hit' | 'c-miss' | 'c-snoop' | 'c-wb' | 'c-evict' | 'c-memrd' | 'c-memwr' | 'c-fill' | 'c-state'
 type AccessEv = Extract<MemEvent, { kind: 'Access' }>
 export interface Phase {
   /** Index in this cycle's phase list (−1: not stepped, e.g. a skipped TLB hit) */
@@ -72,49 +77,108 @@ export interface Phase {
   side: Side | null
   kind: PhaseKind
   ev: MemEvent
+  /** Index of `ev` in the cycle's event list (phases are revealed in event order) */
+  ei: number
+  /** Cache phases: which cache */
+  cache?: CacheId
   /** The L1D access of a PTE read (pteread) */
   read?: AccessEv
 }
-/** One translation (or one SFENCE.VMA) of one core in one cycle */
-export interface Group { core: number; side: Side | null; sfence: boolean; hit: boolean; phases: Phase[] }
+/** One translation, one SFENCE.VMA, or one cache access (L1 → L2 → memory) of one core in one cycle */
+export interface Group { core: number; side: Side | null; sfence: boolean; hit: boolean; cache?: CacheId; phases: Phase[] }
 /** A core's MMU work in the last cycle it did any, and its state before that cycle */
 export interface CoreMmu { cycle: number; groups: Group[]; before: MpCore | null }
 
 const MMU_KINDS = new Set(['Bare', 'TlbLookup', 'PermCheck', 'TlbHit', 'TlbMiss', 'PteAddr', 'Walk', 'PteCheck', 'AdUpdate', 'TlbVictim', 'TlbFill', 'PageFault', 'Sfence'])
 
-/** Split a cycle's events into per-core translation groups and phases */
-function groupsOf(evs: MemEvent[]): Group[][] {
-  const out: Group[][] = [[], []]
-  const cur: (Group | null)[] = [null, null]
+const CACHE_KINDS = new Set(['Lookup', 'L1Hit', 'L1Miss', 'L2Hit', 'L2Miss', 'Snoop', 'WriteBack', 'Evict', 'MemRead', 'MemWrite', 'Fill', 'StateChange'])
+
+/**
+ * Split a cycle's events into groups of phases, in event order: MMU groups
+ * (a translation or an SFENCE.VMA) and cache groups (one L1 access and what
+ * follows: L2, memory, fills). A page walk's PTE reads go into its MMU group.
+ */
+function groupsOf(evs: MemEvent[]): Group[] {
+  const out: Group[] = []
+  const mmuCur: (Group | null)[] = [null, null]
+  const cacheCur: (Group | null)[] = [null, null]
+  const walkOpen = [false, false]
   const pendingRead: (AccessEv | undefined)[] = [undefined, undefined]
-  for (const e of evs) {
-    if (e.kind === 'Access' && e.port === 'Walk') { pendingRead[e.core] = e; continue }
-    if (!MMU_KINDS.has(e.kind) || !('core' in e)) continue
-    const k = e.core
-    const sd: Side | null = 'port' in e ? (e.port === 'Fetch' ? 'I' : 'D') : null
-    if (e.kind === 'TlbLookup' || e.kind === 'Bare' || e.kind === 'Sfence' || !cur[k]) {
-      cur[k] = { core: k, side: sd, sfence: e.kind === 'Sfence', hit: e.kind === 'TlbLookup' && e.hit !== null, phases: [] }
-      out[k]!.push(cur[k]!)
+  let lastCore = 0
+  evs.forEach((e, ei) => {
+    if (e.kind === 'Access' && e.port === 'Walk') { pendingRead[e.core] = e; return }
+    if (MMU_KINDS.has(e.kind) && 'core' in e) {
+      const k = e.core
+      const sd: Side | null = 'port' in e ? (e.port === 'Fetch' ? 'I' : 'D') : null
+      if (e.kind === 'TlbLookup' || e.kind === 'Bare' || e.kind === 'Sfence' || !mmuCur[k]) {
+        mmuCur[k] = { core: k, side: sd, sfence: e.kind === 'Sfence', hit: e.kind === 'TlbLookup' && e.hit !== null, phases: [] }
+        out.push(mmuCur[k]!)
+      }
+      const g = mmuCur[k]!
+      const ph = (kind: PhaseKind, extra: Partial<Phase> = {}) => g.phases.push({ gi: -1, ei, core: k, side: g.side, kind, ev: e, ...extra })
+      switch (e.kind) {
+        case 'Bare': ph('bare'); break
+        case 'TlbLookup': ph('split'); ph('compare'); break
+        case 'PermCheck': ph('perm'); break
+        case 'TlbHit': ph('hit'); break
+        case 'TlbMiss': ph('miss'); break
+        case 'PteAddr': ph('pteaddr'); walkOpen[k] = true; break
+        case 'Walk': ph('pteread', { read: pendingRead[k] }); pendingRead[k] = undefined; walkOpen[k] = false; break
+        case 'PteCheck': ph('ptecheck'); break
+        case 'AdUpdate': ph('ad'); break
+        case 'TlbVictim': ph('victim'); break
+        case 'TlbFill': ph('fill'); break
+        case 'PageFault': ph('fault'); break
+        case 'Sfence': ph('sfence-gates'); ph('sfence-inval'); break
+      }
+      return
     }
-    const g = cur[k]!
-    const ph = (kind: PhaseKind, extra: Partial<Phase> = {}) => g.phases.push({ gi: -1, core: k, side: g.side, kind, ev: e, ...extra })
+    if (!CACHE_KINDS.has(e.kind)) return
+    const k = 'core' in e ? e.core : e.kind === 'Snoop' ? e.from : lastCore
+    lastCore = k
+    let g: Group
+    if (walkOpen[k] && mmuCur[k]) g = mmuCur[k]!                       // a PTE read inside a walk
+    else {
+      if (e.kind === 'Lookup' && e.cache !== 'L2' || !cacheCur[k]) {
+        const c = e.kind === 'Lookup' ? e.cache : 'L1D'
+        cacheCur[k] = { core: k, side: c === 'L1I' ? 'I' : 'D', sfence: false, hit: false, cache: c, phases: [] }
+        out.push(cacheCur[k]!)
+      }
+      g = cacheCur[k]!
+    }
+    const cacheOf = 'cache' in e ? e.cache : e.kind === 'WriteBack' ? 'L1D' : e.kind === 'L2Hit' || e.kind === 'L2Miss' || e.kind === 'MemRead' || e.kind === 'MemWrite' ? 'L2' : undefined
+    const ph = (kind: PhaseKind) => g.phases.push({ gi: -1, ei, core: k, side: g.side, kind, ev: e, cache: cacheOf })
     switch (e.kind) {
-      case 'Bare': ph('bare'); break
-      case 'TlbLookup': ph('split'); ph('compare'); break
-      case 'PermCheck': ph('perm'); break
-      case 'TlbHit': ph('hit'); break
-      case 'TlbMiss': ph('miss'); break
-      case 'PteAddr': ph('pteaddr'); break
-      case 'Walk': ph('pteread', { read: pendingRead[k] }); pendingRead[k] = undefined; break
-      case 'PteCheck': ph('ptecheck'); break
-      case 'AdUpdate': ph('ad'); break
-      case 'TlbVictim': ph('victim'); break
-      case 'TlbFill': ph('fill'); break
-      case 'PageFault': ph('fault'); break
-      case 'Sfence': ph('sfence-gates'); ph('sfence-inval'); break
+      case 'Lookup': ph('c-split'); ph('c-set'); ph('c-cmp'); break
+      case 'L1Hit': if (g.cache && g.phases.length === 3) g.hit = true; ph('c-hit'); break
+      case 'L2Hit': ph('c-hit'); break
+      case 'L1Miss': case 'L2Miss': ph('c-miss'); break
+      case 'Snoop': ph('c-snoop'); break
+      case 'WriteBack': ph('c-wb'); break
+      case 'Evict': ph('c-evict'); break
+      case 'MemRead': ph('c-memrd'); break
+      case 'MemWrite': ph('c-memwr'); break
+      case 'Fill': ph('c-fill'); break
+      case 'StateChange': ph('c-state'); break
     }
-  }
+  })
   return out
+}
+
+/** Does event `e` change the contents of cache `id` ("L1I:0", "L1D:1", "L2")? */
+export function changesCache(e: MemEvent, id: string): boolean {
+  switch (e.kind) {
+    case 'Fill': case 'Evict': case 'StateChange': return id === (e.cache === 'L2' ? 'L2' : `${e.cache}:${e.core}`)
+    case 'WriteBack': return id === `L1D:${e.core}` || id === 'L2'
+    case 'Snoop': return id === `${e.cache}:${e.to}` || id === 'L2'
+    default: return false
+  }
+}
+
+/** Events of `core` in a cycle (for its view) */
+export function mineOf(core: number, evs: MemEvent[]): MemEvent[] {
+  const mine = evs.filter(e => ('core' in e && e.core === core && e.kind !== 'Stall') || (e.kind === 'Snoop' && e.from === core))
+  return mine.length ? [...mine, ...evs.filter(e => e.kind === 'MemWrite')] : []
 }
 
 const fh = (n: number, w: number) => (n >>> 0).toString(16).padStart(w, '0')
@@ -163,6 +227,18 @@ export function phaseText(p: Phase): string {
       return `${c}PAGE FAULT (cause ${x.cause}) → trap: mcause = ${x.cause}, mepc = the instruction, mtval = VA ${fh(x.va, 8)}, priv → M, pc → mtvec` }
     case 'sfence-gates': { const x = e as Extract<MemEvent, { kind: 'Sfence' }>
       return `C${p.core}: sfence.vma ${x.va === null ? 'x0 (all addresses)' : `VA ${fh(x.va, 8)}`}, ${x.asid === null ? 'x0 (all ASIDs, global too)' : `ASID ${x.asid} (global kept)`} — every entry: valid ∧ VA match ∧ ASID match ∧ ¬(rs2≠x0 ∧ G)` }
+    case 'c-split': { const x = e as LookupEv
+      const lo = x.cache === 'L2' ? 7 : 6
+      return `C${p.core} ${x.cache}: PA ${fh(x.pa, 8)} → tag PA[31:${lo}] = ${x.tag.toString(16)} · index PA[${lo - 1}:4] = ${x.set} · offset PA[3:0] = ${x.pa & 0xf}${x.cache === 'L2' ? ' (address from the bus)' : ' (index straight from the VA, tag from the MMU)'}` }
+    case 'c-set': { const x = e as LookupEv
+      return `C${p.core} ${x.cache}: index ${x.set} selects set ${x.set} — its ${x.ways.length} ways are read out (V, tag, data) to the comparators` }
+    case 'c-cmp': { const x = e as LookupEv
+      return `C${p.core} ${x.cache}: compare tag ${x.tag.toString(16)} with each way (valid ∧ tag =): ${x.ways.map((w, i) => `w${i} ${w.valid ? (w.hit ? '✓' : '✗') : 'V=0'}`).join(' · ')}` }
+    case 'c-hit': { const x = e as Extract<MemEvent, { kind: 'L1Hit' | 'L2Hit' }>
+      return `C${p.core} ${p.cache}: HIT way ${x.way} → the offset picks word ${(x.pa >> 2) & 3} of the line` }
+    case 'c-miss': return `C${p.core} ${p.cache}: MISS → ${p.cache === 'L2' ? 'read the line from memory' : 'bus request to L2'}`
+    case 'c-snoop': case 'c-wb': case 'c-evict': case 'c-memrd': case 'c-memwr': case 'c-fill': case 'c-state':
+      return describe(e)
     case 'sfence-inval': { const x = e as Extract<MemEvent, { kind: 'Sfence' }>
       const l = (f: EntryFlush[]) => f.map((q, i) => q.inval ? i : -1).filter(i => i >= 0).join(',') || 'none'
       return `C${p.core}: invalidated ITLB {${l(x.itlb)}} · DTLB {${l(x.dtlb)}}` }
@@ -220,6 +296,8 @@ export interface CoreView {
   xlat: { I: Xlat | null; D: Xlat | null }
   snoop: boolean
   busWait: number
+  /** Last tag lookup per cache: "L1I:core" / "L1D:core" / "L2" */
+  lookups: Record<string, LookupEv>
   /** Privilege mode the access ran in (before any trap it caused) */
   priv: number
   /** L1 set used by the fetch / data side (= VA[5:4], the VIPT index) */
@@ -230,7 +308,7 @@ export interface CoreView {
 const emptyView = (): CoreView => ({
   cycle: -1, events: [], lines: new Map(), missSets: new Set(), fetch: null, data: null,
   tlb: { I: { hit: null, fill: null, miss: false }, D: { hit: null, fill: null, miss: false } }, walks: [], fault: false, xlat: { I: null, D: null },
-  snoop: false, busWait: 0, priv: 3, iSet: null, dSet: null,
+  snoop: false, busWait: 0, priv: 3, lookups: {}, iSet: null, dSet: null,
 })
 
 const hex = (v: number, w = 8) => (v >>> 0).toString(16).padStart(w, '0')
@@ -238,7 +316,7 @@ const hex = (v: number, w = 8) => (v >>> 0).toString(16).padStart(w, '0')
 const side = (p: Port): 'I' | 'D' => p === 'Fetch' ? 'I' : 'D'
 
 /** Build a core's view from the events of the cycle it accessed memory in */
-function viewOf(core: number, cycle: number, evs: MemEvent[], priv: number): CoreView {
+export function viewOf(core: number, cycle: number, evs: MemEvent[], priv: number): CoreView {
   const v = emptyView()
   v.cycle = cycle
   v.priv = priv
@@ -247,6 +325,7 @@ function viewOf(core: number, cycle: number, evs: MemEvent[], priv: number): Cor
   const outcomeOf = (port: Port) => evs.find((e): e is Extract<MemEvent, { kind: 'Access' }> => e.kind === 'Access' && e.core === core && e.port === port)?.outcome ?? null
   for (const e of evs) {
     switch (e.kind) {
+      case 'Lookup': v.lookups[e.cache === 'L2' ? 'L2' : `${e.cache}:${e.core}`] = e; break
       case 'L1Hit': v.lines.set(key(e.cache, e.core, e.set, e.way), 'hit'); if (e.cache === 'L1I') v.iSet = e.set; else v.dSet = e.set; break
       case 'L1Miss': v.missSets.add(`${e.cache}:${e.core}:${e.set}`); if (e.cache === 'L1I') v.iSet = e.set; else v.dSet = e.set; break
       case 'L2Hit': v.lines.set(key('L2', 0, e.set, e.way), 'hit'); break
@@ -294,6 +373,7 @@ export function describe(e: MemEvent): string {
     case 'PageFault': return `${c}${side(e.port)} PAGE FAULT VA ${hex(e.va)} (cause ${e.cause})`
     case 'Access': return `${c}${e.port} ${hex(e.pa)}: ${e.outcome === 'L1Hit' ? 'L1 hit' : e.outcome === 'L2Hit' ? 'L1 miss, L2 hit' : e.outcome === 'Rom' ? 'boot ROM, uncached' : 'total miss (memory)'} — ${e.latency} cyc`
     case 'RomRead': return `${c}ROM read ${hex(e.pa)} = ${hex(e.val)} (uncached, over the bus)`
+    case 'Lookup': return `${c}${e.cache} lookup ${hex(e.pa)}: set ${e.set}, tag ${e.tag.toString(16)}`
     case 'L1Hit': return `${c}${e.cache} hit set ${e.set} way ${e.way}`
     case 'L1Miss': return `${c}${e.cache} miss set ${e.set}`
     case 'L2Hit': return `${c}L2 hit set ${e.set} way ${e.way}`
@@ -331,6 +411,13 @@ export const useMemPanel = defineStore('memPanel', () => {
   /** Step only misses, faults and flushes (not TLB hits / bare) */
   const skipHits = ref(true)
   const playing = ref(false)
+  /** This cycle: all its groups, all its events, the caches before it, each core's mode before it */
+  const cycleGroups = shallowRef<Group[]>([])
+  const cycleEvents = shallowRef<MemEvent[]>([])
+  const cachesBefore = shallowRef<MpCaches | null>(null)
+  const privAt = shallowRef<number[]>([3, 3])
+  /** Events up to (and including) this index are revealed; Infinity = all */
+  const cutoff = computed(() => phaseIdx.value >= 0 && phaseIdx.value < phases.value.length - 1 ? phases.value[phaseIdx.value]!.ei : Infinity)
   /** Recent boot-ROM reads, newest first */
   const romLog = shallowRef<{ cycle: number; core: number; pa: number; val: number }[]>([])
   const running = ref(false)
@@ -371,6 +458,9 @@ export const useMemPanel = defineStore('memPanel', () => {
     views.value = [emptyView(), emptyView()]
     csrChanged.value = [new Set(), new Set()]
     mmu.value = [{ cycle: -1, groups: [], before: null }, { cycle: -1, groups: [], before: null }]
+    cycleGroups.value = []
+    cycleEvents.value = []
+    cachesBefore.value = null
     romLog.value = []
     phases.value = []
     phaseIdx.value = -1
@@ -399,6 +489,7 @@ export const useMemPanel = defineStore('memPanel', () => {
     if (!p) return false
     const cycle = p.cycle
     const before = p.cores()
+    const cachesPre = p.caches()
     const priv = before.map(c => c.priv_mode)
     const evs = p.step()
     // serde_wasm_bindgen sends Rust `None` as undefined: make it null
@@ -408,34 +499,38 @@ export const useMemPanel = defineStore('memPanel', () => {
     }
     const roms = evs.filter((e): e is Extract<MemEvent, { kind: 'RomRead' }> => e.kind === 'RomRead')
     if (roms.length) romLog.value = [...roms.map(e => ({ cycle, core: e.core, pa: e.pa, val: e.val })).reverse(), ...romLog.value].slice(0, 10)
-    // MMU phases of this cycle
+    // Phases of this cycle: MMU groups and cache groups, in event order
     const gs = groupsOf(evs)
     const nextMmu = [...mmu.value]
-    const list: Phase[] = []
-    gs.forEach((g, k) => {
-      if (!g.length) return
-      nextMmu[k] = { cycle, groups: g, before: before[k]! }
-      for (const grp of g) {
-        if (skipHits.value && !grp.sfence && (grp.hit || grp.phases[0]?.kind === 'bare') && !grp.phases.some(x => x.kind === 'fault' || x.kind === 'ad')) continue
-        for (const x of grp.phases) { x.gi = list.length; list.push(x) }
-      }
-    })
+    for (const k of [0, 1]) {
+      const mg = gs.filter(g => g.core === k && !g.cache)
+      if (mg.length) nextMmu[k] = { cycle, groups: mg, before: before[k]! }
+    }
+    const list = gs
+      .filter(g => !(skipHits.value && !g.sfence && (g.hit || g.phases[0]?.kind === 'bare') && !g.phases.some(x => x.kind === 'fault' || x.kind === 'ad')))
+      .flatMap(g => g.phases)
+      .sort((a, b) => a.ei - b.ei)
+    list.forEach((x, i) => { x.gi = i })
     mmu.value = nextMmu
+    cycleGroups.value = gs
+    cycleEvents.value = evs
+    cachesBefore.value = cachesPre
     phases.value = list
     phaseIdx.value = list.length - 1
     phaseCycle.value = cycle
     const next = [...views.value]
     let touched = false
     for (const core of [0, 1]) {
-      const mine = evs.filter(e => ('core' in e && e.core === core && e.kind !== 'Stall') || (e.kind === 'Snoop' && e.from === core))
+      // memory write-backs of this cycle belong to whoever caused them
+      const mine = mineOf(core, evs)
       if (mine.length) {
         touched = true
-        // memory write-backs of this cycle belong to whoever caused them
-        next[core] = viewOf(core, cycle, [...mine, ...evs.filter(e => e.kind === 'MemWrite')], priv[core]!)
+        next[core] = viewOf(core, cycle, mine, priv[core]!)
       }
     }
     views.value = next
-    const lines = evs.filter(e => e.kind !== 'Stall' && e.kind !== 'Bare' && !(e.kind === 'Access' && e.port === 'Fetch' && (e.outcome === 'L1Hit' || e.outcome === 'Rom')))
+    privAt.value = priv
+    const lines = evs.filter(e => e.kind !== 'Stall' && e.kind !== 'Bare' && e.kind !== 'Lookup' && !(e.kind === 'Access' && e.port === 'Fetch' && (e.outcome === 'L1Hit' || e.outcome === 'Rom')))
       .map(e => ({ cycle, text: describe(e), core: 'core' in e ? e.core : 'from' in e ? e.from : null }))
     if (lines.length) log.value = [...lines.reverse(), ...log.value].slice(0, 80)
     tick.value++
@@ -490,7 +585,7 @@ export const useMemPanel = defineStore('memPanel', () => {
 
   return {
     ready, error, examples, exampleIndex, views, log, running, speed, snap, tick, csrChanged,
-    mmu, phases, phaseIdx, romLog, phaseCycle, skipHits, playing, nextPhase, togglePlay,
+    mmu, phases, phaseIdx, romLog, cycleGroups, cycleEvents, cachesBefore, privAt, cutoff, phaseCycle, skipHits, playing, nextPhase, togglePlay,
     init, loadExample, step, nextAccess, toggleRun, asm, memWords, hex,
   }
 })

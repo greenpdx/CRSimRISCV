@@ -93,6 +93,11 @@ pub enum PteVerdict {
     NoLeaf,
 }
 
+/// One way's tag comparator in a cache lookup.
+#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WayCmp { pub valid: bool, pub tag: u32, pub hit: bool }
+
 /// What happened, for the panel. `set` / `way` locate cache lines; `pa`
 /// is the line (or word) physical address.
 #[cfg_attr(feature = "wasm", derive(serde::Serialize))]
@@ -132,6 +137,10 @@ pub enum Event {
     // ── caches / bus ──
     /// One access by a core: where it was satisfied and how long it took.
     Access { core: u8, port: Port, pa: u32, outcome: Outcome, latency: u32 },
+    /// A cache lookup: `pa` split into tag / set (index) / offset; the set's
+    /// ways compared (valid ∧ tag =) before any fill. Then L1Hit / L1Miss
+    /// (or L2Hit / L2Miss) says what came of it.
+    Lookup { core: u8, cache: CacheId, pa: u32, set: u8, tag: u32, ways: Vec<WayCmp> },
     L1Hit { core: u8, cache: CacheId, set: u8, way: u8, pa: u32 },
     L1Miss { core: u8, cache: CacheId, set: u8, pa: u32 },
     L2Hit { core: u8, set: u8, way: u8, pa: u32 },
@@ -316,6 +325,8 @@ impl MemSystem {
             let l1 = if fetch { &self.l1i[core] } else { &self.l1d[core] };
             (l1.find(pa), l1.split(pa).0)
         };
+        let lk = self.lookup_event(c, cid, pa);
+        self.events.push(lk);
         let (done, outcome, set, way) = if let Some((set, way)) = found {
             // ── L1 hit ──
             if fetch { self.stats[core].l1i_hits += 1 } else { self.stats[core].l1d_hits += 1 }
@@ -436,9 +447,19 @@ impl MemSystem {
         self.events.push(Event::WriteBack { core: core as u8, set: set as u8, way: way as u8, pa: line_pa });
     }
 
+    /// The tag comparators of `cache` for `pa` (state before the access).
+    fn lookup_event(&self, core: u8, cache: CacheId, pa: u32) -> Event {
+        let ch = match cache { CacheId::L1I => &self.l1i[core as usize], CacheId::L1D => &self.l1d[core as usize], CacheId::L2 => &self.l2 };
+        let (set, tag) = ch.split(pa);
+        let ways = (0..ch.ways).map(|w| { let l = ch.line(set, w); WayCmp { valid: l.valid(), tag: l.tag, hit: l.valid() && l.tag == tag } }).collect();
+        Event::Lookup { core, cache, pa, set: set as u8, tag, ways }
+    }
+
     /// The L2 line for `line_pa`, filling it from memory on a miss.
     fn l2_get(&mut self, core: usize, line_pa: u32) -> (usize, usize, Outcome) {
         let c = core as u8;
+        let lk = self.lookup_event(c, CacheId::L2, line_pa);
+        self.events.push(lk);
         if let Some((set, way)) = self.l2.find(line_pa) {
             self.stats[core].l2_hits += 1;
             self.l2.touch(set, way);

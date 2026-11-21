@@ -322,3 +322,25 @@ fn example_boot_from_rom() {
     // hart 1 parked in RAM
     assert!(sys.cores[1].pc >= 0x40 && sys.cores[1].pc < 0x50, "hart 1 parked at 0x40 (pc {:#x})", sys.cores[1].pc);
 }
+
+#[test]
+fn cache_lookup_reports_tag_compare_before_fill() {
+    let (_, ev) = run_example(2, 3000);   // L1 miss, L2 hit
+    let mut checked = 0;
+    for w in ev.windows(2) {
+        if let Event::Lookup { core: 0, cache, set, tag, ways, pa } = &w[0] {
+            let hits: Vec<usize> = ways.iter().enumerate().filter(|(_, x)| x.hit).map(|(i, _)| i).collect();
+            assert!(hits.len() <= 1, "at most one way matches");
+            for x in ways { assert_eq!(x.hit, x.valid && x.tag == *tag); }
+            match (&w[1], *cache) {
+                (Event::L1Hit { way, set: s, .. }, CacheId::L1I | CacheId::L1D) => { assert_eq!(hits, [*way as usize]); assert_eq!(s, set); }
+                (Event::L1Miss { set: s, .. }, CacheId::L1I | CacheId::L1D) => { assert!(hits.is_empty()); assert_eq!(s, set); }
+                (Event::L2Hit { way, .. }, CacheId::L2) => assert_eq!(hits, [*way as usize]),
+                (Event::L2Miss { .. }, CacheId::L2) => assert!(hits.is_empty()),
+                (e, c) => panic!("lookup {c:?} {pa:#x} followed by {e:?}"),
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 20, "{checked}");
+}

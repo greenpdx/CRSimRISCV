@@ -9,9 +9,9 @@
         <div class="strip__chips">
           <span class="strip__cyc">cycle {{ mp.phaseCycle >= 0 ? mp.phaseCycle : '—' }}</span>
           <template v-for="(ph, i) in mp.phases" :key="i">
-            <span v-if="i === 0 || newGroup(i)" class="strip__grp">C{{ ph.core }}{{ ph.side ? '·' + ph.side : '' }}</span>
+            <span v-if="i === 0 || newGroup(i)" class="strip__grp">{{ groupLabel(ph) }}</span>
             <span class="chip" :class="['chip--' + chipColor(ph), { 'chip--cur': i === mp.phaseIdx, 'chip--done': i < mp.phaseIdx }]"
-                  :title="phaseText(ph)" @click="mp.phaseIdx = i">{{ CHIP[ph.kind] }}{{ lvTxt(ph) }}</span>
+                  :title="phaseText(ph)" @click="mp.phaseIdx = i">{{ ph.cache && ph.kind.startsWith('c-') ? ph.cache + ' ' : '' }}{{ CHIP[ph.kind] }}{{ lvTxt(ph) }}</span>
           </template>
           <span v-if="!mp.phases.length" class="strip__none">no MMU phase this cycle — press PHASE ▶ to run to the next translation{{ mp.skipHits ? ' miss / fault / flush' : '' }}</span>
         </div>
@@ -51,14 +51,26 @@
           <MemWire :points="wp(core, 'busD')" :color="wbColor(core) ?? missColor(v(core).data)" :arrow="false" />
           <MemWire :points="wp(core, 'snoop')" :color="snoopNow ? '#0891b2' : null" :arrow="false" :width="2" idle="#0891b2" />
         </template>
-        <MemWire :points="[{ x: BUS, y: 92 }, { x: BUS, y: 625 }]" :color="busColor ?? (romNow ? ROM_C : null)" :arrow="false" :width="4" label="BUS" :label-idx="0" />
-        <MemWire :points="[{ x: SNOOP, y: 262 }, { x: SNOOP, y: 470 }]" :color="snoopNow ? '#0891b2' : null" :arrow="false" :width="3" idle="#0891b2" label="SNOOP" :label-idx="0" />
-        <MemWire :points="[{ x: BUS, y: 372 }, { x: L2X, y: 372 }]" :color="busColor" />
+        <MemWire :points="[{ x: BUS, y: BUS_Y[0]! }, { x: BUS, y: BUS_Y[1]! }]" :color="busColor ?? (romNow ? ROM_C : null)" :arrow="false" :width="4" label="BUS" :label-idx="0" />
+        <MemWire :points="[{ x: SNOOP, y: SNOOP_Y[0]! }, { x: SNOOP, y: SNOOP_Y[1]! }]" :color="snoopNow ? '#0891b2' : null" :arrow="false" :width="3" idle="#0891b2" label="SNOOP" :label-idx="0" />
+        <MemWire :points="[{ x: BUS, y: L2Y + 24 }, { x: (BUS + TC2X) / 2, y: L2Y + 24 }, { x: TC2X, y: L2Y + 24 }]" :color="busColor" label="PA" :label-idx="1" />
+        <!-- TAG CHECK ↔ cache: index selects the set; the set's tags go back to the comparators -->
+        <!-- always drawn (faint); the selected set's wires light up as the lookup reaches them -->
+        <template v-for="id in CACHE_IDS" :key="'sw' + id">
+          <template v-for="r in (id === 'L2' ? 8 : 4)" :key="id + r">
+            <MemWire v-if="!rowLit(id, r - 1, 2)" :points="setWire(id, r - 1)" idle="#d97706" :width="1.5" />
+            <MemWire v-if="!rowLit(id, r - 1, 3)" :points="tagsWire(id, r - 1)" idle="#4338ca" :width="1.5" dashed :arrow="false" />
+          </template>
+          <template v-if="look(id).lookup">
+            <MemWire v-if="rowLit(id, look(id).lookup!.set, 2)" :points="setWire(id, look(id).lookup!.set)" color="#d97706" :width="2.5" :label="'set ' + look(id).lookup!.set" :label-idx="3" />
+            <MemWire v-if="rowLit(id, look(id).lookup!.set, 3)" :points="tagsWire(id, look(id).lookup!.set)" color="#4338ca" :width="2.5" dashed label="tags" :label-idx="3" :label-dy="11" />
+          </template>
+        </template>
         <!-- boot ROM ↔ bus (uncached reads) -->
         <MemWire :points="[{ x: L2X, y: 120 }, { x: (L2X + BUS) / 2, y: 120 }, { x: BUS + 2, y: 120 }]" :color="romNow ? ROM_C : null" idle="#92400e" label="ROM" :label-idx="1" :label-dy="12" />
-        <MemWire :points="[{ x: BUS, y: 120 }, { x: BUS, y: 92 }]" :color="romNow ? ROM_C : null" idle="#92400e" :arrow="false" :width="4" />
-        <MemWire :points="[{ x: L2X + 230, y: 500 }, { x: L2X + 230, y: 556 }]" :color="memRead ? '#dc2626' : null" label="read" :label-idx="0" />
-        <MemWire :points="[{ x: L2X + 290, y: 556 }, { x: L2X + 290, y: 500 }]" :color="memWrite ? '#ea580c' : null" label="write-back" :label-idx="0" />
+        <MemWire :points="[{ x: BUS, y: 120 }, { x: BUS, y: BUS_Y[0]! }]" :color="romNow ? ROM_C : null" idle="#92400e" :arrow="false" :width="4" />
+        <MemWire :points="[{ x: L2X + 230, y: 512 }, { x: L2X + 230, y: MEM_Y }]" :color="memRead ? '#dc2626' : null" label="read" :label-idx="0" />
+        <MemWire :points="[{ x: L2X + 290, y: MEM_Y }, { x: L2X + 290, y: 512 }]" :color="memWrite ? '#ea580c' : null" label="write-back" :label-idx="0" />
       </svg>
 
       <template v-for="core in [0, 1]" :key="'b' + core">
@@ -133,19 +145,26 @@
           <PtwDetail :group="ptwGroup(core)" :shown="shown" :cur="curPhase" :root="(cs(core).satp & 0x3fffff) << 12" :focus="ptwFocus(core)" />
         </div>
 
-        <!-- ══ Page 2: caches ══ -->
-        <div class="cpu-block" :style="pos(L1[core]!.I)">
-          <CacheTable :title="`L1I · core ${core}`" :cache="s.caches.l1i[core]!" :marks="allMarks" :miss-sets="allMissSets"
-            :key-of="(se, w) => `L1I:${core}:${se}:${w}`" :set-key="se => `L1I:${core}:${se}`" :active="!!v(core).fetch && v(core).cycle === lastCycle" />
-        </div>
-        <div class="cpu-block" :style="pos(L1[core]!.D)">
-          <CacheTable :title="`L1D · core ${core}`" :cache="s.caches.l1d[core]!" :marks="allMarks" :miss-sets="allMissSets"
-            :key-of="(se, w) => `L1D:${core}:${se}:${w}`" :set-key="se => `L1D:${core}:${se}`" :active="!!v(core).data && v(core).cycle === lastCycle" />
-        </div>
+        <!-- ══ Page 2: caches — TAG CHECK (left) feeds each cache ══ -->
+        <template v-for="sd in SIDES" :key="'c' + sd">
+          <div class="cpu-block" :style="pos({ x: TCX, y: L1[core]![sd].y })">
+            <TagCheck v-bind="tcProps(`L1${sd}:${core}`)" :title="`L1${sd} · core ${core}`" :ways="2" :sets="4" miss-to="L2" />
+          </div>
+          <div class="cpu-block" :style="pos(L1[core]![sd])">
+            <CacheTable :title="`L1${sd} · core ${core}`" :cache="cacheShown(`L1${sd}:${core}`)" :marks="allMarks" :miss-sets="allMissSets"
+              :key-of="(se, w) => `L1${sd}:${core}:${se}:${w}`" :set-key="se => `L1${sd}:${core}:${se}`"
+              :lookup="look(`L1${sd}:${core}`).lookup" :stage="look(`L1${sd}:${core}`).stage"
+              :active="(sd === 'I' ? !!v(core).fetch : !!v(core).data) && v(core).cycle === lastCycle" />
+          </div>
+        </template>
       </template>
 
-      <div class="cpu-block" :style="pos({ x: L2X, y: 250 })">
-        <CacheTable title="L2 · shared, inclusive" :cache="s.caches.l2" :marks="allMarks" :miss-sets="allMissSets" :cell-width="122"
+      <div class="cpu-block" :style="pos({ x: TC2X, y: L2Y })">
+        <TagCheck v-bind="tcProps('L2')" title="L2 · shared" :ways="4" :sets="8" miss-to="memory" l2 />
+      </div>
+      <div class="cpu-block" :style="pos({ x: L2X, y: L2Y })">
+        <CacheTable title="L2 · shared, inclusive" :cache="cacheShown('L2')" :marks="allMarks" :miss-sets="allMissSets"
+          :lookup="look('L2').lookup" :stage="look('L2').stage"
           :key-of="(se, w) => `L2:${se}:${w}`" :set-key="se => `L2:${se}`" :active="l2Active" />
       </div>
       <!-- boot ROM: uncached, every word a bus read -->
@@ -157,20 +176,20 @@
         </div>
         <div v-if="!mp.romLog.length" class="rom__hint">no ROM reads yet</div>
       </div>
-      <div class="blk mem" :class="{ 'mem--active': memRead || memWrite }" :style="pos({ x: L2X, y: 556 })">
+      <div class="blk mem" :class="{ 'mem--active': memRead || memWrite }" :style="pos({ x: L2X, y: MEM_Y })">
         <div class="blk__head"><span>MEMORY · RAM</span><span class="blk__sub">L1 {{ lat.l1 }} · L2 +{{ lat.l2 }} · memory +{{ lat.mem }} cycles</span></div>
         <div class="mem__hint">recent lines — <b>red</b> word = memory is stale (a cache has newer data)</div>
         <div v-for="l in memLines" :key="l.pa" class="mem__line" :class="{ 'mem__line--now': l.now }">
           <span class="mem__addr">{{ mp.hex(l.pa, 4) }}</span>
           <span class="mem__dir">{{ l.write ? 'W' : 'R' }}</span>
-          <span v-for="(w, i) in l.raw" :key="i" class="mem__w" :class="{ 'mem__w--stale': w !== l.cached[i] }">{{ w.toString(16) }}</span>
+          <span v-for="(w, i) in l.raw" :key="i" class="mem__w" :class="{ 'mem__w--stale': w !== l.cached[i] }">{{ mp.hex(w) }}</span>
         </div>
       </div>
 
-      <div class="about" :style="pos({ x: 2140, y: 700 })">
+      <div class="about" :style="pos({ x: L2X + 540, y: MEM_Y })">
         <b>{{ mp.examples[mp.exampleIndex]?.name }}</b> — {{ mp.examples[mp.exampleIndex]?.about }}
       </div>
-      <div class="legend" :style="pos({ x: 2140, y: 820 })">
+      <div class="legend" :style="pos({ x: L2X + 540, y: MEM_Y + 120 })">
         <span class="lg" style="border-color:#16a34a">L1 hit</span>
         <span class="lg" style="border-color:#d97706">L1 miss · L2 hit</span>
         <span class="lg" style="border-color:#dc2626">total miss / fault</span>
@@ -181,7 +200,7 @@
         <span class="lg" style="border-color:#ea580c">write-back</span>
         <span class="lg" style="border-color:#f59e0b; background:#fef3c7">changed / current</span>
       </div>
-      <div class="blk log" :style="pos({ x: P2 + 40, y: 712 })">
+      <div class="blk log" :style="pos({ x: P2 + 40, y: 736 })">
         <div class="blk__head"><span>EVENTS</span><span class="blk__sub">cycle {{ s.cycle }}</span></div>
         <div class="log__body">
           <div v-for="(l, i) in mp.log" :key="i" :class="'log--c' + l.core"><span class="log__c">{{ l.cycle }}</span>{{ l.text }}</div>
@@ -220,9 +239,10 @@ import { computed, onMounted, ref } from 'vue'
 import CacheTable from '../components/memory/CacheTable.vue'
 import MemWire from '../components/memory/MemWire.vue'
 import TlbDetail from '../components/memory/TlbDetail.vue'
+import TagCheck from '../components/memory/TagCheck.vue'
 import PtwDetail from '../components/memory/PtwDetail.vue'
 import {
-  useMemPanel, phaseText, type CoreView, type CsrName, type Outcome, type MemEvent, type LineMark,
+  useMemPanel, phaseText, viewOf, mineOf, changesCache, type CoreView, type LookupEv, type MpCache, type CsrName, type Outcome, type MemEvent, type LineMark,
   type Group, type Phase, type PhaseKind, type Side, type MpCore,
 } from '../stores/memPanel'
 
@@ -241,18 +261,28 @@ const CAUSE: Record<number, string> = { 12: 'instruction page fault', 13: 'load 
 const CHIP: Record<PhaseKind, string> = {
   bare: 'BARE', split: 'VA', compare: 'CMP', perm: 'PERM', hit: 'PA', miss: 'MISS', pteaddr: 'ADDR', pteread: 'READ',
   ptecheck: 'CHECK', ad: 'A/D', victim: 'VICTIM', fill: 'UPDATE', fault: 'FAULT', 'sfence-gates': 'SFENCE', 'sfence-inval': 'INVAL',
+  'c-split': 'ADDR', 'c-set': 'SET', 'c-cmp': 'TAG=', 'c-hit': 'HIT', 'c-miss': 'MISS', 'c-snoop': 'SNOOP', 'c-wb': 'WB',
+  'c-evict': 'EVICT', 'c-memrd': 'MEM RD', 'c-memwr': 'MEM WR', 'c-fill': 'FILL', 'c-state': 'MESI',
 }
 
 // ── Geometry: page 1 (MMU) x 0…1500, page 2 (caches) from P2 ─────────────
 type P = { x: number; y: number }
-const W = 2520, H = 892, P2 = 1520
+const W = 3440, H = 892, P2 = 1520
 const FW = 1275, FH = 376
 const IFC_W = 170, IFC_H = 66, TLB_W = 560, PTW_W = 465, CPU_H = 252
-const L1X = P2 + 40, L1R = L1X + 345, SNOOP = L1R + 20, BUS = L1R + 35, L2X = L1R + 55
+/** TAG CHECK blocks: left of the L1s, and between the bus and L2 */
+const TCX = P2 + 20, TCW = 230
+const L1X = TCX + TCW + 30, L1R = L1X + 391, SNOOP = L1R + 18, BUS = L1R + 34, TC2X = BUS + 24, L2X = TC2X + TCW + 30, L2Y = 250
+/** Cache table rows: header height and row pitch (for the set-select wire) */
+const CT_HEAD = 21.5, CT_ROW = 28.6
+const CACHE_IDS = ['L1I:0', 'L1D:0', 'L1I:1', 'L1D:1', 'L2']
 const Y0 = [70, 476]
 const CPU: P[] = Y0.map(y => ({ x: 10, y: y + 20 }))
 const FRAME: P[] = Y0.map(y => ({ x: 225, y }))
-const L1: Record<Side, P>[] = [{ I: { x: L1X, y: 22 }, D: { x: L1X, y: 178 } }, { I: { x: L1X, y: 556 }, D: { x: L1X, y: 400 } }]
+const L1: Record<Side, P>[] = [{ I: { x: L1X, y: 22 }, D: { x: L1X, y: 196 } }, { I: { x: L1X, y: 562 }, D: { x: L1X, y: 384 } }]
+/** System bus (L1I core 0 … L1I core 1) and snoop bus (L1D core 0 … L1D core 1) */
+const BUS_Y = [L1[0]!.I.y + 70, L1[1]!.I.y + 70], SNOOP_Y = [L1[0]!.D.y + 84, L1[1]!.D.y + 70]
+const MEM_Y = 580
 
 function geo(k: number) {
   const y0 = Y0[k]!
@@ -271,13 +301,13 @@ function wires(k: number): Record<string, P[]> {
   const stageY = (i: number) => cpu.y + 16 + i * 19 + 10
   const idxY = k === 0 ? y0 - 12 : y0 + FH + 18
   const w: Record<string, P[]> = {
-    index: [{ x: 110, y: k === 0 ? cpu.y : cpu.y + CPU_H }, { x: 110, y: idxY }, { x: 700, y: idxY }, { x: L1X - 10, y: idxY }],
-    indexI: [{ x: L1X - 10, y: idxY }, { x: L1X - 10, y: l1.I.y + 48 }, { x: L1X, y: l1.I.y + 48 }],
-    indexD: [{ x: L1X - 10, y: idxY }, { x: L1X - 10, y: l1.D.y + 48 }, { x: L1X, y: l1.D.y + 48 }],
+    index: [{ x: 110, y: k === 0 ? cpu.y : cpu.y + CPU_H }, { x: 110, y: idxY }, { x: 700, y: idxY }, { x: TCX - 10, y: idxY }],
+    indexI: [{ x: TCX - 10, y: idxY }, { x: TCX - 10, y: l1.I.y + 38 }, { x: TCX, y: l1.I.y + 38 }],
+    indexD: [{ x: TCX - 10, y: idxY }, { x: TCX - 10, y: l1.D.y + 38 }, { x: TCX, y: l1.D.y + 38 }],
     csr: [{ x: 210, y: g.midY }, { x: 300, y: g.midY }, { x: 700, y: g.midY }, { x: g.ptw.x, y: g.midY }],
     csrI: [{ x: 300, y: g.midY }, { x: 300, y: g.top === 'I' ? g.ifc.I.y + IFC_H : g.ifc.I.y }],
     csrD: [{ x: 300, y: g.midY }, { x: 300, y: g.top === 'D' ? g.ifc.D.y + IFC_H : g.ifc.D.y }],
-    pte: [{ x: g.ptw.x + PTW_W, y: g.ptw.y + 150 }, { x: L1X - 30, y: g.ptw.y + 150 }, { x: L1X - 30, y: l1.D.y + 100 }, { x: L1X, y: l1.D.y + 100 }],
+    pte: [{ x: g.ptw.x + PTW_W, y: g.ptw.y + 150 }, { x: TCX - 30, y: g.ptw.y + 150 }, { x: TCX - 30, y: l1.D.y + 52 }, { x: TCX, y: l1.D.y + 52 }],
     busI: [{ x: L1R, y: l1.I.y + 70 }, { x: BUS, y: l1.I.y + 70 }],
     busD: [{ x: L1R, y: l1.D.y + 70 }, { x: BUS, y: l1.D.y + 70 }],
     snoop: [{ x: L1R, y: l1.D.y + (k === 0 ? 84 : 70) }, { x: SNOOP, y: l1.D.y + (k === 0 ? 84 : 70) }],
@@ -293,8 +323,8 @@ function wires(k: number): Record<string, P[]> {
     w['upd' + sd] = [{ x: g.ptw.x, y: tlb.y + 100 }, { x: mx, y: tlb.y + 100 }, { x: tx, y: tlb.y + 100 }]
     const up = g.top === sd
     const out = up ? y0 - 6 : y0 + FH + 8
-    w['tag' + sd] = [{ x: ifc.x + 120, y: up ? ifc.y : ifc.y + IFC_H }, { x: ifc.x + 120, y: out }, { x: 900, y: out }, { x: L1X - 20, y: out },
-      { x: L1X - 20, y: l1[sd].y + 75 }, { x: L1X, y: l1[sd].y + 75 }]
+    w['tag' + sd] = [{ x: ifc.x + 120, y: up ? ifc.y : ifc.y + IFC_H }, { x: ifc.x + 120, y: out }, { x: 900, y: out }, { x: TCX - 20, y: out },
+      { x: TCX - 20, y: l1[sd].y + 24 }, { x: TCX, y: l1[sd].y + 24 }]
   }
   return w
 }
@@ -305,7 +335,77 @@ const box = (p: P, w: number, h: number) => ({ ...pos(p), width: `${w}px`, heigh
 
 // ── State ────────────────────────────────────────────────────────────────
 const s = computed(() => mp.snap)
-const v = (core: number): CoreView => mp.views[core]!
+/** Each core's view, built only from the events revealed so far (phase stepping) */
+const vvs = computed<CoreView[]>(() => [0, 1].map(k => {
+  const x = mp.views[k]!
+  if (mp.cutoff === Infinity || x.cycle !== mp.phaseCycle) return x
+  return viewOf(k, x.cycle, mineOf(k, mp.cycleEvents.filter((_, i) => i <= mp.cutoff)), mp.privAt[k]!)
+}))
+const v = (core: number): CoreView => vvs.value[core]!
+
+// ── Cache lookups: what each TAG CHECK / cache shows ─────────────────────
+const cacheName = (id: string) => id.split(':')[0]!
+/** The lookup a cache shows and how far it is revealed (1 split, 2 set, 3 compare, 4 result); cur = step shown now */
+const lookState = computed(() => {
+  const out: Record<string, { lookup: LookupEv | null; stage: number; cur: number | null }> = {}
+  const all = mp.cycleGroups.flatMap(g => g.phases)
+  for (const id of CACHE_IDS) {
+    const name = cacheName(id), core = id.includes(':') ? +id.split(':')[1]! : null
+    const splits = all.filter(p => p.kind === 'c-split' && p.cache === name && (core === null || p.core === core))
+    if (mp.cutoff !== Infinity && splits.length) {
+      const sp = [...splits].reverse().find(shownP)
+      if (!sp) { out[id] = { lookup: null, stage: 0, cur: null }; continue }
+      const g = groupOf(sp)!.phases, i = g.indexOf(sp)
+      const steps = [sp, g[i + 1], g[i + 2], g.slice(i + 3).find(p => (p.kind === 'c-hit' || p.kind === 'c-miss') && p.cache === name)]
+      const stage = steps.filter(p => p && shownP(p)).length
+      const ci = steps.findIndex(p => !!p && p === curPhase.value)
+      out[id] = { lookup: sp.ev as LookupEv, stage, cur: ci >= 0 ? ci + 1 : null }
+    } else {
+      const lk = name === 'L2'
+        ? [0, 1].map(k => v(k)).filter(x => x.lookups.L2).sort((a, b) => b.cycle - a.cycle)[0]?.lookups.L2
+        : v(core!).lookups[id]
+      out[id] = { lookup: lk ?? null, stage: lk ? 4 : 0, cur: null }
+    }
+  }
+  return out
+})
+const look = (id: string) => lookState.value[id]!
+/** Cache contents to draw: as before this cycle while a change to it is not revealed yet */
+function cacheShown(id: string): MpCache {
+  const k = +id.slice(4)
+  const after = id === 'L2' ? s.value!.caches.l2 : id.startsWith('L1I') ? s.value!.caches.l1i[k]! : s.value!.caches.l1d[k]!
+  const b = mp.cachesBefore
+  if (mp.cutoff === Infinity || !b || !mp.cycleEvents.some((e, i) => i > mp.cutoff && changesCache(e, id))) return after
+  return id === 'L2' ? b.l2 : id.startsWith('L1I') ? b.l1i[k]! : b.l1d[k]!
+}
+function tcProps(id: string) {
+  const st = look(id)
+  const c = cacheShown(id)
+  let word: number | null = null
+  if (st.lookup && st.stage >= 4) {
+    const hw = st.lookup.ways.findIndex(w => w.hit)
+    if (hw >= 0) word = c.lines[st.lookup.set * c.ways + hw]?.data[(st.lookup.pa >> 2) & 3] ?? null
+  }
+  return { lookup: st.lookup, stage: st.stage, cur: st.cur, word, focus: st.cur !== null }
+}
+/** Where a cache table is on the canvas */
+const cachePos = (id: string): P => id === 'L2' ? { x: L2X, y: L2Y } : L1[+id.slice(4)]![id[2] as Side]
+const tcRight = (id: string) => (id === 'L2' ? TC2X : TCX) + TCW
+/** Middle of row `r` of a cache table */
+const rowY = (id: string, r: number) => cachePos(id).y + CT_HEAD + (r + 0.5) * CT_ROW
+/** Is row r's wire lit? (it is the looked-up set and the lookup reached `stage`) */
+const rowLit = (id: string, r: number, stage: number) => { const st = look(id); return !!st.lookup && st.lookup.set === r && st.stage >= stage }
+/** Index decoder: from TAG CHECK step 2 to every row (one lit when selected) */
+function setWire(id: string, r: number): P[] {
+  const x0 = tcRight(id), xa = x0 + 8, x1 = cachePos(id).x, y0 = cachePos(id).y + 46, y = rowY(id, r) - 5
+  return [{ x: x0, y: y0 }, { x: xa, y: y0 }, { x: xa, y }, { x: (xa + x1) / 2, y }, { x: x1, y }]
+}
+/** The set's tags back to the comparators (step 3) */
+function tagsWire(id: string, r: number): P[] {
+  const x0 = cachePos(id).x, xb = tcRight(id) + 18, x1 = tcRight(id), y = rowY(id, r) + 6, yIn = cachePos(id).y + 76
+  return [{ x: x0, y }, { x: (x0 + xb) / 2, y }, { x: xb, y }, { x: xb, y: yIn }, { x: x1, y: yIn }]
+}
+
 const c = (core: number) => s.value!.cores[core]!
 const st = (core: number) => s.value!.stats[core]!
 const lastCycle = computed(() => Math.max(v(0).cycle, v(1).cycle))
@@ -316,15 +416,20 @@ const pct = (h: number, m: number) => h + m ? `${Math.round(100 * h / (h + m))}%
 type Ev<K extends MemEvent['kind']> = Extract<MemEvent, { kind: K }>
 const curPhase = computed<Phase | null>(() => mp.phases[mp.phaseIdx] ?? null)
 const isNow = (k: number) => mp.mmu[k]!.cycle === mp.phaseCycle
-/** Is this phase revealed? (older cycles and skipped phases: yes) */
-const shown = (ph: Phase) => !isNow(ph.core) || ph.gi < 0 || ph.gi <= mp.phaseIdx
+/** Is a phase of this cycle revealed? Phases go in event order; phases of one event (e.g. split / compare) by their index */
+const shownP = (ph: Phase) => mp.cutoff === Infinity || ph.ei < mp.cutoff || (ph.ei === mp.cutoff && ph.gi >= 0 && ph.gi <= mp.phaseIdx)
+/** …and for MMU phases kept from an older cycle: yes */
+const shown = (ph: Phase) => !isNow(ph.core) || shownP(ph)
 const has = (g: Group | null, kind: PhaseKind) => !!g?.phases.some(p => p.kind === kind && shown(p))
 const ev = <K extends MemEvent['kind']>(g: Group | null, kind: PhaseKind) => g?.phases.find(p => p.kind === kind && shown(p))?.ev as Ev<K> | undefined
 const inGroup = (g: Group | null) => !!g && !!curPhase.value && g.phases.includes(curPhase.value)
-const groupOf = (ph: Phase) => mp.mmu[ph.core]!.groups.find(g => g.phases.includes(ph))
+const groupOf = (ph: Phase) => mp.cycleGroups.find(g => g.phases.includes(ph)) ?? mp.mmu[ph.core]!.groups.find(g => g.phases.includes(ph))
+const groupLabel = (ph: Phase) => { const g = groupOf(ph); return `C${ph.core}` + (g?.cache ? '·' + g.cache : ph.side ? '·' + ph.side : '') }
 const newGroup = (i: number) => { const a = mp.phases[i - 1], b = mp.phases[i]; return !!a && !!b && groupOf(a) !== groupOf(b) }
 const lvTxt = (ph: Phase) => ph.kind === 'pteaddr' || ph.kind === 'pteread' || ph.kind === 'ptecheck' ? ' L' + (ph.ev as { level: number }).level : ''
-const chipColor = (ph: Phase) => ph.kind === 'fault' || (ph.kind === 'perm' && !(ph.ev as Ev<'PermCheck'>).ok) ? 'red'
+const chipColor = (ph: Phase) => ph.kind === 'c-hit' ? 'green' : ph.kind === 'c-miss' || ph.kind === 'c-fill' ? (ph.cache === 'L2' ? 'red' : 'amber')
+  : ph.kind === 'c-memrd' || ph.kind === 'c-memwr' ? 'red' : ph.kind.startsWith('c-') ? 'slate'
+  : ph.kind === 'fault' || (ph.kind === 'perm' && !(ph.ev as Ev<'PermCheck'>).ok) ? 'red'
   : ph.kind.startsWith('sfence') ? 'teal' : groupOf(ph)?.hit || ph.kind === 'split' || ph.kind === 'compare' || ph.kind === 'bare' ? 'blue' : 'purple'
 
 /** The translation group of core k, side sd: the one with the current phase, else the last one */
@@ -431,6 +536,7 @@ const memRead = computed(() => evNow(e => e.kind === 'MemRead'))
 const memWrite = computed(() => evNow(e => e.kind === 'MemWrite'))
 const snoopNow = computed(() => evNow(e => e.kind === 'Snoop'))
 const romNow = computed(() => evNow(e => e.kind === 'RomRead'))
+/** The newest L2 lookup of either core */
 const ROM_C = '#b45309'
 const lat = { l1: 1, l2: 4, mem: 20, rom: 8 }
 const memLines = computed(() => {
@@ -468,6 +574,9 @@ const memLines = computed(() => {
 .chip--purple { background: #7c3aed; }
 .chip--red { background: #dc2626; }
 .chip--teal { background: #0f766e; }
+.chip--green { background: #16a34a; }
+.chip--amber { background: #d97706; }
+.chip--slate { background: #475569; }
 .strip__text { font-family: Inter, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; font-size: 10px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #fde68a; }
 
 .blk { background: #fff; border: 1.5px solid #2aacbe; border-radius: 3px; overflow: hidden; }
