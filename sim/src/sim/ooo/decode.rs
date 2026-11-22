@@ -1,7 +1,9 @@
 //! RV32I + Zmmul decode for the out-of-order core: which unit an
 //! instruction goes to, its registers and its immediate.
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unit {
     /// ALU 0 / ALU 1 (1 cycle)
@@ -16,15 +18,23 @@ pub enum Unit {
     Sys,
 }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AluOp { Add, Sub, Sll, Slt, Sltu, Xor, Srl, Sra, Or, And, Lui, Auipc }
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OooAluOp { Add, Sub, Sll, Slt, Sltu, Xor, Srl, Sra, Or, And, Lui, Auipc }
+
+/// The OoO ALU operation. Named `OooAluOp` so the TypeScript declarations
+/// stay unique; serialised fields must name `OooAluOp`, not this alias.
+pub type AluOp = OooAluOp;
+
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
     /// ALU operation; `imm` = second operand is the immediate
-    Alu { op: AluOp, imm: bool },
+    Alu { op: OooAluOp, imm: bool },
     /// MUL / MULH / MULHSU / MULHU (funct3 0..3)
     Mul { f3: u8 },
     /// BEQ … BGEU (funct3)
@@ -43,7 +53,9 @@ pub enum Op {
     Illegal,
 }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Decoded {
     pub op: Op,

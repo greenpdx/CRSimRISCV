@@ -7,7 +7,8 @@ export default mergeConfig(
   defineConfig({
     test: {
       environment: 'jsdom',
-      exclude: [...configDefaults.exclude, 'e2e/**'],
+      // sim/tests/*.test.mjs are node:test files (npm run test:wasm-pipeline)
+      exclude: [...configDefaults.exclude, 'e2e/**', 'sim/**'],
       root: fileURLToPath(new URL('./', import.meta.url)),
     },
   }),

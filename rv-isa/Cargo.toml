@@ -5,7 +5,14 @@ version.workspace = true
 edition.workspace = true
 
 [features]
+default = ["disasm-ext"]
+# Disassembly of extensions no core implements (C, F / D / Zfh / Q, H, V)
+disasm-ext = []
 serde = ["dep:serde"]
+# TypeScript declarations for the wasm module
+ts = ["serde", "dep:tsify", "dep:wasm-bindgen"]
 
 [dependencies]
 serde = { workspace = true, optional = true }
+tsify  = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }

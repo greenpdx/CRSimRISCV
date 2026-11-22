@@ -310,3 +310,50 @@ fn b7_thread_mmio_denied_for_non_t0() {
     // T3 should have trapped (load access fault, cause 5).
     assert_eq!(cpu.read_csr(3, addr::MCAUSE), 5, "T3 access fault on thread MMIO");
 }
+
+// ── Thread-MMIO permission faults record the faulting PC ───────────────────
+
+/// Thread 1 (not thread 0 in M-mode) touches the thread-MMIO window: a
+/// load / store access fault with mepc = the instruction's PC. (The EX/MA
+/// register used to carry that PC only for instructions trapping in EX, so
+/// these faults, raised from MA, recorded mepc = 0.)
+fn tmmio_fault(store: bool) -> (u32, u32, u32, u32) {
+    use cpu_sim::isa::encode::sw;
+    let mut cpu = BarrelState::new();
+    cpu.write_csr(0, addr::MTVEC, 0x100);
+    let mut rom = vec![NOP; 128];
+    rom[4] = lui(7, 0x40004);                                  // 0x10: x7 = TMMIO_BASE
+    rom[5] = if store { sw(0, 7, 0) } else { lw(5, 7, 0) };    // 0x14: faults
+    rom[6] = SPIN;
+    rom[32] = SPIN;                                            // 0x80: the others spin
+    rom[64] = addi(6, 0, 0x42);                                // 0x100: handler
+    rom[65] = SPIN;
+    for s in 0..N_THREADS {
+        cpu.threads[s].active = true;
+        cpu.threads[s].pc = 0x80;
+    }
+    cpu.threads[1].pc = 0x10;
+    cpu.load_program(&rom);
+    cpu.prewarm_icache();
+    for _ in 0..200 { cpu.step(); }
+    (cpu.read_csr(1, addr::MCAUSE), cpu.read_csr(1, addr::MEPC), cpu.read_csr(1, addr::MTVAL),
+     cpu.read_thread_register(1, 6))
+}
+
+#[test]
+fn b7_tmmio_load_fault_mepc_is_faulting_pc() {
+    let (cause, epc, tval, x6) = tmmio_fault(false);
+    assert_eq!(cause, 5, "mcause = load access fault");
+    assert_eq!(epc, 0x14, "mepc = the load's PC");
+    assert_eq!(tval, 0x4000_4000, "mtval = the address");
+    assert_eq!(x6, 0x42, "handler ran");
+}
+
+#[test]
+fn b7_tmmio_store_fault_mepc_is_faulting_pc() {
+    let (cause, epc, tval, x6) = tmmio_fault(true);
+    assert_eq!(cause, 7, "mcause = store access fault");
+    assert_eq!(epc, 0x14, "mepc = the store's PC");
+    assert_eq!(tval, 0x4000_4000);
+    assert_eq!(x6, 0x42);
+}

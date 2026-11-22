@@ -471,11 +471,11 @@ fn pipeline_external_interrupt_taken() {
     // Long stream of NOPs (addi x0, x0, 0)
     cpu.load_program(&vec![0x00000013u32; 32]);
     let pc_before = cpu.pc;
-    cpu.step(); // takes interrupt at top of step(); pc then advances by 4
+    cpu.step(); // takes the interrupt at the EX boundary of this cycle
     assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0x8000_000b);
     assert_eq!(cpu.sys.csrs.read(addr::MEPC), pc_before);
-    // After redirect to mtvec=0x80 and IF runs, end-of-cycle pc++ → 0x84.
-    assert_eq!(cpu.pc, 0x84);
+    // Redirected to mtvec = 0x80; the handler's first fetch is next cycle.
+    assert_eq!(cpu.pc, 0x80);
     // mstatus.MIE cleared, MPIE = 1
     assert_eq!((cpu.sys.csrs.read(addr::MSTATUS) >> 3) & 1, 0);
     assert_eq!((cpu.sys.csrs.read(addr::MSTATUS) >> 7) & 1, 1);
@@ -1001,8 +1001,8 @@ fn pipeline_vectored_mtvec_for_interrupts() {
     cpu.sys.csrs.write(addr::MIP, 1 << 7);
     cpu.load_program(&vec![0x00000013u32; 32]);
     cpu.step();
-    // handler at base + 4 × cause (7); IF then advances pc by 4
-    assert_eq!(cpu.pc, 0x100 + 4 * 7 + 4);
+    // handler at base + 4 × cause (7), fetched next cycle
+    assert_eq!(cpu.pc, 0x100 + 4 * 7);
 }
 
 #[test]
@@ -1019,7 +1019,7 @@ fn pipeline_s_interrupt_delegated_from_u() {
     assert_eq!(cpu.priv_bits(), 1);                 // now in S
     assert_eq!(cpu.sys.csrs.read(addr::SCAUSE), 0x8000_0009);
     assert_eq!(cpu.sys.csrs.read(addr::MCAUSE), 0);
-    assert_eq!(cpu.pc, 0xc4);
+    assert_eq!(cpu.pc, 0xc0);
 }
 
 #[test]

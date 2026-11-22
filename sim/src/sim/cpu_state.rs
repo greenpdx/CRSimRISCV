@@ -11,20 +11,21 @@ use crate::sim::micro::{next_phase, MicroState};
 use crate::sim::mem::{Bus, Port};
 use crate::sim::phase::Phase;
 use crate::sim::trace::ActivityTrace;
-use crate::sim::system::{PrivMode, SysUnit, TrapInfo, EXC_BREAKPOINT, EXC_ILLEGAL_INSTR,
+use crate::sim::system::{PrivMode, SysUnit, EXC_BREAKPOINT, EXC_ILLEGAL_INSTR,
     EXC_LOAD_ADDR_MISALIGNED, EXC_STORE_ADDR_MISALIGNED};
 use crate::isa::lsu;
 use crate::isa::mul::mul;
 
 const ROM_BASE: u32 = 0x0000_0000;
-const RAM_BASE: u32 = 0x0001_0000;
+pub const RAM_BASE: u32 = 0x0001_0000;
 pub const IO_BASE:  u32 = 0x4002_0000;
 const MEM_WORDS: usize = 256;
 
 /// Single-cycle memory: ROM at 0 (instruction fetch), RAM at `RAM_BASE`
 /// (words past it kept sparse in `ram_extra`), and one I/O register that
 /// answers at every address from `io_base` up.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[cfg_attr(feature = "wasm", serde(default))]
 #[derive(Debug, Clone)]
 pub struct SingleMem {
@@ -34,6 +35,8 @@ pub struct SingleMem {
     /// I/O window starts here (everything at or above is I/O).
     pub io_base: u32,
     /// RAM words written outside the RAM window (below the I/O base): sparse.
+    #[cfg_attr(feature = "wasm", serde(with = "crate::sim::str_keys"))]
+    #[cfg_attr(feature = "wasm", tsify(type = "Record<string, number>"))]
     pub ram_extra: std::collections::BTreeMap<u32, u32>,
 }
 
@@ -87,7 +90,9 @@ impl Bus for SingleMem {
     }
 }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[cfg_attr(feature = "wasm", serde(default))]
 #[derive(Debug, Clone)]
 pub struct CpuState {
@@ -111,6 +116,10 @@ pub struct CpuState {
     /// Control signals consumed (sampled) by the phase that just ran.
     #[cfg_attr(feature = "wasm", serde(skip))]
     pub last_consumed: Vec<&'static str>,
+    /// Components each phase of the current instruction fired (the
+    /// opcode / phase verifier's view); restarts at IrqCheck.
+    #[cfg_attr(feature = "wasm", serde(skip))]
+    pub trace: ActivityTrace,
     /// Register indices touched (read or written) by the current phase.
     pub last_reg_access: Vec<u8>,
     /// RAM byte addresses touched by the current phase.
@@ -135,6 +144,7 @@ impl Default for CpuState {
             micro: MicroState::default(),
             last_active: Vec::new(),
             last_consumed: Vec::new(),
+            trace: ActivityTrace::new(),
             last_reg_access: Vec::new(),
             last_ram_access: Vec::new(),
             last_rom_access: None,
@@ -189,24 +199,6 @@ fn active_for(phase: Phase) -> Vec<&'static str> {
     }
 }
 
-#[cfg(feature = "wasm")]
-impl CpuState {
-    /// Restore a saved state (JSON). Also reads saves from before `mem`
-    /// existed (`rom`, `ram`, `io_data`, `io_base`, `ram_extra` at the top).
-    pub fn from_json(json: &str) -> Option<CpuState> {
-        let mut v: serde_json::Value = serde_json::from_str(json).ok()?;
-        if let Some(o) = v.as_object_mut() {
-            if !o.contains_key("mem") {
-                let mut m = serde_json::Map::new();
-                for k in ["rom", "ram", "io_data", "io_base", "ram_extra"] {
-                    if let Some(x) = o.remove(k) { m.insert(k.into(), x); }
-                }
-                o.insert("mem".into(), m.into());
-            }
-        }
-        serde_json::from_value(v).ok()
-    }
-}
 
 impl CpuState {
     pub fn new() -> Self { Self::default() }
@@ -262,12 +254,6 @@ impl CpuState {
 
     // ── Trap / privilege API ───────────────────────────────────────────
     pub fn priv_mode(&self) -> PrivMode { self.sys.priv_mode }
-    pub fn last_trap(&self) -> Option<TrapInfo> { self.sys.last_trap }
-    pub fn csr_read(&self, addr: u16) -> u32 { self.sys.csrs.read(addr) }
-    pub fn csr_write(&mut self, addr: u16, val: u32) { self.sys.csrs.write(addr, val); }
-    pub fn raise_irq(&mut self, mask: u32) { self.sys.raise_irq(mask); }
-    pub fn clear_irq(&mut self) { self.sys.clear_irq(); }
-    pub fn csrs_snapshot(&self) -> Vec<(u16, u32)> { self.sys.snapshot() }
 
     /// Sized load / store through the load-store unit. funct3 gives the
     /// width (B / H / W, U = zero-extend). A misaligned address is an
@@ -313,130 +299,11 @@ impl CpuState {
         }
     }
 
-    /// Execute one instruction and return the (phase → active components) trace.
-    /// Faithful port of cpuState.ts::step() lines 212–390.
-    pub fn step_traced(&mut self) -> ActivityTrace {
-        let mut trace = ActivityTrace::new();
-        if self.halted { return trace; }
-        self.cycle_count += 1;
-
-        // ── 1. Fetch ─────────────────────────────────────────────────────────
-        let instr = self.mem.read(self.pc, Port::Fetch);
-        trace.mark(Phase::Fetch, nl::PC);
-        trace.mark(Phase::Fetch, nl::ROM);
-
-        let pc_plus4 = self.pc.wrapping_add(4);
-
-        // ── 2. Decode ───────────────────────────────────────────────────────
-        let opcode  = (instr & 0x7f) as u8;
-        let rd      = ((instr >>  7) & 0x1f) as u8;
-        let funct3  = ((instr >> 12) & 0x07) as u8;
-        let rs1_num = ((instr >> 15) & 0x1f) as u8;
-        let rs2_num = ((instr >> 20) & 0x1f) as u8;
-        let funct7b30 = ((instr >> 30) & 0x1) as u8;
-        trace.mark(Phase::Decode, nl::DECODER);
-
-        let entry = match opcode_by_value(opcode) {
-            Some(e) => e,
-            None => {
-                // Unknown opcode → NOP, advance PC.
-                trace.mark(Phase::PcUpdate, nl::PC_ADDER);
-                trace.mark(Phase::PcUpdate, nl::MUX_PC_OFFSET);
-                trace.mark(Phase::PcUpdate, nl::MUX_PC);
-                trace.mark(Phase::PcUpdate, nl::PC);
-                self.pc = pc_plus4;
-                return trace;
-            }
-        };
-        let sig = entry.signals;
-
-        // ── 3. Control signals ──────────────────────────────────────────────
-        trace.mark(Phase::Control, nl::DECODER);
-
-        // ── 4. Immediate generation ─────────────────────────────────────────
-        let imm = extract_immediate(instr, ImmSel::from_u8(sig.imm_sel));
-        if sig.imm_sel != 5 {
-            trace.mark(Phase::Imm, nl::IMM_GEN);
-        }
-
-        // ── 5. Register read ────────────────────────────────────────────────
-        let rs1_val = self.registers[rs1_num as usize];
-        let rs2_val = self.registers[rs2_num as usize];
-        trace.mark(Phase::RegRead, nl::REGFILE);
-
-        // ── 6. ALU src mux + ALU control + compute ─────────────────────────
-        let alu_b = if sig.alu_src { imm as u32 } else { rs2_val };
-
-        let alu_ctrl_code = alu_control_code(sig.alu_op, funct3, funct7b30, opcode);
-
-        let AluResultLocal { result: alu_result, flags } =
-            { let alu_a = if crate::sim::decode::is_auipc(opcode) { self.pc } else { rs1_val };
-              let r = alu_compute(alu_ctrl_code, alu_a, alu_b);
-              AluResultLocal { result: r.result, flags: r.flags } };
-
-        trace.mark(Phase::Alu, nl::ALU_CTRL);
-        trace.mark(Phase::Alu, nl::MUX_ALUSRC);
-        trace.mark(Phase::Alu, nl::ALU);
-
-        // ── 7. Memory access ────────────────────────────────────────────────
-        let mut mem_read_data = 0u32;
-        if sig.mem_read || sig.mem_write {
-            trace.mark(Phase::Mem, nl::LOADSTORE);
-            trace.mark(Phase::Mem, if self.mem.is_io(alu_result) { nl::IO } else { nl::RAM });
-            if let Ok(r) = self.mem_access(sig.mem_read, sig.mem_write, alu_result, rs2_val, funct3, false) {
-                mem_read_data = r.data;
-            }
-        }
-        let is_mul = self.zmmul && Self::is_mul_instr(instr);
-
-        // ── 8/9. Write-back mux + register write (same clock edge) ─────────
-        let wb_data = if is_mul { mul(funct3 & 3, rs1_val, rs2_val) } else {
-            match sig.wb_sel {
-                0 => alu_result,
-                1 => mem_read_data,
-                2 => pc_plus4,
-                _ => 0,
-            }
-        };
-        if sig.reg_write && (self.zmmul || !Self::is_mul_instr(instr)) {
-            trace.mark(Phase::Wb, nl::MUX_WB);
-            if rd != 0 {
-                trace.mark(Phase::Wb, nl::REGFILE);
-                self.registers[rd as usize] = wb_data;
-            }
-        }
-
-        // ── 10. PC update: mux_pc_offset → pc_adder → mux_pc ────────────────
-        let branch_taken = if sig.pc_sel != 1 {
-            false
-        } else if opcode == 0b1101111 {
-            true // JAL unconditional
-        } else {
-            decide_branch(funct3, &flags)
-        };
-        let is_jalr = sig.pc_sel == 2;
-
-        let pc_offset = if branch_taken { imm as u32 } else { 4 };
-        let adder_result = self.pc.wrapping_add(pc_offset);
-        let jalr_target  = alu_result & 0xffff_fffe;
-        let next_pc      = if is_jalr { jalr_target } else { adder_result };
-
-        trace.mark(Phase::PcUpdate, nl::MUX_PC_OFFSET);
-        trace.mark(Phase::PcUpdate, nl::PC_ADDER);
-        trace.mark(Phase::PcUpdate, nl::MUX_PC);
-        trace.mark(Phase::PcUpdate, nl::PC);
-
-        self.pc = next_pc;
-        trace
-    }
 }
 
 /// Result of a load / store through the load-store unit.
 #[derive(Default)]
 struct MemResult { data: u32, word: u32, bw: u8 }
-
-// Local alias to avoid naming clash with the crate-level AluResult struct.
-struct AluResultLocal { result: u32, flags: AluFlags }
 
 // ─────────────────────────────────────────────────────────────────────────
 // Micro-step API: advance one phase at a time, populating MicroState.
@@ -455,6 +322,7 @@ impl CpuState {
         self.last_ram_access.clear();
 
         self.run_phase(next);
+        self.trace_phase(next);
         self.micro.current = Some(next);
         self.last_active = self.compute_active(next);
         self.last_consumed = consumed_for(next).iter().copied().collect();
@@ -530,6 +398,40 @@ impl CpuState {
     }
 
     pub fn last_active(&self) -> &[&'static str] { &self.last_active }
+
+    /// Mark the components phase `p` fired in `trace`.
+    fn trace_phase(&mut self, p: Phase) {
+        let m = &self.micro;
+        let known = opcode_by_value(m.opcode.unwrap_or(0)).is_some();
+        let instr = m.instr.unwrap_or(0);
+        let comps: &[nl::ComponentId] = match p {
+            Phase::IrqCheck => { self.trace = ActivityTrace::new(); &[] }
+            Phase::Fetch => &[nl::PC, nl::ROM],
+            Phase::Decode => &[nl::DECODER],
+            Phase::Control | Phase::RegRead | Phase::Alu if !known => &[],
+            Phase::Control => &[nl::DECODER],
+            Phase::Imm if m.ctrl_imm_sel.unwrap_or(5) != 5 => &[nl::IMM_GEN],
+            Phase::RegRead => &[nl::REGFILE],
+            Phase::Alu => &[nl::ALU_CTRL, nl::MUX_ALUSRC, nl::ALU],
+            Phase::Mem if m.ctrl_mem_read.unwrap_or(false) || m.ctrl_mem_write.unwrap_or(false) => {
+                if self.mem.is_io(m.alu_result.unwrap_or(0)) { &[nl::LOADSTORE, nl::IO] } else { &[nl::LOADSTORE, nl::RAM] }
+            }
+            Phase::Wb if m.ctrl_reg_write.unwrap_or(false) && (self.zmmul || !Self::is_mul_instr(instr)) => {
+                if m.rd.unwrap_or(0) != 0 { &[nl::MUX_WB, nl::REGFILE] } else { &[nl::MUX_WB] }
+            }
+            Phase::PcUpdate => &[nl::MUX_PC_OFFSET, nl::PC_ADDER, nl::MUX_PC, nl::PC],
+            _ => &[],
+        };
+        for &c in comps { self.trace.mark(p, c); }
+    }
+
+    /// Execute to the end of the current instruction (the micro-phases);
+    /// return the components each phase fired.
+    pub fn step_traced(&mut self) -> ActivityTrace {
+        if self.halted { return ActivityTrace::new(); }
+        while self.micro_step() != Phase::PcUpdate {}
+        self.trace.clone()
+    }
 
     fn run_phase(&mut self, p: Phase) {
         match p {

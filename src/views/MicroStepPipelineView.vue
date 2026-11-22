@@ -1,7 +1,7 @@
 <script setup lang="ts">
 //
 // MicroStepPipelineView — table view for the 5-stage pipeline simulator.
-// Loads JsPipelineState from the wasm package and renders one column per
+// Loads the wasm Pipeline class and renders one column per
 // stage (IF/ID/EX/MA/WB) showing the pipeline register contents and the
 // active components, plus registers/RAM/ROM panels on the side.
 //
@@ -9,99 +9,21 @@
 import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
 import MmuIrqDemo from '../components/MmuIrqDemo.vue'
 import CsrLiveDisplay from '../components/CsrLiveDisplay.vue'
+import type { DisasmJson, Region } from '../stores/wasmCore'
+import type { CtrlJson, PipeCsrJson, Pipeline, PipelineSnapshot } from '../wasm/cpu_sim'
 
 const emit = defineEmits<{ 'switch-cpu': [] }>()
 
-interface CtrlJson {
-  reg_write: boolean; alu_src: boolean; alu_op: number;
-  mem_read: boolean; mem_write: boolean;
-  wb_sel: number; pc_sel: number; branch: boolean; jump: boolean;
-}
-interface IfId  { valid: boolean; pc: number; instr: number; pc_plus4: number; flush_bubble: boolean }
-interface IdEx  {
-  valid: boolean; pc: number; pc_plus4: number; instr: number;
-  rs1_data: number; rs2_data: number; imm: number;
-  rs1_num: number; rs2_num: number; rd_num: number;
-  funct3: number; funct7b30: number; opcode: number;
-  ctrl: CtrlJson;
-  stall_reg: number;
-  flush_bubble: boolean;
-}
-interface ExMa {
-  valid: boolean; instr: number;
-  alu_result: number; rs2_data: number; pc_plus4: number;
-  rd_num: number; funct3: number;
-  branch_taken: boolean; branch_target: number;
-  ctrl: CtrlJson;
-  stall_reg: number;
-  flush_bubble: boolean;
-}
-interface MaWb {
-  valid: boolean; instr: number;
-  alu_result: number; mem_data: number; pc_plus4: number;
-  rd_num: number; ctrl: CtrlJson;
-  stall_reg: number;
-  flush_bubble: boolean;
-}
-interface CsrEntry { addr: number; value: number; changed: boolean }
-interface Snapshot {
-  cycle: bigint;
-  pc: number;
-  halted: boolean;
-  priv_mode: number;
-  branch_mode: number;
-  registers: Uint32Array;
-  reg_read_mask: number;
-  reg_write_mask: number;
-  last_ram_addr: number;
-  last_ram_kind: number;
-  last_ram_side: number;
-  if_id: IfId;
-  id_ex: IdEx;
-  ex_ma: ExMa;
-  ma_wb: MaWb;
-  last_wb: MaWb;
-  hazard:  { stall: boolean; flush: boolean; stall_reg: number };
-  forward: { a: string; b: string };
-  active_components: { IF: string[]; ID: string[]; EX: string[]; MA: string[]; WB: string[] };
-  csrs: CsrEntry[];
-}
-
-interface DisasmJson { class: string; mnemonic: string; operands: string; desc: string }
-
-type Cpu = {
-  pc: number
-  cycle: bigint
-  halted: boolean
-  priv_mode: number
-  branch_mode: number
-  set_branch_mode(mode: number): void
-  reset(): void
-  load_program(words: Uint32Array): void
-  step(): void
-  read_register(idx: number): number
-  registers(): Uint32Array
-  machine_ram(): Uint32Array
-  user_ram(): Uint32Array
-  rom(): Uint32Array
-  csr_read(addr: number): number
-  poke_csr(addr: number, val: number): void
-  if_id(): IfId
-  id_ex(): IdEx
-  ex_ma(): ExMa
-  ma_wb(): MaWb
-  snapshot(): Snapshot
-  poke_register(idx: number, val: number): void
-  poke_ram(addr: number, val: number): void
-  poke_user_ram(addr: number, val: number): void
-  poke_machine_ram(addr: number, val: number): void
-  poke_rom(addr: number, val: number): void
-}
-
-type Disasmer = { disasm(instr: number): DisasmJson }
+// The wasm Pipeline class and its snapshot types (generated from Rust).
+type Cpu = Pipeline
+type Snapshot = PipelineSnapshot
+type CsrEntry = PipeCsrJson
+type Disasmer = (instr: number) => DisasmJson
 
 const cpu  = shallowRef<Cpu | null>(null)
 const dis  = shallowRef<Disasmer | null>(null)
+const rom = ref<Region>({ name: 'rom', base: 0, words: 0 })
+const ram = ref<Region>({ name: 'ram', base: 0, words: 0 })
 const ready = ref(false)
 const renderTick = ref(0)
 
@@ -165,12 +87,11 @@ const program = ref<Uint32Array>(buildProgram())
 onMounted(async () => {
   const mod = await import('../wasm/cpu_sim.js')
   await mod.default()
-  const c = new mod.JsPipelineState() as Cpu
-  c.load_program(program.value)
+  const c = new mod.Pipeline()
+  for (const r of c.regions()) { if (r.name === 'rom') rom.value = r; if (r.name === 'ram') ram.value = r }
+  c.load(rom.value.base, program.value)
   cpu.value = c
-  // Reuse the JsCpuState's disasm helper for ROM display
-  const d = new mod.JsCpuState() as unknown as Disasmer
-  dis.value = d
+  dis.value = mod.disasm
   ready.value = true
 })
 
@@ -180,7 +101,7 @@ function step20()  { for (let i = 0; i < 20; i++) cpu.value?.step(); renderTick.
 function reset()   {
   if (!cpu.value) return
   cpu.value.reset()
-  cpu.value.load_program(program.value)
+  cpu.value.load(rom.value.base, program.value)
   renderTick.value++
 }
 
@@ -240,7 +161,7 @@ function onFileLoad(event: Event) {
     }
     program.value = words
     cpu.value!.reset()
-    cpu.value!.load_program(program.value)
+    cpu.value!.load(rom.value.base, program.value)
     renderTick.value++
   }
   reader.readAsText(file)
@@ -255,11 +176,11 @@ const snap = computed<Snapshot | null>(() => {
 
 const regList = computed<number[]>(() => {
   renderTick.value
-  return cpu.value ? Array.from(cpu.value.registers()) : []
+  return cpu.value ? Array.from(cpu.value.regs()) : []
 })
 const machineRamList = computed<number[]>(() => {
   renderTick.value
-  return cpu.value ? Array.from(cpu.value.machine_ram()) : []
+  return cpu.value ? Array.from(cpu.value.mem(ram.value.base, ram.value.words)) : []
 })
 const userRamList = computed<number[]>(() => {
   renderTick.value
@@ -267,7 +188,7 @@ const userRamList = computed<number[]>(() => {
 })
 const romList = computed<number[]>(() => {
   renderTick.value
-  return cpu.value ? Array.from(cpu.value.rom()) : []
+  return cpu.value ? Array.from(cpu.value.mem(rom.value.base, rom.value.words)) : []
 })
 
 // RAM tab: 'auto' follows priv mode, 'user'/'machine' override.
@@ -372,19 +293,19 @@ function injectIrq() {
   // enabled by the boot code; the trap handler clears mip.MEIP and
   // mret restores mstatus.MIE. This way clicking Inject IRQ while a
   // handler is in flight does not re-trap mid-handler.
-  c.poke_csr(0x344, c.csr_read(0x344) | (1 << 11))
+  c.csr_write(0x344, c.csr_read(0x344) | (1 << 11))
   renderTick.value++
 }
 
 function disasmShort(instr: number): string {
   if (!dis.value || instr === 0) return ''
-  const d = dis.value.disasm(instr >>> 0)
+  const d = dis.value(instr >>> 0)
   return `${d.mnemonic.padEnd(6)} ${d.operands}`
 }
 
 function disasmFull(instr: number): DisasmJson | null {
   if (!dis.value || instr === 0) return null
-  return dis.value.disasm(instr >>> 0)
+  return dis.value(instr >>> 0)
 }
 
 function edit(label: string, current: number, write: (n: number) => void) {
@@ -624,7 +545,7 @@ function ctrlPretty(c: CtrlJson): string[] {
             <table>
               <tbody>
                 <tr v-for="(v, i) in regList" :key="i" :class="regClass(i)"
-                    @dblclick="edit(`x${i}`, v, n => cpu!.poke_register(i, n))">
+                    @dblclick="edit(`x${i}`, v, n => cpu!.poke_reg(i, n))">
                   <td class="name">x{{ i }} {{ REG_NAMES[i] }}</td>
                   <td class="val">{{ hex(v) }}</td>
                 </tr>
@@ -638,12 +559,12 @@ function ctrlPretty(c: CtrlJson): string[] {
             <table>
               <tbody>
                 <tr v-for="(v, i) in ramView" :key="i"
-                    :class="ramRowClass(0x10000 + i*4)"
-                    @dblclick="edit(hex(0x10000 + i*4), v,
+                    :class="ramRowClass(ram.base + i*4)"
+                    @dblclick="edit(hex(ram.base + i*4), v,
                         n => effectiveRamSide === 'user'
-                              ? cpu!.poke_user_ram(0x10000 + i*4, n)
-                              : cpu!.poke_machine_ram(0x10000 + i*4, n))">
-                  <td class="name">{{ hex(0x10000 + i*4) }}</td>
+                              ? cpu!.poke_user_ram(ram.base + i*4, n)
+                              : cpu!.poke_mem(ram.base + i*4, n))">
+                  <td class="name">{{ hex(ram.base + i*4) }}</td>
                   <td class="val">{{ hex(v) }}</td>
                 </tr>
               </tbody>
@@ -651,16 +572,16 @@ function ctrlPretty(c: CtrlJson): string[] {
           </div>
         </div>
         <div class="pane">
-          <h3>ROM @ 0x00000</h3>
+          <h3>ROM @ {{ hex(rom.base) }}</h3>
           <div class="scroll-body" ref="romScrollRef">
             <table>
               <tbody>
                 <tr v-for="(v, i) in romList" :key="i"
                     :data-rom-idx="i"
-                    :class="{ pc: snap && snap.pc === i*4 }"
+                    :class="{ pc: snap && snap.pc === rom.base + i*4 }"
                     :title="disasmFull(v) ? `${disasmFull(v)!.mnemonic} ${disasmFull(v)!.operands}\n${disasmFull(v)!.desc || ''}` : ''"
-                    @dblclick="edit(hex(i*4), v, n => cpu!.poke_rom(i*4, n))">
-                  <td class="name">{{ hex(i*4) }}</td>
+                    @dblclick="edit(hex(rom.base + i*4), v, n => cpu!.poke_mem(rom.base + i*4, n))">
+                  <td class="name">{{ hex(rom.base + i*4) }}</td>
                   <td class="val">{{ hex(v) }}</td>
                   <td class="dim">{{ disasmShort(v) }}</td>
                 </tr>

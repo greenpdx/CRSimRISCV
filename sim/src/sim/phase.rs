@@ -1,7 +1,9 @@
 //! 9 fine-grained phases of single-cycle execution.
 //! Mirrors the sequential structure of `cpuState.ts::step()` lines 212–390.
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Phase {
     IrqCheck, // sample mip & mie; possibly take a trap before fetching

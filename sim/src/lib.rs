@@ -17,6 +17,7 @@ pub mod data {
 }
 
 pub mod sim {
+    pub mod core;
     pub mod phase;
     pub mod trace;
     pub mod micro;
@@ -24,12 +25,15 @@ pub mod sim {
     pub mod mem;
     pub mod decode;
     pub mod forwarding;
+    pub mod stage;
     pub mod execute;
     pub mod cpu_state;
     pub mod pipeline;
     pub mod barrel;
     pub mod memsys;
     pub mod ooo;
+    #[cfg(feature = "wasm")]
+    pub mod str_keys;
 }
 
 pub mod verify {
@@ -39,4 +43,4 @@ pub mod verify {
 
 
 #[cfg(feature = "wasm")]
-pub mod wasm_api;
+pub mod wasm;

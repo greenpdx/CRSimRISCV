@@ -31,7 +31,8 @@ pub mod stage_wb;
 use crate::isa::csr::addr;
 
 pub use state::{
-    BranchMode, ControlBits, ExMa, ForwardSrc, IdEx, IfId, MaWb, PipelineState,
+    BranchMode, ControlBits, CsrOp, ExMa, ExMaData, ForwardSrc, IdEx, IdExData, IfId, IfIdData, MaWb, MaWbData,
+    MemKind, PcSel, PipelineState, TrapKind, WbSel,
 };
 
 /// The five pipeline stages, in execution order.
@@ -83,7 +84,7 @@ pub fn active_components(state: &PipelineState, stage: Stage) -> Vec<&'static st
         Stage::MA => {
             v.push("ma_wb_reg");
             if state.ex_ma.valid {
-                if state.ex_ma.ctrl.mem_read || state.ex_ma.ctrl.mem_write {
+                if state.ex_ma.ctrl.mem.is_access() {
                     v.push("loadstore");
                     let addr = state.ex_ma.alu_result;
                     if PipelineState::is_io(addr) { v.push("io"); } else { v.push("ram"); }
@@ -133,11 +134,7 @@ impl PipelineState {
         // cycle counter CSR = clocks completed so far
         self.sys.csrs.set_counter(addr::CYCLE, self.cycle_count as u32);
 
-        // ── 0. Interrupt check ──────────────────────────────────
         self.last_trap_taken = false;
-        if self.check_and_take_interrupt() {
-            self.last_trap_taken = true;
-        }
 
         // ── Snapshot previous-cycle pipeline registers ──────────
         let prev_if_id = self.if_id;
@@ -166,7 +163,10 @@ impl PipelineState {
         // ── Resolve traps + compute branch flags + latch ────────
         if self.resolve_ma_trap(&new_ma_wb) { return; }
         let mut new_ex_ma = new_ex_ma;
-        let trap_redirect = self.resolve_ex_trap(&mut new_ex_ma);
+        let trap_redirect = match self.take_interrupt(&prev_if_id, &prev_id_ex) {
+            Some(target) => { new_ex_ma = ExMa::bubble(); Some(target) }
+            None => self.resolve_ex_trap(&mut new_ex_ma),
+        };
         let bf = self.compute_branch_flags(
             &new_ex_ma, &new_id_ex, stall, trap_redirect.is_some(),
         );
@@ -200,9 +200,9 @@ impl PipelineState {
     /// Handle MA-stage page fault. Returns true if the trap was
     /// taken (caller should return early from step).
     fn resolve_ma_trap(&mut self, new_ma_wb: &MaWb) -> bool {
-        if new_ma_wb.trap_kind == 0 { return false; }
-        let cause: u32 = if new_ma_wb.trap_kind == 7 { 13 } else { 15 };
-        let target = self.take_trap(cause, new_ma_wb.trap_pc, new_ma_wb.trap_value);
+        if !new_ma_wb.trap_kind.is_some() { return false; }
+        let cause: u32 = if new_ma_wb.trap_kind == TrapKind::LoadPageFault { 13 } else { 15 };
+        let target = self.take_trap(cause, new_ma_wb.pc, new_ma_wb.trap_value);
         self.last_flush = true;
         self.ma_wb = MaWb::bubble();
         self.ex_ma = ExMa::bubble();
@@ -216,33 +216,32 @@ impl PipelineState {
     /// Handle EX-stage sync trap or mret. Defangs the trapping
     /// instruction and returns the redirect PC (or None).
     fn resolve_ex_trap(&mut self, ex_ma: &mut ExMa) -> Option<u32> {
-        if !ex_ma.valid || ex_ma.trap_kind == 0 { return None; }
+        if !ex_ma.valid || !ex_ma.trap_kind.is_some() { return None; }
         let redirect = match ex_ma.trap_kind {
-            4 => self.sys.xret(false),
-            5 => self.sys.xret(true),
+            TrapKind::Mret => self.sys.xret(false),
+            TrapKind::Sret => self.sys.xret(true),
             kind => {
                 let cause: u32 = match kind {
-                    1 => 2,
-                    2 => self.sys.ecall_cause(),
-                    3 => 3,
-                    6 => 12,
+                    TrapKind::Illegal => 2,
+                    TrapKind::Ecall => self.sys.ecall_cause(),
+                    TrapKind::Ebreak => 3,
+                    TrapKind::InstrPageFault => 12,
                     _ => 0,
                 };
                 let mtval: u32 = match kind {
-                    1 => ex_ma.instr, 6 => ex_ma.trap_pc, _ => 0,
+                    TrapKind::Illegal => ex_ma.instr, TrapKind::InstrPageFault => ex_ma.pc, _ => 0,
                 };
-                self.take_trap(cause, ex_ma.trap_pc, mtval)
+                self.take_trap(cause, ex_ma.pc, mtval)
             }
         };
         // Defang: keep entry alive for the visualizer but suppress
         // all side effects so MA/WB treat it as a no-op.
         ex_ma.ctrl.reg_write = false;
-        ex_ma.ctrl.mem_read  = false;
-        ex_ma.ctrl.mem_write = false;
-        ex_ma.ctrl.csr_op    = 0;
+        ex_ma.ctrl.mem       = MemKind::None;
+        ex_ma.ctrl.csr_op    = CsrOp::None;
         ex_ma.ctrl.is_sfence = false;
         ex_ma.rd_num         = 0;
-        ex_ma.trap_kind      = 0;
+        ex_ma.trap_kind      = TrapKind::None;
         Some(redirect)
     }
 
@@ -323,17 +322,19 @@ impl PipelineState {
         self.sys.trap(cause, false, epc, tval, self.cycle_count)
     }
 
-    /// Asynchronous interrupt check, called at the top of `step()`: the
-    /// shared system unit merges the external lines into mip and picks the
-    /// highest-priority enabled interrupt (M and S, mideleg). If one is
-    /// taken, PC is redirected to the handler. In-flight instructions are
-    /// not squashed — they drain behind it; `mepc` is the address that was
-    /// about to be fetched, so `mret` resumes exactly there.
-    fn check_and_take_interrupt(&mut self) -> bool {
-        let Some(cause) = self.sys.sample_irq() else { return false };
-        let epc = self.pc;
-        self.pc = self.sys.trap(cause, true, epc, 0, self.cycle_count);
-        true
+    /// Asynchronous interrupt, taken precisely at the boundary of the
+    /// instruction entering EX this cycle (after an older MA trap, which
+    /// wins): that instruction and the younger ones are cancelled — none has
+    /// a side effect yet (CSR, load, store act in MA) — and the older ones
+    /// finish. `mepc` = the PC of the first cancelled instruction (the fetch
+    /// PC if the pipeline holds none), so `mret` resumes there; no older
+    /// branch can redirect afterwards, all of them have resolved.
+    /// Returns the handler PC if an interrupt was taken.
+    fn take_interrupt(&mut self, if_id: &IfId, id_ex: &IdEx) -> Option<u32> {
+        let cause = self.sys.sample_irq()?;
+        let epc = if id_ex.valid { id_ex.pc } else if if_id.valid { if_id.pc } else { self.pc };
+        self.last_trap_taken = true;
+        Some(self.sys.trap(cause, true, epc, 0, self.cycle_count))
     }
 
     /// Reset the pipeline to its initial state (program preserved).

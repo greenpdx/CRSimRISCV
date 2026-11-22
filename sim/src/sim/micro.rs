@@ -9,7 +9,9 @@
 
 use crate::sim::phase::Phase;
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[cfg_attr(feature = "wasm", serde(default))]
 #[derive(Debug, Default, Clone)]
 pub struct MicroState {

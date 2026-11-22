@@ -45,6 +45,8 @@ pub mod addr {
 
 /// CSR operation from funct3[1:0].
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(tsify::Tsify))]
+#[cfg_attr(feature = "ts", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CsrOp { #[default] None, Rw, Rs, Rc }
 

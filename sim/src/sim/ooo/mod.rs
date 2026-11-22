@@ -44,7 +44,8 @@ pub const FETCH_IN_FLIGHT: usize = 2;
 pub const HISTORY: usize = 64;
 
 /// A source operand: a value, or waiting for ROB entry `tag` to broadcast.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Operand { pub value: u32, pub tag: Option<u8> }
 
@@ -54,7 +55,8 @@ impl Operand {
 }
 
 /// When an instruction passed each stage (cycle numbers).
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Times {
     pub fetch: u64,
@@ -65,14 +67,18 @@ pub struct Times {
     pub commit: Option<u64>,
 }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy)]
 pub struct IqEntry { pub seq: u64, pub pc: u32, pub instr: u32, pub pred: Prediction, pub fetched: u64 }
 
 #[derive(Debug, Clone, Copy)]
 struct FetchReq { seq: u64, pc: u32, instr: u32, pred: Prediction, fetched: u64, ready: u64 }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy)]
 pub struct RobEntry {
     pub seq: u64,
@@ -91,11 +97,15 @@ pub struct RobEntry {
     pub t: Times,
 }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy)]
 pub struct RsEntry { pub seq: u64, pub rob: u8, pub pc: u32, pub d: Decoded, pub j: Operand, pub k: Operand, pub pred: Prediction }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LsqState {
     /// Waiting for its base register, then the address
@@ -108,7 +118,9 @@ pub enum LsqState {
     Done,
 }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy)]
 pub struct LsqEntry {
     pub seq: u64,
@@ -126,7 +138,8 @@ pub struct LsqEntry {
 }
 
 /// An instruction executing (or done, waiting for a CDB).
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy)]
 pub struct Exec {
     pub seq: u64,
@@ -142,23 +155,29 @@ pub struct Exec {
     pub br: Option<BranchOut>,
 }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BranchOut { pub taken: bool, pub next: u32, pub resolved: bool }
 
 /// The stages of one cycle, in the order they run.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage { Commit, Resolve, Memory, Issue, Writeback, Dispatch, Fetch }
 
 pub const STAGES: [Stage; 7] = [Stage::Commit, Stage::Resolve, Stage::Memory, Stage::Issue, Stage::Writeback, Stage::Dispatch, Stage::Fetch];
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StallReason { RobFull, RsFull, LsqFull, Serialize }
 
 /// What happened this cycle, for the panel.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[cfg_attr(feature = "wasm", serde(tag = "kind"))]
 #[derive(Debug, Clone, PartialEq)]
 pub enum OooEvent {
@@ -188,7 +207,9 @@ pub enum OooEvent {
     Halt { pc: u32 },
 }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OooStats {
     pub cycles: u64,
@@ -207,7 +228,8 @@ pub struct OooStats {
 }
 
 /// An instruction that left the machine: committed, or squashed by a flush.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy)]
 pub struct Retired { pub seq: u64, pub pc: u32, pub instr: u32, pub t: Times, pub squashed: bool }
 
@@ -287,6 +309,14 @@ impl OooCpu {
             next_seq: 0, serializing: false, halted: false,
             events: Vec::new(), event_stage: Vec::new(), stage: 0, stats: OooStats::default(), history: VecDeque::new(),
         }
+    }
+
+    /// Core state to reset values; memory (and caches) kept.
+    pub fn reset(&mut self) {
+        let mode = self.mem.mode;
+        let mem = std::mem::replace(&mut self.mem, OooMem::new(mode));
+        *self = Self::new(mode);
+        self.mem = mem;
     }
 
     /// Load words into memory at byte address `pa`.

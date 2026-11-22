@@ -30,7 +30,8 @@ pub struct TlbEntry {
 }
 
 /// One entry's part in a lookup (the comparators of CVA6 Fig 6).
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EntryCmp {
     pub valid: bool,
@@ -42,7 +43,8 @@ pub struct EntryCmp {
 }
 
 /// One entry's part in an SFENCE.VMA (the gates of CVA6 Fig 7).
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EntryFlush {
     pub valid: bool,

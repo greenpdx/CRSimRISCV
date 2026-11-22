@@ -13,14 +13,7 @@ pub fn compute_wb(state: &mut PipelineState, ma_wb: &MaWb) {
     if !ma_wb.valid || !ma_wb.ctrl.reg_write || ma_wb.rd_num == 0 {
         return;
     }
-    let value = match ma_wb.ctrl.wb_sel {
-        0 => ma_wb.alu_result,
-        1 => ma_wb.mem_data,
-        2 => ma_wb.pc_plus4,
-        3 => ma_wb.mem_data,  // CSR old value (Zicsr)
-        _ => 0,
-    };
-    state.write_register(ma_wb.rd_num, value);
+    state.write_register(ma_wb.rd_num, ma_wb.wb_value());
     if ma_wb.rd_num != 0 {
         state.reg_write_mask |= 1 << ma_wb.rd_num;
     }

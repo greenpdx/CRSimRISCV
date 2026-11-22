@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Single-cycle CPU state — backed by the Rust core (wasm JsCpuState.panel()).
+// Single-cycle CPU state — backed by the Rust core (wasm SingleCycle.panel()).
 //
 // Rust does all execution (sim/src/sim/cpu_state.rs: 10 micro-phases, traps
 // and CSRs via the shared system unit). This store mirrors the core's state
@@ -17,57 +17,35 @@ import { OPCODE_BY_VALUE } from '../data/controlData'
 import { RV32I_NETLIST } from '../data/netlist'
 import { DEFAULT_PROGRAM } from '../data/defaultProgram'
 import { useCpuConfig } from './cpuConfig'
+import { irqMask, regionWords } from './wasmCore'
+import type { CpuState, MicroState, SingleCycle } from '../wasm/cpu_sim'
 
 const ROM_WORDS = 64
 const RAM_WORDS = 64
-const RAM_BASE = 0x00010000
+/** Until the core reports its map (`regions()`) */
+const RAM_BASE_DEFAULT = 0x00010000
 const STORAGE_KEY = 'cpuvis_state'
 
 type PrivMode = 'M' | 'S' | 'U'
 
-/** MicroState fields from the Rust core (sim/src/sim/micro.rs), null until driven */
-export interface Micro {
-  current: string | null
-  pc_out: number | null; instr: number | null; pc_plus4: number | null
-  immediate: number | null; rs1_data: number | null; rs2_data: number | null
-  alu_b: number | null; alu_control: number | null; alu_result: number | null
-  /** ALU input A (rs1, or the PC for AUIPC) and its select */
-  alu_a: number | null; ctrl_alu_a_pc: boolean | null
-  mem_read_data: number | null; write_data: number | null
-  pc_offset: number | null; jalr_target: number | null; next_pc: number | null
-  pc_adder_result: number | null; csr_read_data: number | null
-  ctrl_reg_write: boolean | null; ctrl_alu_src: boolean | null
-  ctrl_mem_read: boolean | null; ctrl_mem_write: boolean | null
-  ctrl_alu_op: number | null; ctrl_wb_sel: number | null; ctrl_pc_sel: number | null; ctrl_imm_sel: number | null
-  zero_flag: boolean | null; neg_flag: boolean | null; carry_flag: boolean | null; overflow_flag: boolean | null
-  offset_sel: boolean | null; is_jalr: boolean | null
-  /** Zmmul: MUL block output, multiply decoded */
-  mul_result: number | null; is_mul: boolean | null
-  /** Load: raw word read (before lane select); store: byte enables */
-  mem_word: number | null; mem_bw: number | null
-  /** Exception raised by this instruction: [cause, tval] */
-  exc: [number, number] | null
-  opcode: number | null; rd: number | null; funct3: number | null; rs1_num: number | null; rs2_num: number | null
-  trap_taken: boolean
-}
+/** MicroState fields from the Rust core (sim/src/sim/micro.rs), undefined until driven */
+export type Micro = MicroState
+type Core = SingleCycle
 
-interface Core {
-  set_rom(words: Uint32Array): void
-  reset_keep_rom(): void
-  micro_step(): string
-  micro_raw(): Micro
-  registers(): Uint32Array; ram(): Uint32Array; ram_extra(): Uint32Array
-  readonly pc: number
-  readonly io_data: number; set_io_data(v: number): void
-  readonly io_base: number; set_io_base(b: number): void
-  readonly traps_enabled: boolean; set_traps_enabled(on: boolean): void
-  readonly zmmul: boolean; set_zmmul(on: boolean): void
-  readonly priv_mode: string; readonly pending_irq: number; readonly trap_depth: number
-  raise_irq(kind: string): void; clear_irq(): void
-  csr_read(addr: number): number; csr_write(addr: number, v: number): void
-  csr_snapshot(): { addr: number; name: string; value: number }[]
-  last_trap(): { cycle: number; from: string; to: string; cause: number; is_interrupt: boolean; epc: number; tval: number } | null
-  save_state(): string; restore_state(json: string): boolean
+/**
+ * A saved core state (`SingleCycle.save()` after JSON.parse) in today's shape.
+ * Saves from before the memory moved into `mem` have rom / ram / io_data /
+ * io_base / ram_extra at the top level; they move into `mem` here.
+ */
+export function migrateSave(state: Record<string, unknown>): CpuState {
+  if (!('mem' in state)) {
+    const mem: Record<string, unknown> = {}
+    for (const k of ['rom', 'ram', 'io_data', 'io_base', 'ram_extra']) {
+      if (k in state) { mem[k] = state[k]; delete state[k] }
+    }
+    state.mem = mem
+  }
+  return state as unknown as CpuState
 }
 
 const mkRegisters = (): Register[] =>
@@ -95,7 +73,7 @@ export const useCpuState = defineStore('cpu', () => {
   const nextPc = ref<number>(0x00000004)
   const romWords = ref<MemoryWord[]>(mkRom(DEFAULT_PROGRAM))
   const ramWords = ref<MemoryWord[]>(
-    Array.from({ length: RAM_WORDS }, (_, i) => ({ address: RAM_BASE + i * 4, value: 0, active: false })))
+    Array.from({ length: RAM_WORDS }, (_, i) => ({ address: RAM_BASE_DEFAULT + i * 4, value: 0, active: false })))
   const ioBaseAddress = ref<number>(0x40020000)
   const ioData        = ref<number>(0x00000000)
   const ioOp          = ref<'idle' | 'read' | 'write'>('idle')
@@ -138,7 +116,7 @@ export const useCpuState = defineStore('cpu', () => {
           const mod = await import('../wasm/cpu_sim.js')
           await mod.default()
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          core = (mod.JsCpuState as any).panel() as Core
+          core = mod.SingleCycle.panel()
           loadError.value = null
           ready.value = true
           if (!restoreState().restored) {
@@ -162,13 +140,14 @@ export const useCpuState = defineStore('cpu', () => {
   /** Copy the core's architectural state into the reactive mirror */
   function sync() {
     if (!core) return
-    const regs = core.registers()
+    const regs = core.regs()
     registers.value.forEach((r, i) => { r.value = (regs[i] ?? 0) >>> 0 })
     pc.value = core.pc >>> 0
-    const ram = core.ram()
+    const r = core.regions().find(x => x.name === 'ram')
+    const ram = r ? core.mem(r.base, r.words) : new Uint32Array(0)
     for (let i = 0; i < RAM_WORDS; i++) {
       const w = ramWords.value[i]
-      if (w) w.value = (ram[i] ?? 0) >>> 0
+      if (w) { if (r) w.address = (r.base + i * 4) >>> 0; w.value = (ram[i] ?? 0) >>> 0 }
     }
     const extra = core.ram_extra()
     for (let k = 0; k < extra.length; k += 2) {
@@ -287,7 +266,7 @@ export const useCpuState = defineStore('cpu', () => {
     ioData.value = value >>> 0
   }
 
-  function raiseIrq(kind: 'mti' | 'mei' | 'msi' | 'sti' | 'sei' | 'ssi') { core?.raise_irq(kind); sync() }
+  function raiseIrq(kind: 'mti' | 'mei' | 'msi' | 'sti' | 'sei' | 'ssi') { core?.raise_irq(irqMask(kind)); sync() }
   function clearIrqs() { core?.clear_irq(); sync() }
   function csrRead(addr: number): number { return core ? core.csr_read(addr) >>> 0 : (csrRegisters.value[addr] ?? 0) }
   function csrWrite(addr: number, value: number) { core?.csr_write(addr, value >>> 0); sync() }
@@ -302,7 +281,7 @@ export const useCpuState = defineStore('cpu', () => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         version: 2,
-        core: core.save_state(),
+        core: JSON.stringify(core.save()),
         asm: romWords.value.map(w => w.asm ?? null),
         nextPc: nextPc.value,
         lastInstr: lastInstr.value,
@@ -317,9 +296,9 @@ export const useCpuState = defineStore('cpu', () => {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (!raw) return { restored: false }
       const s = JSON.parse(raw)
-      if (s.version === 2 && typeof s.core === 'string' && core.restore_state(s.core)) {
-        const rom = JSON.parse(s.core).rom as number[]
-        romWords.value = rom.map((value: number, i: number) => ({
+      if (s.version === 2 && typeof s.core === 'string' && core.restore(migrateSave(JSON.parse(s.core)))) {
+        const rom = regionWords(core, 'rom')
+        romWords.value = Array.from(rom, (value: number, i: number) => ({
           address: i * 4, value: value >>> 0, asm: s.asm?.[i] ?? undefined, active: false,
         }))
         trapsEnabled.value = core.traps_enabled

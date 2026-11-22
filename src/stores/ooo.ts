@@ -1,79 +1,26 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Out-of-order panel — Tomasulo + reorder buffer core, all in Rust
-// (sim/src/sim/ooo, wasm JsOoo). This store steps it a stage or a cycle
+// (sim/src/sim/ooo, wasm Ooo). This store steps it a stage or a cycle
 // at a time and hands the panel its snapshot and this cycle's events.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 
-export type Unit = 'Alu' | 'Mul' | 'Br' | 'Lsu' | 'Sys'
-export type Stage = 'Commit' | 'Resolve' | 'Memory' | 'Issue' | 'Writeback' | 'Dispatch' | 'Fetch'
+// Snapshot / event types generated from the Rust structs (sim/src/sim/ooo).
+import type {
+  Ooo, OoSnap, OooEvent, Stage, Unit, Operand, Prediction, Decoded, Times, RobEntry, RsEntry,
+  LsqState, LsqEntry, Exec, BtbEntry, Retired, OooStats,
+} from '../wasm/cpu_sim'
+export type {
+  OooEvent, Stage, Unit, Operand, Prediction, Decoded, Times, RobEntry, RsEntry,
+  LsqState, LsqEntry, Exec, BtbEntry, Retired, OooStats,
+}
+export type OooSnap = OoSnap
 export const STAGES: Stage[] = ['Commit', 'Resolve', 'Memory', 'Issue', 'Writeback', 'Dispatch', 'Fetch']
 
-export interface Operand { value: number; tag?: number | null }
-export interface Prediction { taken: boolean; next: number; btb_hit: boolean; counter: number }
-export interface Decoded { op: unknown; unit: Unit; rd: number; rs1: number; rs2: number; imm: number }
-export interface Times { fetch: number; dispatch?: number | null; issue?: number | null; complete?: number | null; commit?: number | null }
-export interface RobEntry {
-  seq: number; pc: number; instr: number; d: Decoded; value: number; done: boolean
-  exc?: [number, number] | null; pred: Prediction; store?: [number, number, number] | null; src1: number; t: Times
-}
-export interface RsEntry { seq: number; rob: number; pc: number; d: Decoded; j: Operand; k: Operand; pred: Prediction }
-export type LsqState = 'Address' | 'Ready' | 'Memory' | 'Done'
-export interface LsqEntry {
-  seq: number; rob: number; store: boolean; size: number; signed: boolean; base: Operand; data: Operand
-  imm: number; addr?: number | null; addr_at: number; state: LsqState
-}
-export interface Exec { seq: number; rob: number; unit: Unit; fu: number; issued: number; finish: number; value: number; br?: { taken: boolean; next: number; resolved: boolean } | null }
-export interface BtbEntry { valid: boolean; pc: number; target: number; jump: boolean }
-export interface Retired { seq: number; pc: number; instr: number; t: Times; squashed: boolean }
-export interface OooStats {
-  cycles: number; committed: number; branches: number; mispredicts: number; squashed: number; cdb_waits: number
-  stall_rob: number; stall_rs: number; stall_serialize: number; forwards: number; loads: number; stores: number; traps: number
-}
-export interface OooSnap {
-  cycle: number; stage: number; pc: number; rf: number[]; rat: (number | null | undefined)[]
-  iq: { seq: number; pc: number; instr: number; pred: Prediction; fetched: number }[]
-  fetching: { pc: number; instr: number; ready: number }[]
-  rob: { tag: number; e: RobEntry }[]; rob_head: number; rob_len: number
-  alu_rs: RsEntry[]; mul_rs: RsEntry[]; br_rs: RsEntry[]; lsq: LsqEntry[]; exec: Exec[]
-  bht: number[]; btb: BtbEntry[]; stats: OooStats; history: Retired[]
-  halted: boolean; serializing: boolean; caches: boolean
-}
-export type OooEvent =
-  | { kind: 'Fetch'; seq: number; pc: number; instr: number; taken: boolean; next: number; btb_hit: boolean; latency: number }
-  | { kind: 'Dispatch'; seq: number; rob: number; pc: number; unit: Unit; j_tag?: number | null; k_tag?: number | null }
-  | { kind: 'Stall'; reason: 'RobFull' | 'RsFull' | 'LsqFull' | 'Serialize'; unit: Unit }
-  | { kind: 'Issue'; seq: number; rob: number; unit: Unit; fu: number }
-  | { kind: 'Address'; seq: number; rob: number; addr: number }
-  | { kind: 'Forward'; seq: number; rob: number; from_rob: number; addr: number; value: number }
-  | { kind: 'MemRead'; seq: number; rob: number; addr: number; latency: number }
-  | { kind: 'StoreReady'; seq: number; rob: number; addr: number; data: number }
-  | { kind: 'Resolve'; seq: number; rob: number; pc: number; taken: boolean; next: number; mispredict: boolean }
-  | { kind: 'Broadcast'; bus: number; seq: number; rob: number; value: number }
-  | { kind: 'CdbWait'; seq: number; rob: number }
-  | { kind: 'Wakeup'; rob: number; tag: number }
-  | { kind: 'Flush'; after_seq: number; squashed: number; pc: number }
-  | { kind: 'Commit'; seq: number; rob: number; pc: number; rd: number; value: number }
-  | { kind: 'StoreCommit'; seq: number; addr: number; value: number; size: number }
-  | { kind: 'Trap'; seq: number; pc: number; cause: number; handler: number }
-  | { kind: 'Mret'; seq: number; target: number }
-  | { kind: 'Halt'; pc: number }
-
-interface Core {
-  examples(): { name: string; about: string }[]
-  load_example(i: number, caches: boolean): boolean
-  program(): Uint32Array
-  step_stage(): number
-  step(): void
-  run(n: number): boolean
-  readonly cycle: number
-  readonly halted: boolean
-  events(): { events: OooEvent[]; stages: Stage[] }
-  snapshot(): OooSnap
-}
-interface Disasm { disasm(w: number): { mnemonic: string; operands: string } | null }
+type Core = Ooo
+type Disasm = (w: number) => { mnemonic: string; operands: string } | null
 
 const hex = (v: number, w = 8) => (v >>> 0).toString(16).padStart(w, '0')
 
@@ -125,10 +72,8 @@ export const useOoo = defineStore('ooo', () => {
         try {
           const mod = await import('../wasm/cpu_sim.js')
           await mod.default()
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const m = mod as any
-          core = new m.JsOoo(false) as Core
-          dis = new m.JsCpuState() as Disasm
+          core = new mod.Ooo(false)
+          dis = mod.disasm
           examples.value = core.examples()
           error.value = null
           ready.value = true
@@ -164,7 +109,7 @@ export const useOoo = defineStore('ooo', () => {
   /** Finish the cycle (or run one whole cycle) */
   function stepCycle() {
     if (!core || core.halted) return
-    core.step()
+    core.step_cycle()
     lastStage.value = 6
     tick.value++
   }
@@ -177,10 +122,10 @@ export const useOoo = defineStore('ooo', () => {
     }
     running.value = false
   }
-  function runToEnd() { if (!core) return; core.run(5000); lastStage.value = 6; tick.value++ }
+  function runToEnd() { if (!core) return; core.run_cycles(5000); lastStage.value = 6; tick.value++ }
 
   function asm(w: number): string {
-    const d = dis?.disasm(w >>> 0)
+    const d = dis?.(w >>> 0)
     return d ? `${d.mnemonic} ${d.operands}`.trim().toLowerCase() : hex(w)
   }
 

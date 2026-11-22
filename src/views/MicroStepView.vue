@@ -3,63 +3,23 @@
 // MicroStepView — Vue port of `sim/demo.html`. Loads the standalone Rust
 // simulator from /sim/pkg/cpu_sim.js (built via `npm run wasm`).
 //
-// This view is its own isolated simulator (a JsCpuState instance), separate
+// This view is its own isolated simulator (a SingleCycle instance), separate
 // from the Vue Pinia store that drives CpuLayout. The two coexist so the
 // instructional micro-step UI doesn't fight with the existing visualizer.
 //
 import { computed, onMounted, ref, shallowRef } from 'vue'
+import { irqMask, type DisasmJson, type Region } from '../stores/wasmCore'
+import type { MicroJson, SingleCycle } from '../wasm/cpu_sim'
 
 const emit = defineEmits<{ 'switch-cpu': [] }>()
 
-interface BusEntry  { name: string; value: number | null }
-interface CtrlEntry { name: string; value: string | null }
-interface CompEntry { name: string; value: string | null }
-interface CsrEntry  { addr: number; name: string; value: number; desc: string }
-interface MicroJson {
-  current: string | null
-  opcode_name: string | null
-  active: string[]
-  consumed: string[]
-  reg_access: number[]
-  ram_access: number[]
-  rom_access: number | null
-  buses: BusEntry[]
-  controls: CtrlEntry[]
-  components: CompEntry[]
-}
-interface DisasmJson { class: string; mnemonic: string; operands: string; desc: string }
-interface TrapInfo {
-  cycle: number; from: string; to: string
-  cause: number; is_interrupt: boolean; epc: number; tval: number
-}
-
-// JsCpuState is the wasm class — typed loosely to avoid import wrangling.
-type Cpu = {
-  pc: number
-  cycle: bigint
-  priv_mode: string
-  in_trap: boolean
-  reset(): void
-  load_program(words: Uint32Array): void
-  micro_step(): string
-  micro_state(): MicroJson
-  registers(): Uint32Array
-  ram(): Uint32Array
-  rom(): Uint32Array
-  read_register(idx: number): number
-  poke_register(idx: number, val: number): void
-  poke_ram(addr: number, val: number): void
-  poke_rom(addr: number, val: number): void
-  csr_read(addr: number): number
-  csr_write(addr: number, val: number): void
-  csr_snapshot(): CsrEntry[]
-  raise_irq(kind: string): void
-  clear_irq(): void
-  last_trap(): TrapInfo | null
-  disasm(instr: number): DisasmJson
-}
-
+// The wasm SingleCycle class and its result types (generated from Rust).
+type Cpu = SingleCycle
+type Disasm = (word: number) => DisasmJson
 const cpu = shallowRef<Cpu | null>(null)
+const dis = shallowRef<Disasm | null>(null)
+const rom = ref<Region>({ name: 'rom', base: 0, words: 0 })
+const ram = ref<Region>({ name: 'ram', base: 0, words: 0 })
 const ready = ref(false)
 const renderTick = ref(0) // bump to force re-render after a step
 const REG_NAMES = [
@@ -110,9 +70,11 @@ onMounted(async () => {
   // .wasm asset hashing automatically because the shim uses `import.meta.url`.
   const mod = await import('../wasm/cpu_sim.js')
   await mod.default()
-  const c = new mod.JsCpuState() as Cpu
-  c.load_program(program)
+  const c = new mod.SingleCycle()
+  for (const r of c.regions()) { if (r.name === 'rom') rom.value = r; if (r.name === 'ram') ram.value = r }
+  c.load(rom.value.base, program)
   cpu.value = c
+  dis.value = mod.disasm
   ready.value = true
 })
 
@@ -121,24 +83,24 @@ function full()  { for (let i = 0; i < 10; i++) cpu.value?.micro_step(); renderT
 function run10() { for (let i = 0; i < 100; i++) cpu.value?.micro_step(); renderTick.value++ }
 function reset() {
   if (!cpu.value) return
-  cpu.value.reset()
-  cpu.value.load_program(program)
+  cpu.value.clear()
+  cpu.value.load(rom.value.base, program)
   renderTick.value++
 }
-function irq(k: string) { cpu.value?.raise_irq(k); renderTick.value++ }
+function irq(k: string) { cpu.value?.raise_irq(irqMask(k)); renderTick.value++ }
 function clrIrq()       { cpu.value?.clear_irq(); renderTick.value++ }
 
 // Reactivity helpers — read fresh state every render via the renderTick dep.
 function snap<T>(fn: () => T): T { renderTick.value; return fn() }
 
 function disasmShort(instr: number): string {
-  if (!cpu.value || instr === 0) return ''
-  const d = cpu.value.disasm(instr >>> 0)
+  if (!dis.value || instr === 0) return ''
+  const d = dis.value(instr >>> 0)
   return `${d.mnemonic.padEnd(6)} ${d.operands}`
 }
 function disasmFull(instr: number): DisasmJson | null {
-  if (!cpu.value) return null
-  return cpu.value.disasm(instr >>> 0)
+  if (!dis.value) return null
+  return dis.value(instr >>> 0)
 }
 
 // Manual edit prompt — shared by all storage tables.
@@ -155,15 +117,15 @@ function edit(label: string, current: number, write: (n: number) => void) {
 // after every micro_step / poke / IRQ button click.
 const regList = computed<number[]>(() => {
   renderTick.value
-  return cpu.value ? Array.from(cpu.value.registers()) : []
+  return cpu.value ? Array.from(cpu.value.regs()) : []
 })
 const ramList = computed<number[]>(() => {
   renderTick.value
-  return cpu.value ? Array.from(cpu.value.ram()) : []
+  return cpu.value ? Array.from(cpu.value.mem(ram.value.base, ram.value.words)) : []
 })
 const romList = computed<number[]>(() => {
   renderTick.value
-  return cpu.value ? Array.from(cpu.value.rom()) : []
+  return cpu.value ? Array.from(cpu.value.mem(rom.value.base, rom.value.words)) : []
 })
 
 const csrInteresting = new Set([
@@ -294,7 +256,7 @@ function rowCls(name: string, m: MicroJson): string {
             <tbody>
               <tr v-for="(v, i) in regList" :key="i"
                   :class="cpu.micro_state().reg_access.includes(i) ? 'consumed' : 'held'"
-                  @dblclick="edit(`x${i}`, v, n => cpu!.poke_register(i, n))">
+                  @dblclick="edit(`x${i}`, v, n => cpu!.poke_reg(i, n))">
                 <td class="name">x{{ i }} {{ REG_NAMES[i] }}</td>
                 <td class="val">{{ hex(v) }}</td>
               </tr>
@@ -304,13 +266,13 @@ function rowCls(name: string, m: MicroJson): string {
 
         <!-- Column 4: RAM -->
         <div class="pane">
-          <h3>RAM @ 0x10000</h3>
+          <h3>RAM @ {{ hex(ram.base) }}</h3>
           <table>
             <tbody>
               <tr v-for="(v, i) in ramList" :key="i"
-                  :class="cpu.micro_state().ram_access.includes(0x10000 + i*4) ? 'consumed' : 'held'"
-                  @dblclick="edit(hex(0x10000 + i*4), v, n => cpu!.poke_ram(0x10000 + i*4, n))">
-                <td class="name">{{ hex(0x10000 + i*4) }}</td>
+                  :class="cpu.micro_state().ram_access.includes(ram.base + i*4) ? 'consumed' : 'held'"
+                  @dblclick="edit(hex(ram.base + i*4), v, n => cpu!.poke_mem(ram.base + i*4, n))">
+                <td class="name">{{ hex(ram.base + i*4) }}</td>
                 <td class="val">{{ hex(v) }}</td>
               </tr>
             </tbody>
@@ -319,14 +281,14 @@ function rowCls(name: string, m: MicroJson): string {
 
         <!-- Column 5: ROM -->
         <div class="pane">
-          <h3>ROM @ 0x00000</h3>
+          <h3>ROM @ {{ hex(rom.base) }}</h3>
           <table>
             <tbody>
               <tr v-for="(v, i) in romList" :key="i"
-                  :class="cpu.micro_state().rom_access === i*4 ? 'consumed' : 'held'"
+                  :class="cpu.micro_state().rom_access === rom.base + i*4 ? 'consumed' : 'held'"
                   :title="disasmFull(v) ? `${disasmFull(v)!.mnemonic} ${disasmFull(v)!.operands}\n${disasmFull(v)!.desc || ''}` : ''"
-                  @dblclick="edit(hex(i*4), v, n => cpu!.poke_rom(i*4, n))">
-                <td class="name">{{ hex(i*4) }}</td>
+                  @dblclick="edit(hex(rom.base + i*4), v, n => cpu!.poke_mem(rom.base + i*4, n))">
+                <td class="name">{{ hex(rom.base + i*4) }}</td>
                 <td class="val">{{ hex(v) }}</td>
                 <td class="dim">{{ disasmShort(v) }}</td>
               </tr>

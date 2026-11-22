@@ -44,7 +44,8 @@ pub mod stage_ma;
 pub mod stage_wb;
 
 pub use state::{
-    BarrelState, ControlBits, CustomOp, DiEx, ExMa, IfDi, IfSrc, LtIf, MaWb, SchedMode,
+    BarrelState, ControlBits, CsrOp, CustomOp, DiEx, DiExData, ExMa, ExMaData, IfDi, IfDiData, IfSrc, LtIf, LtIfData,
+    MaWb, MaWbData, MemKind, SchedMode, TrapKind, WbSel,
     Thread, EXT_DMEM_BASE, ISRAM_BASE, ISRAM_BYTES_PER_SLOT, ISRAM_N_SLOTS,
     ISRAM_TOP, ISRAM_WORDS_PER_SLOT, N_THREADS,
 };
@@ -52,7 +53,7 @@ pub use state::{
 /// Same-thread load-use hazard. Returns true if `prev_di_ex` is a
 /// load whose rd is read by `prev_if_di`'s instruction.
 fn detect_load_use(if_di: &IfDi, di_ex: &DiEx) -> bool {
-    if !di_ex.valid || !di_ex.ctrl.mem_read || di_ex.rd_num == 0 { return false; }
+    if !di_ex.valid || !di_ex.ctrl.mem.is_load() || di_ex.rd_num == 0 { return false; }
     if !if_di.valid || di_ex.thread != if_di.thread { return false; }
     let instr = if_di.instr;
     let rs1 = ((instr >> 15) & 0x1f) as u8;
@@ -167,34 +168,33 @@ impl BarrelState {
         // or mepc (for MRET). In multi-thread barrel mode, no
         // other in-flight instructions need squashing because
         // they belong to different threads.
-        if new_ex_ma.valid && new_ex_ma.trap_kind != 0 {
+        if new_ex_ma.valid && new_ex_ma.trap_kind.is_some() {
             let slot = new_ex_ma.thread;
             match new_ex_ma.trap_kind {
-                4 => {
+                TrapKind::Mret => {
                     // MRET: restore pc from mepc, MIE from MPIE.
                     self.do_mret(slot);
                 }
                 kind => {
-                    // Sync trap: illegal(1), ecall(2), ebreak(3).
+                    // Sync trap: illegal, ecall, ebreak. (A foreign I-SRAM
+                    // fetch traps directly in IF, cause 1.)
                     let cause: u32 = match kind {
-                        1 => 2,  // illegal instruction
-                        2 => self.threads[slot as usize].sys.ecall_cause(),   // ECALL (by mode)
-                        3 => 3,  // EBREAK
-                        5 => 1,  // instruction access fault
+                        TrapKind::Illegal => 2,
+                        TrapKind::Ecall => self.threads[slot as usize].sys.ecall_cause(),   // by mode
+                        TrapKind::Ebreak => 3,
                         _ => 0,
                     };
-                    let tval = if kind == 1 { new_ex_ma.instr } else { 0 };
-                    self.take_sync_trap(slot, cause, new_ex_ma.trap_pc, tval);
+                    let tval = if kind == TrapKind::Illegal { new_ex_ma.instr } else { 0 };
+                    self.take_sync_trap(slot, cause, new_ex_ma.pc, tval);
                 }
             }
             // Defang the trapping instruction so MA/WB don't
             // produce side effects (same pattern as 5-stage).
             new_ex_ma.ctrl.reg_write = false;
-            new_ex_ma.ctrl.mem_read  = false;
-            new_ex_ma.ctrl.mem_write = false;
+            new_ex_ma.ctrl.mem       = MemKind::None;
             new_ex_ma.ctrl.custom_op = CustomOp::None;
             new_ex_ma.rd_num = 0;
-            new_ex_ma.trap_kind = 0;
+            new_ex_ma.trap_kind = TrapKind::None;
         }
 
         // ── EX-stage branch resolution ──
