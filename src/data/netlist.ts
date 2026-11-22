@@ -150,6 +150,16 @@ export const RV32I_NETLIST: Netlist = {
     },
 
     {
+      // Zmmul multiplier (combinational): rs1 × rs2 → WB Sel input 4
+      id: 'mul', label: 'MUL',
+      ports: [
+        { componentId: 'mul', name: 'a',      direction: 'in',  bits: 32 },
+        { componentId: 'mul', name: 'b',      direction: 'in',  bits: 32 },
+        { componentId: 'mul', name: 'result', direction: 'out', bits: 32 },
+      ],
+    },
+
+    {
       id: 'loadstore', label: 'Load / Store',
       ports: [
         { componentId: 'loadstore', name: 'address',    direction: 'in',  bits: 32 },
@@ -187,7 +197,9 @@ export const RV32I_NETLIST: Netlist = {
         { componentId: 'mux_wb', name: 'in0', direction: 'in',  bits: 32 },  // alu_result
         { componentId: 'mux_wb', name: 'in1', direction: 'in',  bits: 32 },  // read_data
         { componentId: 'mux_wb', name: 'in2', direction: 'in',  bits: 32 },  // pc_adder result (for JAL/JALR link)
-        { componentId: 'mux_wb', name: 'sel', direction: 'in',  bits: 2  },  // wb_sel
+        { componentId: 'mux_wb', name: 'in3', direction: 'in',  bits: 32 },  // csr_read_data
+        { componentId: 'mux_wb', name: 'in4', direction: 'in',  bits: 32 },  // mul_result
+        { componentId: 'mux_wb', name: 'sel', direction: 'in',  bits: 3  },  // wb_sel
         { componentId: 'mux_wb', name: 'out', direction: 'out', bits: 32 },
       ],
     },
@@ -280,7 +292,7 @@ export const RV32I_NETLIST: Netlist = {
       ],
     },
     {
-      id: 'ctrl_wb_sel', bits: 2,
+      id: 'ctrl_wb_sel', bits: 3,
       from: { componentId: 'decoder', portName: 'wb_sel' },
       to:   [{ componentId: 'mux_wb', portName: 'sel'    }],
     },
@@ -388,6 +400,13 @@ export const RV32I_NETLIST: Netlist = {
       id: 'csr_read_data', bits: 32,
       from: { componentId: 'decoder', portName: 'pc_sel' }, // placeholder source
       to:   [{ componentId: 'mux_wb', portName: 'in3' }],
+    },
+
+    // ── MUL result (Zmmul) ───────────────────────────────────────────────
+    {
+      id: 'mul_result', bits: 32,
+      from: { componentId: 'mul',    portName: 'result' },
+      to:   [{ componentId: 'mux_wb', portName: 'in4' }],
     },
 
     // ── Write-back to register file ────────────────────────────────────────

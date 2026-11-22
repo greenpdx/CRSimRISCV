@@ -99,6 +99,8 @@ export interface MemoryWord {
   value: number
   asm?: string
   active?: boolean
+  /** Byte lanes a sub-word access touched (bit i = byte i); unset = whole word */
+  lanes?: number
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

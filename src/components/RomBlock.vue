@@ -3,7 +3,7 @@
 
     <div class="rom__header">
       <span class="rom__title">Instruction Memory</span>
-      <span class="rom__subtitle">ROM · {{ words.length }} words</span>
+      <span class="rom__subtitle" :title="`ROM · ${words.length} words`">{{ base !== undefined ? '@ ' + fmtBase(base) : `ROM · ${words.length} words` }}</span>
     </div>
 
     <!-- Address input port -->
@@ -24,7 +24,7 @@
         </colgroup>
         <thead>
           <tr class="rom__col-headers">
-            <th class="rom__th">Address</th>
+            <th class="rom__th">{{ base !== undefined ? 'Offset' : 'Address' }}</th>
             <th class="rom__th">Bytes</th>
             <th class="rom__th">Assembly</th>
             <th class="rom__th rom__th--dot"></th>
@@ -37,6 +37,8 @@
             :word="word"
             kind="rom"
             :stripe="i % 2 === 1"
+            :base="base"
+            :offset-digits="offsetDigits"
           />
         </tbody>
       </table>
@@ -55,7 +57,14 @@ const props = defineProps<{
   words: MemoryWord[]
   /** Current PC value — used to auto-scroll to active row */
   pc: number
+  /** Base address: header shows it, rows show the offset from it */
+  base?: number
 }>()
+
+/** 0x-prefixed 8-digit base for the header */
+const fmtBase = (v: number) => '0x' + (v >>> 0).toString(16).padStart(8, '0')
+/** Offset digits: enough for the last word's offset, at least 4 */
+const offsetDigits = computed(() => Math.max(4, ((props.words.length * 4 - 4) >>> 0).toString(16).length))
 
 const scrollEl = ref<HTMLDivElement | null>(null)
 

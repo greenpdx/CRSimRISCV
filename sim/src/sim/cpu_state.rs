@@ -9,18 +9,18 @@ use crate::data::netlist as nl;
 use crate::sim::micro::{next_phase, MicroState};
 use crate::sim::phase::Phase;
 use crate::sim::trace::ActivityTrace;
-use crate::sim::trap::{
-    addr as csra, interrupt_destination, mret, sret, take_trap,
-    CsrFile, PrivMode, TrapInfo,
-    EXC_BREAKPOINT, EXC_ECALL_FROM_M, EXC_ECALL_FROM_S, EXC_ECALL_FROM_U,
-    EXC_ILLEGAL_INSTR,
-};
+use crate::sim::system::{PrivMode, SysUnit, TrapInfo, EXC_BREAKPOINT, EXC_ILLEGAL_INSTR,
+    EXC_LOAD_ADDR_MISALIGNED, EXC_STORE_ADDR_MISALIGNED};
+use crate::sim::lsu::{load_data, store_data};
+use crate::sim::mul::mul_comb;
 
 const ROM_BASE: u32 = 0x0000_0000;
 const RAM_BASE: u32 = 0x0001_0000;
-const IO_BASE:  u32 = 0x4002_0000;
+pub const IO_BASE:  u32 = 0x4002_0000;
 const MEM_WORDS: usize = 256;
 
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "wasm", serde(default))]
 #[derive(Debug, Clone)]
 pub struct CpuState {
     pub pc: u32,
@@ -28,13 +28,25 @@ pub struct CpuState {
     pub rom: Vec<u32>,
     pub ram: Vec<u32>,
     pub io_data: u32,
+    /// I/O window starts here (everything at or above is I/O).
+    pub io_base: u32,
+    /// RAM words written outside the RAM window (below the I/O base): sparse.
+    pub ram_extra: std::collections::BTreeMap<u32, u32>,
+    /// Traps on: IrqCheck may take interrupts; ECALL / EBREAK / MRET / SRET /
+    /// illegal SYSTEM trap. Off: they are no-ops (PC + 4), IRQs are ignored.
+    pub traps_enabled: bool,
+    /// Zmmul on: MUL / MULH / MULHSU / MULHU run on the MUL block.
+    /// Off: they are illegal (trap with traps on, NOP with traps off).
+    pub zmmul: bool,
     pub cycle_count: u64,
     pub halted: bool,
     /// Live phase-by-phase state for the visualizer.
     pub micro: MicroState,
     /// Drivers that fired this micro-step (bright green in the visualizer).
+    #[cfg_attr(feature = "wasm", serde(skip))]
     pub last_active: Vec<&'static str>,
     /// Control signals consumed (sampled) by the phase that just ran.
+    #[cfg_attr(feature = "wasm", serde(skip))]
     pub last_consumed: Vec<&'static str>,
     /// Register indices touched (read or written) by the current phase.
     pub last_reg_access: Vec<u8>,
@@ -43,16 +55,8 @@ pub struct CpuState {
     /// ROM byte address touched by the current phase (Fetch only).
     pub last_rom_access: Option<u32>,
 
-    // ── Privilege & traps ──────────────────────────────────────────────
-    pub priv_mode: PrivMode,
-    pub csrs: CsrFile,
-    /// External IRQ inputs ORed into mip at the start of each IrqCheck.
-    pub pending_irq: u32,
-    pub last_trap: Option<TrapInfo>,
-    /// Number of traps currently active (bumped on take_trap, decremented on
-    /// mret/sret). `in_trap = trap_depth > 0` is the visualizer's "we are
-    /// currently inside a handler" indicator.
-    pub trap_depth: u32,
+    // ── Privilege, CSRs, traps, IRQs (shared system unit) ──────────────
+    pub sys: SysUnit,
 }
 
 impl Default for CpuState {
@@ -63,6 +67,10 @@ impl Default for CpuState {
             rom: vec![0x0000_0013; MEM_WORDS],
             ram: vec![0; MEM_WORDS],
             io_data: 0,
+            io_base: IO_BASE,
+            ram_extra: Default::default(),
+            traps_enabled: true,
+            zmmul: true,
             cycle_count: 0,
             halted: false,
             micro: MicroState::default(),
@@ -71,11 +79,7 @@ impl Default for CpuState {
             last_reg_access: Vec::new(),
             last_ram_access: Vec::new(),
             last_rom_access: None,
-            priv_mode: PrivMode::M,
-            csrs: CsrFile::new(),
-            pending_irq: 0,
-            last_trap: None,
-            trap_depth: 0,
+            sys: SysUnit::new(),
         }
     }
 }
@@ -129,6 +133,16 @@ fn active_for(phase: Phase) -> Vec<&'static str> {
 impl CpuState {
     pub fn new() -> Self { Self::default() }
 
+    /// Core with the given ROM / RAM sizes in words (the panel uses 64 / 64).
+    pub fn with_sizes(rom_words: usize, ram_words: usize) -> Self {
+        Self { rom: vec![0x0000_0013; rom_words], ram: vec![0; ram_words], ..Self::default() }
+    }
+
+    /// RAM words outside the window, (address, value).
+    pub fn ram_extra_snapshot(&self) -> Vec<(u32, u32)> {
+        self.ram_extra.iter().map(|(&a, &v)| (a, v)).collect()
+    }
+
     pub fn load_word(&mut self, byte_addr: u32, word: u32) {
         let idx = ((byte_addr - ROM_BASE) >> 2) as usize;
         if idx < self.rom.len() { self.rom[idx] = word; }
@@ -169,18 +183,13 @@ impl CpuState {
     pub fn ram_snapshot(&self) -> &[u32] { &self.ram }
 
     // ── Trap / privilege API ───────────────────────────────────────────
-    pub fn priv_mode(&self) -> PrivMode { self.priv_mode }
-    pub fn last_trap(&self) -> Option<TrapInfo> { self.last_trap }
-    pub fn csr_read(&self, addr: u16) -> u32 { self.csrs.read(addr) }
-    pub fn csr_write(&mut self, addr: u16, val: u32) { self.csrs.write(addr, val); }
-    pub fn raise_irq(&mut self, mask: u32) { self.pending_irq |= mask; }
-    pub fn clear_irq(&mut self) {
-        self.pending_irq = 0;
-        self.csrs.write(csra::MIP, 0);
-    }
-    pub fn csrs_snapshot(&self) -> Vec<(u16, u32)> {
-        self.csrs.raw().iter().map(|(&a, &v)| (a, v)).collect()
-    }
+    pub fn priv_mode(&self) -> PrivMode { self.sys.priv_mode }
+    pub fn last_trap(&self) -> Option<TrapInfo> { self.sys.last_trap }
+    pub fn csr_read(&self, addr: u16) -> u32 { self.sys.csrs.read(addr) }
+    pub fn csr_write(&mut self, addr: u16, val: u32) { self.sys.csrs.write(addr, val); }
+    pub fn raise_irq(&mut self, mask: u32) { self.sys.raise_irq(mask); }
+    pub fn clear_irq(&mut self) { self.sys.clear_irq(); }
+    pub fn csrs_snapshot(&self) -> Vec<(u16, u32)> { self.sys.snapshot() }
 
     fn rom_read(&self, addr: u32) -> u32 {
         let idx = ((addr - ROM_BASE) >> 2) as usize;
@@ -188,13 +197,67 @@ impl CpuState {
     }
     fn ram_read(&self, addr: u32) -> u32 {
         let idx = ((addr & !3).wrapping_sub(RAM_BASE) >> 2) as usize;
-        self.ram.get(idx).copied().unwrap_or(0)
+        match self.ram.get(idx) {
+            Some(&v) => v,
+            None => self.ram_extra.get(&(addr & !3)).copied().unwrap_or(0),
+        }
     }
     fn ram_write(&mut self, addr: u32, val: u32) {
         let idx = ((addr & !3).wrapping_sub(RAM_BASE) >> 2) as usize;
         if idx < self.ram.len() { self.ram[idx] = val; }
+        else { self.ram_extra.insert(addr & !3, val); }
     }
-    fn is_io(addr: u32) -> bool { addr >= IO_BASE }
+    fn is_io(&self, addr: u32) -> bool { addr >= self.io_base }
+
+    /// Read the word holding `addr` (RAM or the IO register).
+    fn bus_read(&self, addr: u32) -> u32 {
+        if self.is_io(addr) { self.io_data } else { self.ram_read(addr) }
+    }
+
+    /// Sized load / store through the load-store unit. funct3 gives the
+    /// width (B / H / W, U = zero-extend). A misaligned address is an
+    /// exception with `trap_misaligned`, otherwise its low bits are ignored.
+    fn mem_access(&mut self, read: bool, write: bool, addr: u32, rs2: u32, funct3: u8,
+                  trap_misaligned: bool) -> Result<MemResult, (u32, u32)> {
+        let bytes = 1u32 << (funct3 & 3).min(2);
+        let mut addr = addr;
+        if addr & (bytes - 1) != 0 {
+            if trap_misaligned {
+                let cause = if write { EXC_STORE_ADDR_MISALIGNED } else { EXC_LOAD_ADDR_MISALIGNED };
+                return Err((cause, addr));
+            }
+            addr &= !(bytes - 1);
+        }
+        let mut r = MemResult::default();
+        if read {
+            let word = self.bus_read(addr);
+            r.word = word;
+            r.data = load_data(word, addr, funct3);
+        }
+        if write {
+            let (wdata, bw) = store_data(rs2, addr, funct3);
+            let mask = (0..4).filter(|i| bw >> i & 1 != 0).fold(0u32, |m, i| m | 0xff << (8 * i));
+            let new = (self.bus_read(addr) & !mask) | (wdata & mask);
+            if self.is_io(addr) { self.io_data = new; } else { self.ram_write(addr, new); }
+            r.bw = bw;
+        }
+        Ok(r)
+    }
+
+    /// R-type with funct7 = 0000001 and funct3 0..3 (MUL / MULH / MULHSU /
+    /// MULHU). DIV / REM (funct3 4..7) are not in Zmmul: illegal.
+    fn is_mul_instr(instr: u32) -> bool {
+        instr & 0x7f == 0b0110011 && instr >> 25 == 1 && (instr >> 12) & 7 < 4
+    }
+
+    /// Not an instruction of this core: unknown opcode, reserved funct3 /
+    /// funct7, or MUL with Zmmul off. MISC-MEM (FENCE) is a legal NOP.
+    fn is_illegal(&self, instr: u32) -> bool {
+        let f = crate::sim::decode::extract_fields(instr);
+        if f.opcode == 0b0001111 { return false; }
+        if Self::is_mul_instr(instr) { return !self.zmmul; }
+        opcode_by_value(f.opcode).is_none() || !crate::sim::decode::encoding_ok(&f)
+    }
 
     /// Execute one instruction and return the (phase → active components) trace.
     /// Faithful port of cpuState.ts::step() lines 212–390.
@@ -257,7 +320,8 @@ impl CpuState {
         let alu_ctrl_code = compute_alu_control(sig.alu_op, funct3, eff_f7b30, is_lui);
 
         let AluResultLocal { result: alu_result, flags } =
-            { let r = alu_compute(alu_ctrl_code, rs1_val, alu_b);
+            { let alu_a = if crate::sim::decode::is_auipc(opcode) { self.pc } else { rs1_val };
+              let r = alu_compute(alu_ctrl_code, alu_a, alu_b);
               AluResultLocal { result: r.result, flags: r.flags } };
 
         trace.mark(Phase::Alu, nl::ALU_CTRL);
@@ -266,35 +330,25 @@ impl CpuState {
 
         // ── 7. Memory access ────────────────────────────────────────────────
         let mut mem_read_data = 0u32;
-        if sig.mem_read {
+        if sig.mem_read || sig.mem_write {
             trace.mark(Phase::Mem, nl::LOADSTORE);
-            if Self::is_io(alu_result) {
-                trace.mark(Phase::Mem, nl::IO);
-                mem_read_data = self.io_data;
-            } else {
-                trace.mark(Phase::Mem, nl::RAM);
-                mem_read_data = self.ram_read(alu_result);
+            trace.mark(Phase::Mem, if self.is_io(alu_result) { nl::IO } else { nl::RAM });
+            if let Ok(r) = self.mem_access(sig.mem_read, sig.mem_write, alu_result, rs2_val, funct3, false) {
+                mem_read_data = r.data;
             }
         }
-        if sig.mem_write {
-            trace.mark(Phase::Mem, nl::LOADSTORE);
-            if Self::is_io(alu_result) {
-                trace.mark(Phase::Mem, nl::IO);
-                self.io_data = rs2_val;
-            } else {
-                trace.mark(Phase::Mem, nl::RAM);
-                self.ram_write(alu_result, rs2_val);
-            }
-        }
+        let is_mul = self.zmmul && Self::is_mul_instr(instr);
 
         // ── 8/9. Write-back mux + register write (same clock edge) ─────────
-        let wb_data = match sig.wb_sel {
-            0 => alu_result,
-            1 => mem_read_data,
-            2 => pc_plus4,
-            _ => 0,
+        let wb_data = if is_mul { mul_comb(rs1_val, rs2_val, funct3 & 3) } else {
+            match sig.wb_sel {
+                0 => alu_result,
+                1 => mem_read_data,
+                2 => pc_plus4,
+                _ => 0,
+            }
         };
-        if sig.reg_write {
+        if sig.reg_write && (self.zmmul || !Self::is_mul_instr(instr)) {
             trace.mark(Phase::Wb, nl::MUX_WB);
             if rd != 0 {
                 trace.mark(Phase::Wb, nl::REGFILE);
@@ -334,6 +388,10 @@ impl CpuState {
         trace
     }
 }
+
+/// Result of a load / store through the load-store unit.
+#[derive(Default)]
+struct MemResult { data: u32, word: u32, bw: u8 }
 
 // Local alias to avoid naming clash with the crate-level AluResult struct.
 struct AluResultLocal { result: u32, flags: AluFlags }
@@ -389,14 +447,14 @@ impl CpuState {
             Phase::Mem => {
                 let mr = self.micro.ctrl_mem_read.unwrap_or(false);
                 let mw = self.micro.ctrl_mem_write.unwrap_or(false);
-                if (mr || mw) && !Self::is_io(self.micro.alu_result.unwrap_or(0)) {
+                if (mr || mw) && self.micro.exc.is_none() && !self.is_io(self.micro.alu_result.unwrap_or(0)) {
                     if let Some(addr) = self.micro.alu_result {
                         self.last_ram_access.push(addr & !3);
                     }
                 }
             }
             Phase::Wb => {
-                if self.micro.ctrl_reg_write.unwrap_or(false) {
+                if self.micro.ctrl_reg_write.unwrap_or(false) && self.micro.exc.is_none() {
                     if let Some(rd) = self.micro.rd {
                         if rd != 0 { self.last_reg_access.push(rd); }
                     }
@@ -451,18 +509,9 @@ impl CpuState {
     /// handler entry. We OR `pending_irq` into mip live so externally
     /// asserted IRQs are visible to the standard mip/mie path.
     fn phase_irq_check(&mut self) {
-        // Merge external pending bits into mip (level-triggered).
-        let mip = self.csrs.read(csra::MIP) | self.pending_irq;
-        self.csrs.write(csra::MIP, mip);
-
-        if let Some((cause, _dest)) = interrupt_destination(&self.csrs, self.priv_mode, 0) {
-            let (new_pc, new_mode, mut info) =
-                take_trap(&mut self.csrs, self.priv_mode, cause, true, self.pc, 0);
-            info.cycle = self.cycle_count;
-            self.last_trap = Some(info);
-            self.pc = new_pc;
-            self.priv_mode = new_mode;
-            self.trap_depth = self.trap_depth.saturating_add(1);
+        if !self.traps_enabled { self.micro.trap_taken = false; return; }
+        if let Some(cause) = self.sys.sample_irq() {
+            self.pc = self.sys.trap(cause, true, self.pc, 0, self.cycle_count);
             self.micro.trap_taken = true;
         } else {
             self.micro.trap_taken = false;
@@ -470,11 +519,15 @@ impl CpuState {
     }
 
     fn phase_fetch(&mut self) {
+        // cycle / instret counters advance at fetch (as the visualizer's engine)
+        self.sys.csrs.bump(crate::sim::system::addr::CYCLE);
+        self.sys.csrs.bump(crate::sim::system::addr::INSTRET);
         let pc = self.pc;
         let instr = self.rom_read(pc);
         self.micro.pc_out = Some(pc);
         self.micro.instr = Some(instr);
         self.micro.pc_plus4 = Some(pc.wrapping_add(4));
+        self.micro.exc = None;
     }
 
     fn phase_decode(&mut self) {
@@ -498,6 +551,36 @@ impl CpuState {
             self.micro.ctrl_wb_sel    = Some(s.wb_sel);
             self.micro.ctrl_pc_sel    = Some(s.pc_sel);
             self.micro.ctrl_imm_sel   = Some(s.imm_sel);
+        } else {
+            // Unknown opcode: all controls deasserted → NOP (PC + 4)
+            self.micro.ctrl_reg_write = Some(false);
+            self.micro.ctrl_alu_src   = Some(false);
+            self.micro.ctrl_mem_read  = Some(false);
+            self.micro.ctrl_mem_write = Some(false);
+            self.micro.ctrl_alu_op    = Some(0);
+            self.micro.ctrl_wb_sel    = Some(0);
+            self.micro.ctrl_pc_sel    = Some(0);
+            self.micro.ctrl_imm_sel   = Some(5);
+        }
+        let instr = self.micro.instr.unwrap_or(0);
+        let mul = Self::is_mul_instr(instr);
+        self.micro.is_mul = Some(mul && self.zmmul);
+        self.micro.ctrl_alu_a_pc = Some(crate::sim::decode::is_auipc(opcode));
+        if mul && self.zmmul {
+            self.micro.ctrl_wb_sel = Some(4);            // WB Sel ← MUL block
+        } else if self.is_illegal(instr) {
+            // Illegal instruction (unknown opcode, reserved encoding, DIV /
+            // REM, MUL with Zmmul off): all controls deasserted (NOP);
+            // with traps on, PcUpdate takes the exception.
+            self.micro.ctrl_mem_read  = Some(false);
+            self.micro.ctrl_mem_write = Some(false);
+            self.micro.ctrl_reg_write = Some(false);
+            self.micro.ctrl_alu_src   = Some(false);
+            self.micro.ctrl_alu_op    = Some(0);
+            self.micro.ctrl_wb_sel    = Some(0);
+            self.micro.ctrl_pc_sel    = Some(0);
+            self.micro.ctrl_imm_sel   = Some(5);
+            if self.traps_enabled { self.micro.exc = Some((EXC_ILLEGAL_INSTR, instr)); }
         }
     }
 
@@ -513,6 +596,9 @@ impl CpuState {
         let rs2 = self.micro.rs2_num.unwrap_or(0) as usize;
         self.micro.rs1_data = Some(self.registers[rs1]);
         self.micro.rs2_data = Some(self.registers[rs2]);
+        // ALU Src mux is combinational: its output is valid once the operands are
+        let imm = self.micro.immediate.unwrap_or(0);
+        self.micro.alu_b = Some(if self.micro.ctrl_alu_src.unwrap_or(false) { imm } else { self.registers[rs2] });
     }
 
     fn phase_alu(&mut self) {
@@ -537,12 +623,30 @@ impl CpuState {
         let code = compute_alu_control(alu_op, funct3, f7, is_lui);
         self.micro.alu_control = Some(code);
 
-        let r = alu_compute(code, rs1_val, alu_b);
+        // ALU A: rs1, or the PC for AUIPC
+        let alu_a = if self.micro.ctrl_alu_a_pc.unwrap_or(false) { self.micro.pc_out.unwrap_or(self.pc) } else { rs1_val };
+        self.micro.alu_a = Some(alu_a);
+        let r = alu_compute(code, alu_a, alu_b);
         self.micro.alu_result    = Some(r.result);
         self.micro.zero_flag     = Some(r.flags.zero);
         self.micro.neg_flag      = Some(r.flags.negative);
         self.micro.carry_flag    = Some(r.flags.carry);
         self.micro.overflow_flag = Some(r.flags.overflow);
+
+        // ── MUL block (combinational, beside the ALU) ──
+        if self.micro.is_mul.unwrap_or(false) {
+            self.micro.mul_result = Some(mul_comb(rs1_val, rs2_val, funct3 & 3));
+        }
+
+        // ── CSR ops (Zicsr): read old, write new in execute; rd ← old in WB ──
+        // (funct3 = 100 is reserved: no CSR access, rd ← 0)
+        if opcode == 0b1110011 && funct3 & 0b011 != 0 {
+            let instr    = self.micro.instr.unwrap_or(0);
+            let csr_addr = ((instr >> 20) & 0xfff) as u16;
+            let rs1      = self.micro.rs1_num.unwrap_or(0);
+            let old = self.sys.csr(csr_addr, funct3, rs1, rs1_val).old;
+            self.micro.csr_read_data = Some(old);
+        }
     }
 
     fn phase_mem(&mut self) {
@@ -551,13 +655,18 @@ impl CpuState {
         let addr      = self.micro.alu_result.unwrap_or(0);
         let rs2_val   = self.micro.rs2_data.unwrap_or(0);
 
-        if mem_read {
-            let data = if Self::is_io(addr) { self.io_data } else { self.ram_read(addr) };
-            self.micro.mem_read_data = Some(data);
-        }
-        if mem_write {
-            if Self::is_io(addr) { self.io_data = rs2_val; }
-            else { self.ram_write(addr, rs2_val); }
+        let funct3    = self.micro.funct3.unwrap_or(2);
+        if !(mem_read || mem_write) { return; }
+
+        match self.mem_access(mem_read, mem_write, addr, rs2_val, funct3, self.traps_enabled) {
+            Ok(r) => {
+                if mem_read {
+                    self.micro.mem_word = Some(r.word);
+                    self.micro.mem_read_data = Some(r.data);
+                }
+                if mem_write { self.micro.mem_bw = Some(r.bw); }
+            }
+            Err(e) => self.micro.exc = Some(e),    // misaligned: no access
         }
     }
 
@@ -567,25 +676,7 @@ impl CpuState {
 
         // ── CSR ops (Zicsr): opcode SYSTEM (1110011) with funct3 != 0 ───
         if opcode == 0b1110011 && funct3 != 0 {
-            let instr   = self.micro.instr.unwrap_or(0);
-            let csr_addr = ((instr >> 20) & 0xfff) as u16;
-            let rs1     = self.micro.rs1_num.unwrap_or(0);
-            let rs1_val = self.micro.rs1_data.unwrap_or(0);
-            let uimm    = rs1 as u32; // immediate forms zero-extend rs1 field
-            let src     = if funct3 & 0b100 != 0 { uimm } else { rs1_val };
-            let old     = self.csrs.read(csr_addr);
-            let new = match funct3 & 0b011 {
-                0b01 => src,                  // CSRRW / CSRRWI
-                0b10 => old | src,            // CSRRS / CSRRSI
-                0b11 => old & !src,           // CSRRC / CSRRCI
-                _    => old,
-            };
-            // CSRRS/CSRRC with rs1==x0 should not write (avoid clearing W1C bits).
-            let do_write = match funct3 & 0b011 {
-                0b01 => true,
-                _    => rs1 != 0,
-            };
-            if do_write { self.csrs.write(csr_addr, new); }
+            let old = self.micro.csr_read_data.unwrap_or(0);
             // rd ← old (always; rd=0 is the no-write case for the regfile)
             let rd = self.micro.rd.unwrap_or(0);
             if rd != 0 { self.registers[rd as usize] = old; }
@@ -599,11 +690,13 @@ impl CpuState {
             0 => self.micro.alu_result.unwrap_or(0),
             1 => self.micro.mem_read_data.unwrap_or(0),
             2 => self.micro.pc_plus4.unwrap_or(0),
+            4 => self.micro.mul_result.unwrap_or(0),
             _ => 0,
         };
         self.micro.write_data = Some(wb_data);
 
-        if self.micro.ctrl_reg_write.unwrap_or(false) {
+        // An exception (misaligned load) suppresses the register write
+        if self.micro.ctrl_reg_write.unwrap_or(false) && self.micro.exc.is_none() {
             let rd = self.micro.rd.unwrap_or(0);
             if rd != 0 { self.registers[rd as usize] = wb_data; }
         }
@@ -618,8 +711,14 @@ impl CpuState {
         let neg    = self.micro.neg_flag.unwrap_or(false);
         let carry  = self.micro.carry_flag.unwrap_or(false);
 
-        // ── SYSTEM funct3=0: ECALL/EBREAK/MRET/SRET ─────────────────────
-        if opcode == 0b1110011 && funct3 == 0 {
+        // ── Exception raised earlier in this instruction ──
+        if let Some((cause, tval)) = self.micro.exc {
+            self.take_exception(cause, tval);
+            return;
+        }
+
+        // ── SYSTEM funct3=0: ECALL/EBREAK/MRET/SRET (no-ops with traps off) ──
+        if self.traps_enabled && opcode == 0b1110011 && funct3 == 0 {
             let instr  = self.micro.instr.unwrap_or(0);
             let imm12  = (instr >> 20) & 0xfff;
             let funct7 = (instr >> 25) & 0x7f;
@@ -627,43 +726,30 @@ impl CpuState {
 
             // MRET: imm = 0x302 (funct7 0011000, rs2 00010)
             if funct7 == 0b0011000 && rs2 == 0b00010 {
-                let (epc, new_mode) = mret(&mut self.csrs);
-                self.priv_mode = new_mode;
+                let epc = self.sys.xret(false);
                 self.pc = epc;
                 self.micro.next_pc = Some(epc);
-                self.trap_depth = self.trap_depth.saturating_sub(1);
                 self.cycle_count += 1;
                 return;
             }
             // SRET: imm = 0x102 (funct7 0001000, rs2 00010)
             if funct7 == 0b0001000 && rs2 == 0b00010 {
-                let (epc, new_mode) = sret(&mut self.csrs);
-                self.priv_mode = new_mode;
+                let epc = self.sys.xret(true);
                 self.pc = epc;
                 self.micro.next_pc = Some(epc);
-                self.trap_depth = self.trap_depth.saturating_sub(1);
                 self.cycle_count += 1;
                 return;
             }
             // ECALL / EBREAK take an exception trap.
             let cause = match imm12 {
-                0x000 => Some(match self.priv_mode {
-                    PrivMode::U => EXC_ECALL_FROM_U,
-                    PrivMode::S => EXC_ECALL_FROM_S,
-                    PrivMode::M => EXC_ECALL_FROM_M,
-                }),
+                0x000 => Some(self.sys.ecall_cause()),
                 0x001 => Some(EXC_BREAKPOINT),
                 _ => None,
             };
             if let Some(c) = cause {
                 let epc = self.pc; // ecall: epc = pc of the ecall instruction
-                let (new_pc, new_mode, mut info) =
-                    take_trap(&mut self.csrs, self.priv_mode, c, false, epc, 0);
-                info.cycle = self.cycle_count;
-                self.last_trap = Some(info);
+                let new_pc = self.sys.trap(c, false, epc, 0, self.cycle_count);
                 self.pc = new_pc;
-                self.priv_mode = new_mode;
-                self.trap_depth = self.trap_depth.saturating_add(1);
                 self.micro.next_pc = Some(new_pc);
                 self.micro.trap_taken = true;
                 self.cycle_count += 1;
@@ -691,6 +777,9 @@ impl CpuState {
         let pc_offset = if branch_taken { imm } else { 4 };
         self.micro.pc_offset = Some(pc_offset);
         let adder = self.pc.wrapping_add(pc_offset);
+        self.micro.pc_adder_result = Some(adder);
+        self.micro.offset_sel = Some(branch_taken);
+        self.micro.is_jalr = Some(is_jalr);
         let jalr_target = self.micro.alu_result.unwrap_or(0) & 0xffff_fffe;
         self.micro.jalr_target = Some(jalr_target);
         let next = if is_jalr { jalr_target } else { adder };
@@ -702,17 +791,12 @@ impl CpuState {
 
     fn take_exception(&mut self, cause: u32, tval: u32) {
         let epc = self.pc;
-        let (new_pc, new_mode, mut info) =
-            take_trap(&mut self.csrs, self.priv_mode, cause, false, epc, tval);
-        info.cycle = self.cycle_count;
-        self.last_trap = Some(info);
+        let new_pc = self.sys.trap(cause, false, epc, tval, self.cycle_count);
         self.pc = new_pc;
-        self.priv_mode = new_mode;
-        self.trap_depth = self.trap_depth.saturating_add(1);
         self.micro.next_pc = Some(new_pc);
         self.micro.trap_taken = true;
         self.cycle_count += 1;
     }
 
-    pub fn in_trap(&self) -> bool { self.trap_depth > 0 }
+    pub fn in_trap(&self) -> bool { self.sys.in_trap() }
 }

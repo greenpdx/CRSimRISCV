@@ -85,6 +85,15 @@ fn execute_store(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
     // DMA
     let is_dma = state.dma.write_reg(addr, val, &state.ext_imem, &mut state.local_isram);
     if !is_dma {
+        // SB / SH: merge the byte lanes into the current word — the newest
+        // copy is in the store buffer, else the D-L1, else memory (read
+        // directly: the model does not fill a line for a sub-word store).
+        let val = if ex_ma.funct3 & 3 != 2 {
+            let old = state.store_buffer.forward(addr)
+                .or_else(|| state.dcache.peek_line_mut(addr).map(|l| l.data[Cache::word_offset(addr)]))
+                .unwrap_or_else(|| state.dmem_read(addr));
+            crate::sim::lsu::store_merge(old, val, addr, ex_ma.funct3)
+        } else { val };
         // D-L1 write-through
         if let Some(line) = state.dcache.peek_line_mut(addr) {
             line.data[Cache::word_offset(addr)] = val;

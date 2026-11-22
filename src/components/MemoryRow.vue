@@ -11,7 +11,13 @@
     <td class="mem-row__addr">{{ addrHex }}</td>
 
     <!-- Hex bytes — double-click to edit (RAM only) -->
-    <td class="mem-row__bytes" @dblclick="startEdit" v-if="!editing">{{ bytesDisplay }}</td>
+    <td class="mem-row__bytes" @dblclick="startEdit" v-if="!editing">
+      <template v-if="word.active && word.lanes"><span
+        v-for="b in [3, 2, 1, 0]" :key="b"
+        :class="{ 'mem-row__lane': (word.lanes >> b) & 1 }"
+      >{{ byteHex(b) }}{{ b === 2 ? ' ' : '' }}</span></template>
+      <template v-else>{{ bytesDisplay }}</template>
+    </td>
     <td class="mem-row__bytes" v-else>
       <input
         ref="editInput"
@@ -48,6 +54,10 @@ const props = defineProps<{
   word: MemoryWord
   kind: 'rom' | 'ram'
   stripe?: boolean
+  /** When set, the address column shows the offset from this base (+0000) */
+  base?: number
+  /** Hex digits for the offset */
+  offsetDigits?: number
 }>()
 
 const editing = ref(false)
@@ -78,7 +88,9 @@ const showAnnotation = computed(() => props.kind === 'rom' || props.kind === 'ra
 
 /** Zero-padded 8-digit hex address */
 const addrHex = computed(() =>
-  '0x' + props.word.address.toString(16).padStart(8, '0')
+  props.base === undefined
+    ? '0x' + props.word.address.toString(16).padStart(8, '0')
+    : '+' + ((props.word.address - props.base) >>> 0).toString(16).padStart(props.offsetDigits ?? 4, '0')
 )
 
 /**
@@ -92,6 +104,9 @@ const bytesDisplay = computed(() => {
   return hi.toString(16).padStart(4, '0') + ' ' + lo.toString(16).padStart(4, '0')
 })
 
+/** One byte of the word as 2 hex digits */
+const byteHex = (b: number) => ((props.word.value >>> (8 * b)) & 0xff).toString(16).padStart(2, '0')
+
 /** Signed 32-bit decimal — shown in RAM annotation column */
 const decValue = computed(() => (props.word.value | 0).toString(10))
 </script>
@@ -103,6 +118,10 @@ const decValue = computed(() => (props.word.value | 0).toString(10))
 }
 .mem-row--stripe {
   background-color: #e8f8fb;
+}
+.mem-row__lane {
+  color: #d97706;
+  text-decoration: underline;
 }
 .mem-row--active {
   background-color: #d8f0ff !important;

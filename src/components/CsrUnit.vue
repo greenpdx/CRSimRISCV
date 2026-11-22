@@ -16,12 +16,12 @@
           v-if="editingAddr !== reg.addr"
           class="csr__value"
           @dblclick="startEdit(reg.addr)"
-        >{{ fmtHex(cpu.csrRegisters[reg.addr] ?? 0) }}</span>
+        >{{ fmtHex(valueOf(reg.addr)) }}</span>
         <input
           v-else
           ref="editInput"
           class="csr__edit"
-          :value="fmtHex(cpu.csrRegisters[reg.addr] ?? 0)"
+          :value="fmtHex(valueOf(reg.addr))"
           @keydown.enter="commitEdit($event, reg.addr)"
           @keydown.escape="editingAddr = -1"
           @blur="commitEdit($event, reg.addr)"
@@ -38,9 +38,14 @@ import { useCpuState } from '../stores/cpuState'
 
 const props = defineProps<{
   activeCsr?: number
+  /** CSR values by address (default: the TypeScript engine's CSRs) */
+  values?: Record<number, number>
+  /** CSR write (default: the TypeScript engine) */
+  write?: (addr: number, value: number) => void
 }>()
 
 const cpu = useCpuState()
+const valueOf = (addr: number) => (props.values ? props.values[addr] : cpu.csrRegisters[addr]) ?? 0
 const editingAddr = ref(-1)
 const editInput = ref<HTMLInputElement[]>([])
 
@@ -77,7 +82,8 @@ function commitEdit(event: Event, addr: number) {
     num = parseInt(val, 10)
   }
   if (!isNaN(num)) {
-    cpu.csrWrite(addr, num)
+    if (props.write) props.write(addr, num)
+    else cpu.csrWrite(addr, num)
   }
 }
 </script>

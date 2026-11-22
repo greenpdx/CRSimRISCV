@@ -3,7 +3,7 @@
 
     <div class="io__header">
       <span class="io__title">I/O</span>
-      <span class="io__subtitle">{{ fmtHex(baseAddress) }}</span>
+      <span class="io__subtitle">{{ showOffset ? '@ ' : '' }}{{ fmtHex(baseAddress) }}</span>
     </div>
 
     <div class="io__body">
@@ -27,6 +27,7 @@
 
       <!-- Byte value below LEDs — double-click to edit -->
       <div class="io__byte-row" @dblclick="startEdit" v-if="!editing">
+        <span v-if="showOffset" class="io__offset" title="register offset from the I/O base">+00</span>
         <span class="io__byte-hex">{{ fmtByte(data) }}</span>
         <span class="io__byte-bin">{{ fmtBin(data) }}</span>
       </div>
@@ -58,6 +59,10 @@ const props = defineProps<{
   address:     number
   data:        number
   op:          IoOp
+  /** Write the IO register (default: the TypeScript engine) */
+  write?: (value: number) => void
+  /** Header reads "@ base"; the data register shows its offset (+00) */
+  showOffset?: boolean
 }>()
 
 const cpu = useCpuState()
@@ -67,8 +72,10 @@ const editInput = ref<HTMLInputElement | null>(null)
 /** bit 7 down to bit 0, left to right */
 const bitIndices = [7, 6, 5, 4, 3, 2, 1, 0]
 
+const setData = (v: number) => props.write ? props.write(v >>> 0) : cpu.setIoData(v)
+
 function toggleBit(bit: number) {
-  cpu.setIoData(props.data ^ (1 << bit))
+  setData(props.data ^ (1 << bit))
 }
 
 function startEdit() {
@@ -86,7 +93,7 @@ function commitEdit(event: Event) {
     num = parseInt(val, 10)
   }
   if (!isNaN(num)) {
-    cpu.setIoData(num & 0xFF)
+    setData((props.data & ~0xFF) | (num & 0xFF))
   }
 }
 
@@ -247,4 +254,5 @@ const fmtBin  = (v: number) => (v & 0xff).toString(2).padStart(8, '0')
 .io__led-col {
   cursor: pointer;
 }
+.io__offset { color: #4b5563; font-size: 10px; margin-right: 6px; }
 </style>

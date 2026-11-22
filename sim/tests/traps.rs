@@ -31,7 +31,7 @@ fn external_mti_takes_m_trap() {
 
     // PC must now be the trap vector and a trap should be recorded.
     assert_eq!(cpu.pc, 0x80);
-    let t = cpu.last_trap.expect("trap should have been taken");
+    let t = cpu.last_trap().expect("trap should have been taken");
     assert!(t.is_interrupt);
     assert_eq!(t.cause, 7); // INT_MTI
     assert_eq!(cpu.priv_mode(), PrivMode::M);
@@ -45,7 +45,7 @@ fn ecall_from_m_traps_to_m() {
     cpu.load_program(&[0x00000073]); // ECALL
     cpu.csr_write(csra::MTVEC, 0x100);
     step(&mut cpu);
-    let t = cpu.last_trap.unwrap();
+    let t = cpu.last_trap().unwrap();
     assert!(!t.is_interrupt);
     assert_eq!(t.cause, EXC_ECALL_FROM_M);
     assert_eq!(cpu.pc, 0x100);
@@ -94,7 +94,7 @@ fn delegation_sei_to_s() {
     irq_check_only(&mut cpu);
     assert_eq!(cpu.priv_mode(), PrivMode::S);
     assert_eq!(cpu.pc, 0x200);
-    let t = cpu.last_trap.unwrap();
+    let t = cpu.last_trap().unwrap();
     assert_eq!(t.to_mode, PrivMode::S);
 }
 
@@ -110,7 +110,7 @@ fn ecall_from_u_traps_to_m_when_not_delegated() {
     step(&mut cpu); // MRET → U, pc=4
     assert_eq!(cpu.priv_mode(), PrivMode::U);
     step(&mut cpu); // ECALL from U → M (medeleg=0)
-    let t = cpu.last_trap.unwrap();
+    let t = cpu.last_trap().unwrap();
     assert_eq!(t.cause, EXC_ECALL_FROM_U);
     assert_eq!(t.to_mode, PrivMode::M);
     assert_eq!(cpu.pc, 0x300);

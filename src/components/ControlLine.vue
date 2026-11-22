@@ -38,18 +38,18 @@
     <!-- Signal name label -->
     <text
       v-if="showLabel"
-      :x="midpoint.x"
-      :y="midpoint.y - 4"
+      :x="(labelAt ?? midpoint).x"
+      :y="(labelAt ?? midpoint).y - 4"
       class="ctrl-line__label"
       :fill="effectiveAsserted ? '#cc2222' : '#cc888888'"
       text-anchor="middle"
-    >{{ netId.replace('ctrl_', '') }}</text>
+    >{{ labelText ?? netId.replace('ctrl_', '') }}</text>
 
   </g>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch, nextTick } from 'vue'
 import { useCpuPhases } from '../stores/cpuPhases'
 import type { Phase } from '../stores/cpuPhases'
 
@@ -62,6 +62,10 @@ const props = defineProps<{
   showLabel?: boolean
   /** If set, this control line only activates during this specific phase */
   phase?:    Phase
+  /** Label text (default: net id without the ctrl_ prefix) */
+  labelText?: string
+  /** Label position (default: the middle of the line) */
+  labelAt?: Point
 }>()
 
 const phases = useCpuPhases()
@@ -93,10 +97,13 @@ const midpoint = computed(() => {
 
 const pathLength = ref(100)
 
-onMounted(() => {
+function measurePath() {
   const el = document.querySelector(`#ctrl-${props.netId} path`) as SVGPathElement | null
   if (el) pathLength.value = el.getTotalLength()
-})
+}
+onMounted(measurePath)
+// Re-measure when the route changes (layout editor moves lines)
+watch(pathD, () => nextTick(measurePath))
 </script>
 
 <style scoped>

@@ -94,7 +94,7 @@ pub fn compute_ex(id_ex: &IdEx, ex_ma_in: &ExMa, ma_wb_in: &MaWb) -> ExResult {
     let rs2_val = pick_value(fb, id_ex.rs2_data, ex_ma_in, ma_wb_in);
 
     let alu_b = if id_ex.ctrl.alu_src { id_ex.imm } else { rs2_val };
-    let r = execute_alu(rs1_val, alu_b, id_ex.ctrl.alu_op, id_ex.funct3, id_ex.funct7b30, id_ex.opcode);
+    let r = execute_alu(rs1_val, alu_b, id_ex.pc, id_ex.ctrl.alu_op, id_ex.funct3, id_ex.funct7b30, id_ex.opcode);
 
     let mut branch_taken = false;
     let mut branch_target = id_ex.pc.wrapping_add(id_ex.imm);

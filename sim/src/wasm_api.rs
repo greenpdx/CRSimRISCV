@@ -39,6 +39,69 @@ impl JsCpuState {
 
     pub fn reset(&mut self) { self.inner = CpuState::new(); }
 
+    // ── Single-cycle panel (src/stores/cpuState.ts) ─────────────────────
+    /// Core configured like the single-cycle panel: 64-word ROM / RAM, traps off.
+    pub fn panel() -> JsCpuState {
+        let mut c = CpuState::with_sizes(64, 64);
+        c.traps_enabled = false;
+        JsCpuState { inner: c }
+    }
+
+    /// Reset the core (registers, RAM, IO data, CSRs, traps) but keep the
+    /// ROM, ROM / RAM sizes, I/O base and the traps option.
+    pub fn reset_keep_rom(&mut self) {
+        let rom = std::mem::take(&mut self.inner.rom);
+        let ram_words = self.inner.ram.len();
+        let (io_base, traps, zmmul) = (self.inner.io_base, self.inner.traps_enabled, self.inner.zmmul);
+        let extra: Vec<u32> = self.inner.ram_extra.keys().copied().collect();
+        self.inner = CpuState::with_sizes(rom.len(), ram_words);
+        self.inner.rom = rom;
+        self.inner.io_base = io_base;
+        self.inner.traps_enabled = traps;
+        self.inner.zmmul = zmmul;
+        // Written-outside-window words stay listed (zeroed), like the panel's RAM view
+        for a in extra { self.inner.ram_extra.insert(a, 0); }
+    }
+
+    /// Replace the whole ROM (padded with NOPs to its size).
+    pub fn set_rom(&mut self, words: &[u32]) {
+        for (i, slot) in self.inner.rom.iter_mut().enumerate() {
+            *slot = words.get(i).copied().unwrap_or(0x0000_0013);
+        }
+    }
+
+    #[wasm_bindgen(getter)] pub fn traps_enabled(&self) -> bool { self.inner.traps_enabled }
+    pub fn set_traps_enabled(&mut self, on: bool) { self.inner.traps_enabled = on; }
+    #[wasm_bindgen(getter)] pub fn zmmul(&self) -> bool { self.inner.zmmul }
+    pub fn set_zmmul(&mut self, on: bool) { self.inner.zmmul = on; }
+    #[wasm_bindgen(getter)] pub fn io_data(&self) -> u32 { self.inner.io_data }
+    pub fn set_io_data(&mut self, v: u32) { self.inner.io_data = v; }
+    #[wasm_bindgen(getter)] pub fn io_base(&self) -> u32 { self.inner.io_base }
+    pub fn set_io_base(&mut self, base: u32) { self.inner.io_base = base; }
+    #[wasm_bindgen(getter)] pub fn pending_irq(&self) -> u32 { self.inner.sys.pending_irq }
+    #[wasm_bindgen(getter)] pub fn trap_depth(&self) -> u32 { self.inner.sys.trap_depth }
+
+    /// RAM words written outside the RAM window, flat [addr, value, …].
+    pub fn ram_extra(&self) -> Vec<u32> {
+        self.inner.ram_extra_snapshot().into_iter().flat_map(|(a, v)| [a, v]).collect()
+    }
+
+    /// Every MicroState field (bus / control values and decoded fields).
+    pub fn micro_raw(&self) -> JsValue {
+        serde_wasm_bindgen::to_value(&self.inner.micro).unwrap_or(JsValue::NULL)
+    }
+
+    /// Whole core state as JSON (for localStorage); restore with `restore_state`.
+    pub fn save_state(&self) -> String { serde_json::to_string(&self.inner).unwrap_or_default() }
+
+    /// Restore a `save_state` string. Returns false if it does not parse.
+    pub fn restore_state(&mut self, json: &str) -> bool {
+        match serde_json::from_str::<CpuState>(json) {
+            Ok(c) => { self.inner = c; true }
+            Err(_) => false,
+        }
+    }
+
     /// Load a program (Uint32Array of instruction words) starting at ROM base.
     pub fn load_program(&mut self, words: &[u32]) { self.inner.load_program(words); }
 
