@@ -7,6 +7,9 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Served from a sub-path on GitHub Pages (/CRSimRISCV/): the deploy
+  // workflow sets VITE_BASE. Local dev and preview stay at /.
+  base: process.env.VITE_BASE ?? '/',
   plugins: [
     vue(),
     vueJsx(),
