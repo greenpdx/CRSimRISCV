@@ -7,6 +7,7 @@
 //! Always-active components: `ma_wb_reg`, plus `ram` or `io` and
 //! `loadstore` if memory access.
 
+use crate::sim::lsu::store_merge;
 use crate::data::load_width::sign_extend_load;
 use super::csr::CsrOp;
 use super::state::{ExMa, MaWb, PipelineState};
@@ -90,12 +91,14 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
     }
 
     if ex_ma.ctrl.mem_write {
+        // SW writes the word; SB / SH merge their byte lanes into the word
+        // already there (read without a second memory access).
+        let sub_word = ex_ma.funct3 & 3 != 2;
         if state.io_at(vaddr) {
-            state.io_data = ex_ma.rs2_data;
+            state.io_data = if sub_word { store_merge(state.io_data, ex_ma.rs2_data, vaddr, ex_ma.funct3) } else { ex_ma.rs2_data };
         } else {
-            // Sub-word writes are not modeled in the visualizer; treat
-            // SB/SH/SW as full word writes for v1.
-            state.priv_ram_write(addr, ex_ma.rs2_data);
+            let word = if sub_word { store_merge(state.word_peek(addr), ex_ma.rs2_data, addr, ex_ma.funct3) } else { ex_ma.rs2_data };
+            state.priv_ram_write(addr, word);
         }
     }
 

@@ -2,7 +2,7 @@
   <div class="ov">
     <div v-if="!o.ready" class="ov__loading">{{ o.error ? `Rust core not loaded (reload the page): ${o.error}` : 'Loading the Rust core…' }}</div>
 
-    <div v-else-if="s" class="canvas" :style="{ width: W + 'px', height: H + 'px' }">
+    <div v-else-if="s" class="canvas" :style="{ width: W + 'px', height: H + barH + 'px' }">
       <!-- ══ stage strip: the 7 stages of one cycle ══ -->
       <div class="strip" :style="box(10, 4, 1700, 42)">
         <div class="strip__row">
@@ -213,7 +213,7 @@
     </div>
 
     <!-- ══ controls ══ -->
-    <div class="bar">
+    <div ref="barEl" class="bar">
       <button class="btn btn--nav" @click="emit('switch-cpu')">CPU</button>
       <span class="bar__div">|</span>
       <select class="bar__sel" :value="o.exampleIndex" @change="o.loadExample(+($event.target as HTMLSelectElement).value)">
@@ -236,13 +236,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import MemWire from '../components/memory/MemWire.vue'
 import RsTable from '../components/ooo/RsTable.vue'
 import { useOoo, describe, STAGES, type OooEvent, type Operand, type LsqEntry, type Unit, type Stage, type Times } from '../stores/ooo'
 
 const emit = defineEmits<{ 'switch-cpu': [] }>()
 const o = useOoo()
+/** The canvas is taller by the fixed bar's height, so the page scrolls only when it does not fit */
+const barEl = ref<HTMLDivElement | null>(null)
+const barH = ref(65)
+let barObs: ResizeObserver | null = null
+onMounted(() => {
+  if (!barEl.value) return
+  barObs = new ResizeObserver(() => { barH.value = barEl.value?.offsetHeight ?? 65 })
+  barObs.observe(barEl.value)
+})
+onBeforeUnmount(() => barObs?.disconnect())
 onMounted(() => { o.init().catch(() => { /* shown in the panel */ }) })
 
 const W = 1720, H = 940
@@ -346,7 +356,7 @@ function cellKind(r: { t: Times; squashed: boolean }, c: number): CellKind {
 <style scoped>
 .ov { font-family: Inter, 'Segoe UI', Roboto, Arial, sans-serif; color: #1f2937; }
 .ov__loading { padding: 40px; color: #4b5563; }
-.canvas { position: relative; background: #fafafa; margin-bottom: 70px; }
+.canvas { position: relative; background: #fafafa; }
 .wires { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 2; }
 .blk, .pos, .cdb { position: absolute; z-index: 1; }
 .blk { background: #fff; border: 1.5px solid #2aacbe; border-radius: 3px; overflow: hidden; }

@@ -1,17 +1,12 @@
 <template>
   <div class="ls" :class="{ 'ls--active': op !== 'idle' }">
-    <div class="ls__box">
+    <div class="ls__box" :class="{ 'ls__box--mirror': mirror }">
 
       <!-- Left side: addr, load data, store data (bottom) -->
+      <!-- (mirrored: store data, addr, load data from the top, so the wires don't cross) -->
       <div class="ls__left">
-        <div class="ls__port">
-          <span class="ls__port-label">addr</span>
-        </div>
-        <div class="ls__port">
-          <span class="ls__port-label">load data</span>
-        </div>
-        <div class="ls__port">
-          <span class="ls__port-label">store data</span>
+        <div v-for="l in dataPorts" :key="l" class="ls__port">
+          <span class="ls__port-label">{{ l }}</span>
         </div>
       </div>
 
@@ -50,7 +45,11 @@ const props = defineProps<{
   loadSign?: LoadSigned
   writeData?: number
   readData?:  number
+  /** Memory / I/O side on the left (memories to the left of the datapath) */
+  mirror?: boolean
 }>()
+
+const dataPorts = computed(() => props.mirror ? ['store data', 'addr', 'load data'] : ['addr', 'load data', 'store data'])
 
 const opLabel = computed(() => {
   if (props.op === 'idle')  return 'idle'
@@ -132,4 +131,7 @@ const opLabel = computed(() => {
 .ls__bottom {
   padding-top: 2px;
 }
+.ls__box--mirror { flex-direction: row-reverse; }
+.ls__box--mirror .ls__left { align-items: flex-end; }
+.ls__box--mirror .ls__right { align-items: flex-start; }
 </style>

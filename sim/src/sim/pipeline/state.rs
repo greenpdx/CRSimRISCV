@@ -391,6 +391,13 @@ impl PipelineState {
         self.last_ram_kind = 2;
     }
 
+    /// The data word at `addr` as a store by the current mode would find it —
+    /// no access is recorded and no cache state changes (SB / SH merge).
+    pub fn word_peek(&self, addr: u32) -> u32 {
+        if let Some(h) = &self.hier { return h.sys.borrow().peek(addr & !3); }
+        if self.sys.priv_mode == PrivMode::M { self.ram_read(addr) } else { self.user_ram_read(addr) }
+    }
+
     pub fn is_io(addr: u32) -> bool { addr >= IO_BASE }
 
     /// I/O at `addr` for this core? The memory-panel machine (`hier`) has no

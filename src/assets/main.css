@@ -20,15 +20,6 @@ a,
   }
 }
 
-@media (min-width: 1024px) {
-  body {
-    display: flex;
-    place-items: center;
-  }
-
-  #app {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 0 2rem;
-  }
-}
+/* (The Vue starter template centred the app in a two-column grid with 2rem
+   padding; removed — each view lays itself out from the top-left corner.
+   App.vue sets the page background to the active view's colour.) */

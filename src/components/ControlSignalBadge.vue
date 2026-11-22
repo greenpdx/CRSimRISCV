@@ -1,5 +1,5 @@
 <template>
-  <div class="csb" :class="asserted ? 'csb--on' : 'csb--off'" :title="hint">
+  <div class="csb" :class="[asserted ? 'csb--on' : 'csb--off', { 'csb--compact': compact }]" :title="hint">
     <span class="csb__label">{{ label }}</span>
   </div>
 </template>
@@ -15,6 +15,8 @@ const props = defineProps<{
   bits?: number
   /** Optional tooltip / hint text */
   hint?: string
+  /** Smaller variant (decoder FSM strip) */
+  compact?: boolean
 }>()
 
 const bits = computed(() => props.bits ?? 1)
@@ -39,6 +41,13 @@ const displayValue = computed(() =>
   font-size: 9px;
   cursor: default;
   transition: background 0.1s, color 0.1s;
+}
+.csb--compact {
+  padding: 0 3px;
+  font-size: 8px;
+}
+.csb--compact .csb__label {
+  letter-spacing: 0;
 }
 .csb--off {
   background: #f5f5f5;

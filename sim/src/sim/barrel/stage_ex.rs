@@ -86,7 +86,7 @@ pub fn compute_ex(di_ex: &DiEx, ex_ma_in: &ExMa, ma_wb_in: &MaWb) -> ExMa {
     }
 
     let alu_b = if di_ex.ctrl.alu_src { di_ex.imm } else { rs2_val };
-    let r = execute_alu(rs1_val, alu_b, di_ex.ctrl.alu_op, di_ex.funct3, di_ex.funct7b30, di_ex.opcode);
+    let r = execute_alu(rs1_val, alu_b, di_ex.pc, di_ex.ctrl.alu_op, di_ex.funct3, di_ex.funct7b30, di_ex.opcode);
 
     let mut branch_taken = false;
     let mut branch_target = di_ex.pc.wrapping_add(di_ex.imm);

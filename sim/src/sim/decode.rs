@@ -38,6 +38,27 @@ pub fn extract_fields(instr: u32) -> InstrFields {
 pub fn is_branch(opcode: u8) -> bool { opcode == 0b1100011 }
 pub fn is_jump(opcode: u8) -> bool { opcode == 0b1101111 || opcode == 0b1100111 }
 pub fn is_jalr(opcode: u8) -> bool { opcode == 0b1100111 }
+pub fn is_auipc(opcode: u8) -> bool { opcode == 0b0010111 }
+
+/// funct3 / funct7 checks for the RV32I opcodes of the decoder table (the
+/// table itself only looks at the opcode). False = illegal instruction.
+/// The M extension (funct7 = 0000001) is not RV32I: callers with Zmmul
+/// test for MUL before this.
+pub fn encoding_ok(f: &InstrFields) -> bool {
+    match f.opcode {
+        0b0110011 => f.funct7 == 0 || (f.funct7 == 0b010_0000 && (f.funct3 == 0 || f.funct3 == 5)),
+        0b0010011 => match f.funct3 {
+            1 => f.funct7 == 0,
+            5 => f.funct7 == 0 || f.funct7 == 0b010_0000,
+            _ => true,
+        },
+        0b0000011 => matches!(f.funct3, 0 | 1 | 2 | 4 | 5),
+        0b0100011 => f.funct3 < 3,
+        0b1100011 => f.funct3 != 2 && f.funct3 != 3,
+        0b1100111 => f.funct3 == 0,
+        _ => true,
+    }
+}
 
 // ── SYSTEM trap kind ────────────────────────────────────────────
 
@@ -98,12 +119,13 @@ pub struct StandardDecode {
 }
 
 /// Decode a standard RV32I instruction. Returns `None` for unknown
-/// opcodes (the caller should treat it as an illegal-instruction
+/// opcodes and reserved funct3 / funct7 encodings (the caller should treat it as an illegal-instruction
 /// trap). `f` must be from `extract_fields(instr)`.
 pub fn decode_standard<R: RegRead>(
     regs: &R, instr: u32, f: &InstrFields,
 ) -> Option<StandardDecode> {
     let entry = opcode_by_value(f.opcode)?;
+    if !encoding_ok(f) { return None; }
     let s = entry.signals;
     let imm = extract_immediate(instr, ImmSel::from_u8(s.imm_sel)) as u32;
     Some(StandardDecode {

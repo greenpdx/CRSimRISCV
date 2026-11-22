@@ -3,7 +3,7 @@
 
     <div class="ram__header">
       <span class="ram__title">Data Memory</span>
-      <span class="ram__subtitle">RAM · {{ words.length }} words</span>
+      <span class="ram__subtitle" :title="`RAM · ${words.length} words`">{{ base !== undefined ? '@ ' + fmtBase(base) : `RAM · ${words.length} words` }}</span>
     </div>
 
     <!-- Single table with sticky header inside scrollable container -->
@@ -11,7 +11,7 @@
       <table class="ram__table">
         <thead>
           <tr class="ram__col-headers">
-            <th class="ram__th">Address</th>
+            <th class="ram__th">{{ base !== undefined ? 'Offset' : 'Address' }}</th>
             <th class="ram__th">Bytes</th>
             <th class="ram__th">Dec</th>
             <th class="ram__th ram__th--dot"></th>
@@ -24,6 +24,8 @@
             :word="word"
             kind="ram"
             :stripe="i % 2 === 1"
+            :base="base"
+            :offset-digits="offsetDigits"
           />
         </tbody>
       </table>
@@ -48,7 +50,14 @@ const props = defineProps<{
   lastAddress: number
   /** Value read or written in the last operation */
   lastValue: number
+  /** Base address: header shows it, rows show the offset from it */
+  base?: number
 }>()
+
+/** 0x-prefixed 8-digit base for the header */
+const fmtBase = (v: number) => '0x' + (v >>> 0).toString(16).padStart(8, '0')
+/** Offset digits: enough for the last word's offset, at least 4 */
+const offsetDigits = computed(() => Math.max(4, ((props.words.length * 4 - 4) >>> 0).toString(16).length))
 
 const scrollEl = ref<HTMLDivElement | null>(null)
 

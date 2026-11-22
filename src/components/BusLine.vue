@@ -59,11 +59,20 @@
       >{{ valueLabel }}</text>
     </g>
 
+    <!-- Optional fixed name tag (e.g. "mepc ← PC"), drawn at the middle point -->
+    <text
+      v-if="tag"
+      :x="midpoint.x + (tagDx ?? 0)"
+      :y="midpoint.y - 3"
+      class="bus-line__tag"
+      :text-anchor="tagAnchor ?? 'middle'"
+    >{{ tag }}</text>
+
   </g>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import type { SignalState } from '../types/cpu'
 import { useCpuPhases } from '../stores/cpuPhases'
 import type { Phase } from '../stores/cpuPhases'
@@ -79,6 +88,12 @@ const props = defineProps<{
   showLabel?: boolean
   /** If set, this bus only activates during this specific phase */
   phase?:     Phase
+  /** Colour override (default: by net name) */
+  color?:     string
+  /** Optional fixed name shown beside the line */
+  tag?:       string
+  tagAnchor?: 'start' | 'middle' | 'end'
+  tagDx?:     number
 }>()
 
 const phases = useCpuPhases()
@@ -122,6 +137,7 @@ const hitWidth = computed(() => Math.max(strokeWidth.value * 4, 12))
 
 /** Colour: green for PC feedback, blue for address, amber for data */
 const busColor = computed(() => {
+  if (props.color) return props.color
   if (props.netId === 'next_pc' || props.netId === 'pc_offset' || props.netId === 'pc_adder_result') return '#009977'
   if (props.netId.includes('_addr') || props.netId === 'pc_out') return '#0099cc'
   return '#cc8800'
@@ -149,10 +165,13 @@ const bigLabelW = computed(() => valueLabel.value.length * 10)
 /** Path length for dash animation */
 const pathLength = ref(200)
 
-onMounted(() => {
+function measurePath() {
   const el = document.querySelector(`#bus-${props.netId} path`) as SVGPathElement | null
   if (el) pathLength.value = el.getTotalLength()
-})
+}
+onMounted(measurePath)
+// Re-measure when the route changes (layout editor moves lines)
+watch(pathD, () => nextTick(measurePath))
 </script>
 
 <style scoped>
@@ -174,6 +193,12 @@ onMounted(() => {
   100% { stroke-dashoffset: 0;              opacity: 0; }
 }
 
+.bus-line__tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8px;
+  fill: #6a9ab0;
+  pointer-events: none;
+}
 .bus-line__label {
   font-family: 'JetBrains Mono', 'Courier New', monospace;
   font-size: 8px;

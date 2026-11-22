@@ -1,16 +1,33 @@
 <template>
   <div class="mux" :class="{ 'mux--active': active }">
-    <div class="mux__shape" :style="{ width: shapeW + 'px', height: shapeH + 'px' }">
-      <svg class="mux__svg" :viewBox="`0 0 ${svgW} ${svgH}`" preserveAspectRatio="none">
+    <div
+      class="mux__shape"
+      :style="vertical
+        ? { width: shapeH + 'px', height: shapeW + 'px' }
+        : { width: shapeW + 'px', height: shapeH + 'px' }"
+    >
+      <svg
+        class="mux__svg"
+        :viewBox="vertical ? `0 0 ${svgH} ${svgW}` : `0 0 ${svgW} ${svgH}`"
+        preserveAspectRatio="none"
+      >
         <polygon
           :points="polyPoints"
           class="mux__poly"
         />
       </svg>
 
-      <div class="mux__content" :class="{ 'mux__content--flipped': isFlipped }">
+      <div
+        class="mux__content"
+        :class="{
+          'mux__content--flipped': isFlipped,
+          'mux__content--v': vertical,
+          'mux__content--up': direction === 'up',
+          'mux__content--down': direction === 'down',
+        }"
+      >
         <!-- Inputs (wide side) -->
-        <div class="mux__in-col">
+        <div class="mux__in-col" :class="{ 'mux__in-col--rev': inputsBottomUp }" :style="inColStyle">
           <div
             v-for="(input, i) in inputs"
             :key="i"
@@ -53,6 +70,10 @@ const props = withDefaults(defineProps<{
   outputLabel?: string
   /** Direction the narrow (output) end points: left (default), right, up, down */
   direction?: 'left' | 'right' | 'up' | 'down'
+  /** Number inputs from the bottom (input 0 last) instead of from the top */
+  inputsBottomUp?: boolean
+  /** Size the shape for at least this many inputs (keeps input positions fixed when inputs come and go) */
+  minInputs?: number
 }>(), {
   direction: 'left',
 })
@@ -65,7 +86,22 @@ const SHORT_LINES = 5
 const linesPerInput = 3
 const padLines = 2
 
-const longLines = computed(() => linesPerInput * props.inputs.length + padLines * 2)
+const slots = computed(() => Math.max(props.inputs.length, props.minInputs ?? 0))
+const longLines = computed(() => linesPerInput * slots.value + padLines * 2)
+
+// Input rows: min-height 14px, gap 6px (see .mux__in / .mux__in-col)
+const IN_ROW = 14
+const IN_GAP = 6
+/**
+ * Bottom-up inputs are packed from the bottom edge, with the padding a full
+ * set of `slots` rows would have when centred — so input 0 sits at the same
+ * place whether or not the optional top inputs are present.
+ */
+const inColStyle = computed(() => {
+  if (!props.inputsBottomUp || vertical.value) return undefined
+  const used = slots.value * IN_ROW + (slots.value - 1) * IN_GAP
+  return { justifyContent: 'flex-start', paddingBottom: `${(shapeH.value - used) / 2}px` }
+})
 
 const shapeW = COLS * CH_W   // 150px
 const shapeH = computed(() => longLines.value * LH)
@@ -79,6 +115,15 @@ const polyPoints = computed(() => {
   const h = svgH.value
   const shortH = (SHORT_LINES / longLines.value) * h
   const topInset = (h - shortH) / 2
+  // Vertical: the long (input) side runs along x, the short side along y
+  if (props.direction === 'up') {
+    // Narrow on top, wide on bottom
+    return `${topInset},0 ${topInset + shortH},0 ${h},${svgW} 0,${svgW}`
+  }
+  if (props.direction === 'down') {
+    // Wide on top, narrow on bottom
+    return `0,0 ${h},0 ${topInset + shortH},${svgW} ${topInset},${svgW}`
+  }
   if (props.direction === 'right') {
     // Narrow on right, wide on left
     return `0,0 ${svgW},${topInset} ${svgW},${topInset + shortH} 0,${h}`
@@ -88,6 +133,7 @@ const polyPoints = computed(() => {
 })
 
 const isFlipped = computed(() => props.direction === 'right')
+const vertical = computed(() => props.direction === 'up' || props.direction === 'down')
 </script>
 
 <style scoped>
@@ -131,6 +177,28 @@ const isFlipped = computed(() => props.direction === 'right')
 .mux__content--flipped {
   flex-direction: row;
 }
+/* Vertical: down = inputs top, output bottom; up = output top, inputs bottom.
+   Text stays upright. */
+.mux__content--down { flex-direction: column; }
+.mux__content--up   { flex-direction: column-reverse; }
+.mux__content--v > .mux__out-col,
+.mux__content--v > .mux__name-col,
+.mux__content--v > .mux__in-col {
+  width: 100%;
+  height: 33%;
+}
+.mux__content--v > .mux__in-col {
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+}
+.mux__content--v .mux__in {
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+}
 
 /* Output label (narrow side) */
 .mux__out-col {
@@ -173,6 +241,12 @@ const isFlipped = computed(() => props.direction === 'right')
   justify-content: center;
   gap: 6px;
   padding: 0 8px;
+}
+.mux__in-col--rev {
+  flex-direction: column-reverse;
+}
+.mux__content--v > .mux__in-col--rev {
+  flex-direction: row-reverse;
 }
 .mux__in {
   display: flex;

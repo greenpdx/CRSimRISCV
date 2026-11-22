@@ -2,11 +2,11 @@
   <div class="ifpc" :class="{ 'ifpc--active': active }">
 
     <div class="ifpc__header">
-      <span class="ifpc__title">IF / PC</span>
+      <span class="ifpc__title">{{ title ?? 'IF / PC' }}</span>
     </div>
 
     <div class="ifpc__body">
-      <div class="ifpc__row">
+      <div v-if="showPc ?? true" class="ifpc__row">
         <span class="ifpc__key">pc</span>
         <span class="ifpc__val">{{ fmtHex(pc) }}</span>
       </div>
@@ -28,6 +28,10 @@ import { computed } from 'vue'
 
 const props = defineProps<{
   pc: number
+  /** Box title (default "IF / PC") */
+  title?: string
+  /** Show the pc row (default true); false = instruction latch only */
+  showPc?: boolean
   /** Instruction word fetched at pc (undefined if pc is outside ROM) */
   instr?: number
   /** Disassembly text, e.g. "ADDI x2, x2, 0x100" */

@@ -47,6 +47,8 @@ pub mod sim {
     pub mod cpu_state;
     pub mod pipeline;
     pub mod barrel;
+    pub mod lsu;
+    pub mod mul;
     pub mod memsys;
     pub mod ooo;
 }

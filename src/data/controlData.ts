@@ -38,7 +38,7 @@ export interface ControlSignals {
   aluOp:     0 | 1 | 2     // 2-bit
   memRead:   boolean
   memWrite:  boolean
-  wbSel:     0 | 1 | 2 | 3 // 2-bit: 0=ALU, 1=Mem, 2=PC+4, 3=CSR
+  wbSel:     0 | 1 | 2 | 3 | 4 // 3-bit: 0=ALU, 1=Mem, 2=PC+4, 3=CSR, 4=MUL (Zmmul, decoded from funct7)
   pcSel:     0 | 1 | 2     // 2-bit: 0=PC+4, 1=PC+imm, 2=(rs1+imm)&~1
   csrOp:     0 | 1 | 2 | 3 // 0=none, 1=RW, 2=RS(set), 3=RC(clear)
   immSel:    0|1|2|3|4|5   // 3-bit immediate format selector
@@ -58,7 +58,7 @@ export interface OpcodeEntry {
 export const OPCODE_TABLE: OpcodeEntry[] = [
   {
     opcode: 0b0110011, opcodeBin: '0110011', name: 'R-type',
-    instrs: ['ADD','SUB','AND','OR','XOR','SLL','SRL','SRA','SLT','SLTU'],
+    instrs: ['ADD','SUB','AND','OR','XOR','SLL','SRL','SRA','SLT','SLTU','MUL','MULH','MULHSU','MULHU'],
     immFormat: 'none',
     signals: {
       regWrite: true,  aluSrc: false, aluOp: 2,
@@ -176,11 +176,12 @@ export const IMM_FORMAT_LABEL: Record<ImmFormat, string> = {
   none: 'R-type  no immediate',
 }
 
-export const WB_SEL_LABEL: Record<0|1|2|3, string> = {
+export const WB_SEL_LABEL: Record<0|1|2|3|4, string> = {
   0: 'ALU result',
   1: 'Mem read',
   2: 'PC + 4',
   3: 'CSR',
+  4: 'MUL',
 }
 
 export const ALU_OP_LABEL: Record<0|1|2, string> = {

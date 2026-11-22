@@ -2,7 +2,7 @@
   <div ref="scroller" class="mv">
     <div v-if="!mp.ready" class="mv__loading">{{ mp.error ? `Rust core not loaded (reload the page): ${mp.error}` : 'Loading the Rust core…' }}</div>
 
-    <div v-else-if="s" class="canvas" :style="{ width: W + 'px', height: H + 'px' }">
+    <div v-else-if="s" class="canvas" :style="{ width: W + 'px', height: H + barH + 'px' }">
       <!-- ══ Page 1: MMU ═══════════════════════════════════════════════════ -->
       <!-- phase strip: every phase of this cycle's translations, current one lit -->
       <div class="strip" :style="box({ x: 10, y: 4 }, 1490, 40)">
@@ -209,7 +209,7 @@
     </div>
 
     <!-- ══ Controls ══ -->
-    <div class="bar">
+    <div ref="barEl" class="bar">
       <button class="btn btn--nav" @click="emit('switch-cpu')">CPU</button>
       <button class="btn btn--page" title="scroll to the MMU page" @click="goPage(0)">◀ MMU</button>
       <button class="btn btn--page" title="scroll to the caches page" @click="goPage(1)">Caches ▶</button>
@@ -235,7 +235,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import CacheTable from '../components/memory/CacheTable.vue'
 import MemWire from '../components/memory/MemWire.vue'
 import TlbDetail from '../components/memory/TlbDetail.vue'
@@ -248,6 +248,16 @@ import {
 
 const emit = defineEmits<{ 'switch-cpu': [] }>()
 const mp = useMemPanel()
+/** The canvas is taller by the fixed bar's height, so the page scrolls only when it does not fit */
+const barEl = ref<HTMLDivElement | null>(null)
+const barH = ref(65)
+let barObs: ResizeObserver | null = null
+onMounted(() => {
+  if (!barEl.value) return
+  barObs = new ResizeObserver(() => { barH.value = barEl.value?.offsetHeight ?? 65 })
+  barObs.observe(barEl.value)
+})
+onBeforeUnmount(() => barObs?.disconnect())
 onMounted(() => { mp.init().catch(() => { /* shown in the panel */ }) })
 const scroller = ref<HTMLElement | null>(null)
 /** The page scrolls sideways (the canvas is two pages wide): jump to the MMU or the caches */
@@ -556,7 +566,7 @@ const memLines = computed(() => {
 <style scoped>
 .mv { font-family: 'JetBrains Mono', 'Courier New', monospace; color: #222; }
 .mv__loading { padding: 40px; color: #4b5563; }
-.canvas { position: relative; background: #fafafa; margin-bottom: 60px; }
+.canvas { position: relative; background: #fafafa; }
 .wires { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 2; }
 .cpu-block, .blk { position: absolute; z-index: 1; }
 .page-div { position: absolute; top: 0; width: 0; border-left: 2px dashed #cbd5e1; }
