@@ -1,11 +1,12 @@
 //! Shared system unit: Zicsr execution, trap entry / return, IRQ sampling.
 
-use cpu_sim::sim::system::{addr, csr_exec, PrivMode, SysUnit, IRQ_MTI, INT_MTI, EXC_ECALL_FROM_M};
+use cpu_sim::isa::csr::{addr, csr_exec, CsrResult};
+use cpu_sim::sim::system::{PrivMode, SysUnit, IRQ_MTI, INT_MTI, EXC_ECALL_FROM_M};
 
 #[test]
 fn csr_exec_ops() {
     // CSRRW / CSRRS / CSRRC with a register source
-    assert_eq!(csr_exec(0xF0, 0b001, 5, 0x0F), cpu_sim::sim::system::CsrResult { old: 0xF0, new: 0x0F, write: true });
+    assert_eq!(csr_exec(0xF0, 0b001, 5, 0x0F), CsrResult { old: 0xF0, new: 0x0F, write: true });
     assert_eq!(csr_exec(0xF0, 0b010, 5, 0x0F).new, 0xFF);
     assert_eq!(csr_exec(0xF0, 0b011, 5, 0x30).new, 0xC0);
     // RS / RC with rs1 = x0 do not write; RW does

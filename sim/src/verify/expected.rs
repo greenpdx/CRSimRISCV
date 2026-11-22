@@ -7,7 +7,7 @@
 use crate::data::netlist as nl;
 use crate::sim::phase::Phase;
 use crate::sim::trace::ActivityTrace;
-use crate::types::cpu::ComponentId;
+use crate::data::netlist::ComponentId;
 
 #[derive(Debug, Clone, Copy)]
 pub struct OpcodeClass(pub &'static str);

@@ -12,7 +12,7 @@
 //! `fmt` field is instr[26:25]:  00=S, 01=D, 10=H, 11=Q.
 
 use super::{fr, r, Disasm};
-use crate::data::imm_data::{extract_immediate, ImmSel};
+use crate::imm::{extract_immediate, ImmSel};
 
 /// Format suffix for the four IEEE widths supported by RISC-V.
 fn fmt_suffix(fmt: u32) -> Option<(&'static str, &'static str)> {

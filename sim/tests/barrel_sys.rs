@@ -2,16 +2,12 @@
 //! shared mtvec / mie / mip / medeleg / mideleg, interrupt delivery at a
 //! thread's fetch slot (precise: its in-flight instructions drain first).
 
-use cpu_sim::sim::system::{addr, IRQ_MTI, IRQ_MEI};
+use cpu_sim::isa::csr::addr;
+use cpu_sim::sim::system::{IRQ_MTI, IRQ_MEI};
 use cpu_sim::sim::barrel::{BarrelState, N_THREADS};
+use cpu_sim::isa::encode::{MRET, NOP, addi, csrrw};
 
-const NOP: u32 = 0x00000013;
-fn addi(rd: u32, rs1: u32, imm: i32) -> u32 {
-    (((imm as u32) & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x13
-}
 fn jal_back4() -> u32 { 0xffdff06f }   // jal x0, -4
-fn csrrw(rd: u32, csr: u32, rs1: u32) -> u32 { (csr << 20) | (rs1 << 15) | (1 << 12) | (rd << 7) | 0x73 }
-const MRET: u32 = 0x30200073;
 
 /// All 8 threads run (the barrel's normal mode: each thread has at most
 /// one instruction in flight). Thread 0: 0x00 addi x5,x5,1 · 0x04 j 0x00;

@@ -4,9 +4,10 @@
 //! RV32I, CSR, and SYSTEM instructions. Adds barrel-specific
 //! custom-0 decoding (FORK/JOIN/DONE/YIELD/TID/FORKRET).
 
+use crate::isa::fields::{extract_fields, InstrFields};
+use crate::isa::instr::{decode, Instr};
 use crate::sim::decode::{
-    self, InstrFields, RegRead,
-    extract_fields, system_trap_kind,
+    self, RegRead, system_trap_kind,
 };
 use super::state::{BarrelState, ControlBits, CustomOp, DiEx, IfDi};
 
@@ -66,7 +67,7 @@ fn decode_custom0(state: &BarrelState, if_di: &IfDi, instr: u32, f: &InstrFields
 fn decode_csr(state: &BarrelState, if_di: &IfDi, instr: u32, f: &InstrFields) -> DiEx {
     let t = &state.threads[if_di.thread as usize];
     let regs = ThreadRegs { regs: &t.regs };
-    match decode::decode_csr_instr(&regs, instr, f) {
+    match decode::decode_csr_instr(&regs, instr) {
         Some(c) => DiEx {
             valid: true, thread: if_di.thread,
             pc: if_di.pc, pc_plus4: if_di.pc.wrapping_add(4), instr,
@@ -83,10 +84,8 @@ fn decode_csr(state: &BarrelState, if_di: &IfDi, instr: u32, f: &InstrFields) ->
 }
 
 fn decode_system_trap(if_di: &IfDi, instr: u32, f: &InstrFields) -> DiEx {
-    let funct12 = (instr >> 20) & 0xfff;
-    let trap_kind = system_trap_kind(funct12);
-    // Barrel doesn't support SRET (5) — treat as illegal.
-    let trap_kind = if trap_kind == 5 { 1 } else { trap_kind };
+    // Barrel has no S-mode: SRET (5) and SFENCE.VMA are illegal.
+    let trap_kind = match system_trap_kind(&decode(instr)) { 5 => 1, k => k };
     DiEx {
         valid: true, thread: if_di.thread,
         pc: if_di.pc, pc_plus4: if_di.pc.wrapping_add(4), instr,
@@ -133,6 +132,12 @@ pub fn compute_di(state: &BarrelState, if_di: &IfDi) -> DiEx {
         0b0001011 => decode_custom0(state, if_di, instr, &f),
         0b1110011 if f.funct3 != 0 => decode_csr(state, if_di, instr, &f),
         0b1110011 => decode_system_trap(if_di, instr, &f),
+        // FENCE / FENCE.I: no-op (memory is in order; stores write through)
+        0b0001111 if matches!(decode(instr), Instr::Fence | Instr::FenceI) => DiEx {
+            valid: true, thread: if_di.thread, pc: if_di.pc, pc_plus4: if_di.pc.wrapping_add(4), instr,
+            funct3: f.funct3, funct7b30: f.funct7b30, opcode: f.opcode,
+            ..DiEx::default()
+        },
         _ => decode_std(state, if_di, instr, &f),
     }
 }

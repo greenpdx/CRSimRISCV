@@ -7,28 +7,14 @@ use cpu_sim::sim::ooo::decode::{alu, branch_taken, decode, mul, Op};
 use cpu_sim::sim::ooo::mem::{extract, merge, MemMode};
 use cpu_sim::sim::ooo::{OooCpu, OooEvent};
 use std::collections::HashMap;
+use cpu_sim::isa::encode::{ECALL, MRET, SPIN, add, addi, csrr, csrw, i, jal, lui, lw, r, s, sub, sw};
 
 // ── encoders (independent of the core's decoder) ───────────────────────
-fn r(f7: u32, rs2: u32, rs1: u32, f3: u32, rd: u32, op: u32) -> u32 { f7 << 25 | rs2 << 20 | rs1 << 15 | f3 << 12 | rd << 7 | op }
-fn i(imm: i32, rs1: u32, f3: u32, rd: u32, op: u32) -> u32 { ((imm as u32) & 0xfff) << 20 | rs1 << 15 | f3 << 12 | rd << 7 | op }
-fn s(imm: i32, rs2: u32, rs1: u32, f3: u32) -> u32 { let m = imm as u32; ((m >> 5) & 0x7f) << 25 | rs2 << 20 | rs1 << 15 | f3 << 12 | (m & 0x1f) << 7 | 0x23 }
 fn b(off: i32, rs2: u32, rs1: u32, f3: u32) -> u32 {
     let o = off as u32;
     ((o >> 12) & 1) << 31 | ((o >> 5) & 0x3f) << 25 | rs2 << 20 | rs1 << 15 | f3 << 12 | ((o >> 1) & 0xf) << 8 | ((o >> 11) & 1) << 7 | 0x63
 }
-fn jal(rd: u32, off: i32) -> u32 { let o = off as u32; ((o >> 20) & 1) << 31 | ((o >> 1) & 0x3ff) << 21 | ((o >> 11) & 1) << 20 | ((o >> 12) & 0xff) << 12 | rd << 7 | 0x6f }
-fn addi(rd: u32, rs1: u32, imm: i32) -> u32 { i(imm, rs1, 0, rd, 0x13) }
-fn add(rd: u32, a: u32, bb: u32) -> u32 { r(0, bb, a, 0, rd, 0x33) }
-fn sub(rd: u32, a: u32, bb: u32) -> u32 { r(0x20, bb, a, 0, rd, 0x33) }
 fn mulr(f3: u32, rd: u32, a: u32, bb: u32) -> u32 { r(1, bb, a, f3, rd, 0x33) }
-fn lui(rd: u32, imm20: u32) -> u32 { imm20 << 12 | rd << 7 | 0x37 }
-fn lw(rd: u32, rs1: u32, off: i32) -> u32 { i(off, rs1, 2, rd, 0x03) }
-fn sw(rs2: u32, rs1: u32, off: i32) -> u32 { s(off, rs2, rs1, 2) }
-fn csrr(rd: u32, csr: i32) -> u32 { i(csr, 0, 2, rd, 0x73) }
-fn csrw(csr: i32, rs1: u32) -> u32 { i(csr, rs1, 1, 0, 0x73) }
-const SPIN: u32 = 0x0000_006f;
-const ECALL: u32 = 0x0000_0073;
-const MRET: u32 = 0x3020_0073;
 
 // ── reference: one instruction at a time (no traps) ────────────────────
 struct Ref { x: [u32; 32], mem: HashMap<u32, u32>, pc: u32 }

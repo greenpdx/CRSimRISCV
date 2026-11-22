@@ -11,16 +11,11 @@
 //! - Slots 0/1/2 fetching from a *foreign* slot's I-SRAM range
 //!   also raise the same fault.
 
-use cpu_sim::sim::system::{addr, PrivMode};
+use cpu_sim::isa::csr::addr;
 use cpu_sim::sim::barrel::{
     BarrelState, ISRAM_BASE, ISRAM_BYTES_PER_SLOT, ISRAM_N_SLOTS, N_THREADS,
 };
-
-const NOP: u32 = 0x00000013;
-fn addi(rd: u32, rs1: u32, imm: i32) -> u32 {
-    (((imm as u32) & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x13
-}
-fn jal_spin() -> u32 { 0x0000006f }
+use cpu_sim::isa::encode::{NOP, SPIN, addi};
 
 fn isram_pc(slot: u8) -> u32 {
     ISRAM_BASE + (slot as u32) * ISRAM_BYTES_PER_SLOT
@@ -32,7 +27,7 @@ fn barrel_isram_slot0_runs_from_local_scratchpad() {
     // Set slot 0's PC to the I-SRAM base. Verify it executes.
     let isram_prog = vec![
         addi(5, 0, 42),
-        jal_spin(),
+        SPIN,
     ];
     let mut cpu = BarrelState::new();
     cpu.threads[0].active = true;
@@ -59,7 +54,7 @@ fn barrel_isram_each_slot_uses_its_own_scratchpad() {
     let mut cpu = BarrelState::new();
     for slot in 0..3u8 {
         let val = (slot as i32 + 1) * 100;
-        let prog = vec![ addi(6, 0, val), jal_spin() ];
+        let prog = vec![ addi(6, 0, val), SPIN ];
         cpu.load_isram(slot, &prog);
         cpu.threads[slot as usize].active = true;
         cpu.threads[slot as usize].pc = isram_pc(slot);
@@ -145,10 +140,10 @@ fn barrel_isram_can_fall_through_to_external_memory() {
     // Even easier: test that I-SRAM code runs and external code
     // runs *separately* by having slot 0 start in I-SRAM and slot
     // 1 start in external memory.
-    let isram_prog = vec![ addi(5, 0, 11), jal_spin() ];
+    let isram_prog = vec![ addi(5, 0, 11), SPIN ];
     let mut ext = vec![NOP; 32];
     ext[0] = addi(7, 0, 22);
-    ext[1] = jal_spin();
+    ext[1] = SPIN;
 
     cpu.load_isram(0, &isram_prog);
     cpu.load_program(&ext);

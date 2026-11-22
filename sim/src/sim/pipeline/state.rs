@@ -7,20 +7,13 @@
 //! See `sim/docs/pipeline-plan.md` for the full design discussion.
 
 use super::csr::known_addrs;
-use crate::sim::system::{addr, PrivMode, SysUnit};
+use crate::isa::csr::addr;
+use crate::sim::system::{PrivMode, SysUnit};
 use super::tlb::Tlb;
-use crate::sim::memsys::{Event, MemSystem, Port};
-use std::cell::RefCell;
-use std::rc::Rc;
-
-/// Memory-panel mode: this pipeline is core `core` of a shared memory
-/// system (caches, coherence, one physical memory). Its fetch, loads /
-/// stores and page-table walks go through `sys`; its MMU reports events.
-#[derive(Debug, Clone)]
-pub struct Hier {
-    pub core: u8,
-    pub sys: Rc<RefCell<MemSystem>>,
-}
+use crate::sim::mem::Port;
+use crate::sim::memsys::Event;
+use super::mem::PipeMem;
+use super::mem::IO_BASE;
 
 /// Branch resolution strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,10 +49,6 @@ impl BranchMode {
     pub fn to_u8(self) -> u8 { self as u8 }
 }
 
-const ROM_BASE: u32 = 0x0000_0000;
-const RAM_BASE: u32 = 0x0001_0000;
-const IO_BASE:  u32 = 0x4002_0000;
-const MEM_WORDS: usize = 256;
 
 /// All control signals decoded from the instruction in ID, propagated
 /// forward through the pipeline registers. Each downstream stage only
@@ -218,10 +207,8 @@ pub use super::super::forwarding::ForwardSrc;
 pub struct PipelineState {
     pub pc: u32,
     pub registers: [u32; 32],
-    pub rom: Vec<u32>,
-    pub machine_ram: Vec<u32>,
-    pub user_ram: Vec<u32>,
-    pub io_data: u32,
+    /// ROM / RAM / I/O, or this core's port into the memory panel's hierarchy.
+    pub mem: PipeMem,
     /// Privilege mode, CSRs, trap entry / return, IRQ sampling — the
     /// system unit shared with the other cores (sim/system).
     pub sys: SysUnit,
@@ -229,8 +216,6 @@ pub struct PipelineState {
     pub itlb: Tlb,
     /// Load / store TLB.
     pub dtlb: Tlb,
-    /// Memory-panel mode (None = the flat ROM / RAM model, as always).
-    pub hier: Option<Hier>,
     /// Branch resolution strategy.
     pub branch_mode: BranchMode,
     pub cycle_count: u64,
@@ -280,12 +265,8 @@ impl Default for PipelineState {
         Self {
             pc: 0,
             registers: [0; 32],
-            rom: vec![0x0000_0013; MEM_WORDS],  // NOPs
-            machine_ram: vec![0; MEM_WORDS],
-            user_ram: vec![0; MEM_WORDS],
-            io_data: 0,
+            mem: PipeMem::default(),
             sys: pipeline_sys(),
-            hier: None,
             itlb: Tlb::default(),
             dtlb: Tlb::default(),
             branch_mode: BranchMode::default(),
@@ -315,94 +296,53 @@ impl Default for PipelineState {
 impl PipelineState {
     pub fn new() -> Self { Self::default() }
 
+    /// Load a program into ROM from address 0 (flat model).
     pub fn load_program(&mut self, words: &[u32]) {
-        for (i, w) in words.iter().enumerate() {
-            if i < self.rom.len() { self.rom[i] = *w; }
+        if let Some(f) = self.mem.flat_mut() {
+            for (slot, w) in f.rom.iter_mut().zip(words) { *slot = *w; }
         }
     }
 
-    pub fn rom_read(&self, addr: u32) -> u32 {
-        if let Some(h) = &self.hier { return h.sys.borrow_mut().read(h.core as usize, addr, Port::Fetch); }
-        let idx = ((addr.wrapping_sub(ROM_BASE)) >> 2) as usize;
-        self.rom.get(idx).copied().unwrap_or(0)
-    }
+    pub fn rom_read(&self, addr: u32) -> u32 { self.mem.fetch(addr) }
 
-    /// Machine-side RAM read. Used by the page-table walker (PTEs
-    /// always live in machine RAM) and by M-mode loads. Existing
-    /// tests that pre-date the user/machine split also call this.
-    pub fn ram_read(&self, addr: u32) -> u32 {
-        let idx = ((addr & !3).wrapping_sub(RAM_BASE) >> 2) as usize;
-        self.machine_ram.get(idx).copied().unwrap_or(0)
-    }
+    /// Machine-side RAM (flat model; page tables live here).
+    pub fn ram_read(&self, addr: u32) -> u32 { self.mem.flat().map_or(0, |f| f.ram_read(addr, false)) }
+    pub fn ram_write(&mut self, addr: u32, val: u32) { if let Some(f) = self.mem.flat_mut() { f.ram_write(addr, val, false) } }
+    /// User-side RAM (flat model).
+    pub fn user_ram_read(&self, addr: u32) -> u32 { self.mem.flat().map_or(0, |f| f.ram_read(addr, true)) }
+    pub fn user_ram_write(&mut self, addr: u32, val: u32) { if let Some(f) = self.mem.flat_mut() { f.ram_write(addr, val, true) } }
 
-    pub fn ram_write(&mut self, addr: u32, val: u32) {
-        let idx = ((addr & !3).wrapping_sub(RAM_BASE) >> 2) as usize;
-        if idx < self.machine_ram.len() { self.machine_ram[idx] = val; }
-    }
-
-    pub fn user_ram_read(&self, addr: u32) -> u32 {
-        let idx = ((addr & !3).wrapping_sub(RAM_BASE) >> 2) as usize;
-        self.user_ram.get(idx).copied().unwrap_or(0)
-    }
-
-    pub fn user_ram_write(&mut self, addr: u32, val: u32) {
-        let idx = ((addr & !3).wrapping_sub(RAM_BASE) >> 2) as usize;
-        if idx < self.user_ram.len() { self.user_ram[idx] = val; }
-    }
+    /// U / S mode: the flat model's user RAM side.
+    fn user_side(&self) -> bool { self.sys.priv_mode != PrivMode::M }
 
     /// Privilege-aware RAM read for stage_ma loads. M-mode hits
     /// machine RAM; U/S-mode hits user RAM. Records `last_ram_*`
     /// for the visualizer.
     pub fn priv_ram_read(&mut self, addr: u32) -> u32 {
-        if let Some(h) = self.hier.clone() {
-            let v = h.sys.borrow_mut().read(h.core as usize, addr, Port::Load);
-            self.last_ram_addr = addr & !3;
-            self.last_ram_kind = 1;
-            return v;
-        }
-        let v;
-        if self.sys.priv_mode == PrivMode::M {
-            v = self.ram_read(addr);
-            self.last_ram_side = 0;
-        } else {
-            v = self.user_ram_read(addr);
-            self.last_ram_side = 1;
-        }
+        let user = self.user_side();
+        let v = self.mem.load(addr, user);
+        if !self.mem.is_hier() { self.last_ram_side = user as u8; }
         self.last_ram_addr = addr & !3;
         self.last_ram_kind = 1;
         v
     }
 
     pub fn priv_ram_write(&mut self, addr: u32, val: u32) {
-        if let Some(h) = self.hier.clone() {
-            h.sys.borrow_mut().write(h.core as usize, addr, val, Port::Store);
-            self.last_ram_addr = addr & !3;
-            self.last_ram_kind = 2;
-            return;
-        }
-        if self.sys.priv_mode == PrivMode::M {
-            self.ram_write(addr, val);
-            self.last_ram_side = 0;
-        } else {
-            self.user_ram_write(addr, val);
-            self.last_ram_side = 1;
-        }
+        let user = self.user_side();
+        self.mem.store(addr, val, user);
+        if !self.mem.is_hier() { self.last_ram_side = user as u8; }
         self.last_ram_addr = addr & !3;
         self.last_ram_kind = 2;
     }
 
     /// The data word at `addr` as a store by the current mode would find it —
     /// no access is recorded and no cache state changes (SB / SH merge).
-    pub fn word_peek(&self, addr: u32) -> u32 {
-        if let Some(h) = &self.hier { return h.sys.borrow().peek(addr & !3); }
-        if self.sys.priv_mode == PrivMode::M { self.ram_read(addr) } else { self.user_ram_read(addr) }
-    }
+    pub fn word_peek(&self, addr: u32) -> u32 { self.mem.peek_data(addr, self.user_side()) }
 
     pub fn is_io(addr: u32) -> bool { addr >= IO_BASE }
 
-    /// I/O at `addr` for this core? The memory-panel machine (`hier`) has no
-    /// I/O: its whole physical space is RAM plus the boot ROM.
-    pub fn io_at(&self, addr: u32) -> bool { self.hier.is_none() && Self::is_io(addr) }
+    /// I/O at `addr` for this core? (None in memory-panel mode.)
+    pub fn io_at(&self, addr: u32) -> bool { self.mem.io_at(addr) }
 
     pub fn write_register(&mut self, idx: u8, val: u32) {
         if idx != 0 && (idx as usize) < 32 { self.registers[idx as usize] = val; }
@@ -428,41 +368,17 @@ impl PipelineState {
 // ── Memory-panel mode helpers (no-ops / flat RAM without `hier`) ──────────
 impl PipelineState {
     /// Page-table read at `level` (1 = root table, 0 = leaf table).
-    pub fn pte_read(&self, addr: u32, level: u8) -> u32 {
-        match &self.hier {
-            Some(h) => {
-                let mut m = h.sys.borrow_mut();
-                let pte = m.read(h.core as usize, addr, Port::Walk);
-                let port = m.xlat_port[h.core as usize];
-                m.event(Event::Walk { core: h.core, port, level, pte_addr: addr, pte });
-                pte
-            }
-            None => self.ram_read(addr),
-        }
-    }
+    pub fn pte_read(&self, addr: u32, level: u8) -> u32 { self.mem.pte_read(addr, level) }
 
     /// Page-table write (A / D bits).
-    pub fn pte_write(&mut self, addr: u32, val: u32) {
-        match &self.hier {
-            Some(h) => h.sys.borrow_mut().write(h.core as usize, addr, val, Port::Walk),
-            None => self.ram_write(addr, val),
-        }
-    }
+    pub fn pte_write(&mut self, addr: u32, val: u32) { self.mem.pte_write(addr, val) }
 
     /// Report an MMU event to the memory system (memory-panel mode only):
     /// `e(core, port)` with the access being translated.
-    pub fn mem_event(&self, e: impl FnOnce(u8, Port) -> Event) {
-        if let Some(h) = &self.hier {
-            let mut m = h.sys.borrow_mut();
-            let port = m.xlat_port[h.core as usize];
-            m.event(e(h.core, port));
-        }
-    }
+    pub fn mem_event(&self, e: impl FnOnce(u8, Port) -> Event) { self.mem.event(e) }
 
     /// The access about to be translated (Fetch / Load / Store).
-    pub fn set_xlat_port(&self, port: Port) {
-        if let Some(h) = &self.hier { h.sys.borrow_mut().set_xlat_port(h.core as usize, port); }
-    }
+    pub fn set_xlat_port(&self, port: Port) { self.mem.set_xlat_port(port) }
 
     /// Reset: invalidate the ITLB and the DTLB.
     pub fn flush_tlbs(&mut self) {
@@ -474,8 +390,6 @@ impl PipelineState {
     pub fn sfence(&mut self, va: Option<u32>, asid: Option<u16>) {
         let itlb = self.itlb.sfence(va, asid);
         let dtlb = self.dtlb.sfence(va, asid);
-        if let Some(h) = &self.hier {
-            h.sys.borrow_mut().event(Event::Sfence { core: h.core, va, asid, itlb, dtlb });
-        }
+        self.mem.event(|core, _| Event::Sfence { core, va, asid, itlb, dtlb });
     }
 }

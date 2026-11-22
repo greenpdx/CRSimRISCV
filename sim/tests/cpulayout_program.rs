@@ -1,7 +1,7 @@
 //! Sanity-check that the CpuLayout default program disassembles back to the
 //! intended mnemonic for every instruction. Catches hand-encoding mistakes.
 
-use cpu_sim::disasm::disassemble;
+use cpu_sim::isa::disasm::disassemble;
 
 const PROG: &[(u32, &str, &str)] = &[
     (0x00010137, "LUI",   "x2, 0x10"),

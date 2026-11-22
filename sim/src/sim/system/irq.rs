@@ -1,6 +1,7 @@
 //! Interrupt sources and priority (mip & mie, global enables, delegation).
 
-use super::csr::{addr, CsrFile, PrivMode, M_MSTATUS_MIE, M_MSTATUS_SIE};
+use crate::isa::csr::addr;
+use super::csr::{CsrFile, PrivMode, M_MSTATUS_MIE, M_MSTATUS_SIE};
 
 // ── Interrupt-pending / enable bit layout (mip/mie) ────────────────────────
 // User-Software   bit 0  (USI — not modeled, bit reserved)

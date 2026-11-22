@@ -8,8 +8,9 @@
 //! what the hardware does in one access.
 
 use super::state::PipelineState;
-use crate::sim::system::addr;
-use crate::sim::memsys::{Event, Port, PteVerdict};
+use crate::isa::csr::addr;
+use crate::sim::mem::Port;
+use crate::sim::memsys::{Event, PteVerdict};
 use super::tlb::Tlb;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +45,7 @@ pub fn satp_asid(satp: u32) -> u16 { ((satp >> 22) & 0x1ff) as u16 }
 /// On success, hardware-manages A/D bits: sets A on every access,
 /// sets D on stores. The updated PTE is written back to RAM.
 pub fn translate(state: &mut PipelineState, vaddr: u32, access: AccessKind) -> Result<u32, u32> {
-    if state.hier.is_none() { return translate_inner(state, vaddr, access); }
+    if !state.mem.is_hier() { return translate_inner(state, vaddr, access); }
     state.set_xlat_port(match access {
         AccessKind::Fetch => Port::Fetch, AccessKind::Load => Port::Load, AccessKind::Store => Port::Store,
     });

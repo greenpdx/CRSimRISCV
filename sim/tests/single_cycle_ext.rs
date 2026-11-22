@@ -2,7 +2,8 @@
 //! on / off), misaligned accesses (trap with traps on, low bits ignored off).
 
 use cpu_sim::sim::cpu_state::CpuState;
-use cpu_sim::sim::trap::{addr as csra, EXC_ILLEGAL_INSTR};
+use cpu_sim::isa::csr::addr as csra;
+use cpu_sim::sim::system::EXC_ILLEGAL_INSTR;
 
 const RAM: u32 = 0x0001_0000;
 
@@ -61,7 +62,7 @@ fn stores_write_only_their_lanes() {
         c.poke_ram(RAM, 0x1111_1111);
         c.write_register(3, 0x1234_cdab);
         step(&mut c);
-        assert_eq!(c.ram[0], want, "funct3 {f3:03b} offset {off}");
+        assert_eq!(c.mem.ram[0], want, "funct3 {f3:03b} offset {off}");
         assert_eq!(c.micro.mem_bw, Some(bw));
     }
 }
@@ -69,11 +70,11 @@ fn stores_write_only_their_lanes() {
 #[test]
 fn byte_store_and_load_on_the_io_register() {
     let mut c = core(&[s_type(0b000, 4, 3, 1), load(0b100, 5, 4, 1)]);
-    c.write_register(4, c.io_base);
+    c.write_register(4, c.mem.io_base);
     c.write_register(3, 0xa5);
-    c.io_data = 0x0000_0000;
+    c.mem.io_data = 0x0000_0000;
     step(&mut c);
-    assert_eq!(c.io_data, 0x0000_a500);
+    assert_eq!(c.mem.io_data, 0x0000_a500);
     step(&mut c);
     assert_eq!(c.registers[5], 0xa5);
 }
@@ -131,7 +132,7 @@ fn misaligned_traps_off_ignores_low_bits() {
     for _ in 0..3 { step(&mut c); }
     assert_eq!(c.registers[2], 0x1234_5678);       // LW @+2 → word @+0
     assert_eq!(c.registers[3], 0x0000_1234);       // LH @+3 → half @+2
-    assert_eq!(c.ram[0], 0xcafe_f00d);             // SW @+1 → word @+0
+    assert_eq!(c.mem.ram[0], 0xcafe_f00d);             // SW @+1 → word @+0
 }
 
 #[test]
@@ -149,6 +150,6 @@ fn misaligned_traps_on_raise_cause_4_and_6() {
         assert_eq!(c.pc, 0x80);
         assert_eq!(c.csr_read(csra::MTVAL), RAM + if cause == 4 { (instr >> 20) & 0xfff } else { 3 });
         assert_eq!(c.registers[2], 0x55, "load must not write rd");
-        assert_eq!(c.ram[0], 0x1234_5678, "store must not write memory");
+        assert_eq!(c.mem.ram[0], 0x1234_5678, "store must not write memory");
     }
 }

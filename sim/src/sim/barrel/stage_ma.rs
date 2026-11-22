@@ -3,7 +3,7 @@
 //! Phase B1: direct external data memory access (no D-L1 cache, no
 //! store buffer). Loads do sign/zero extension based on funct3.
 
-use crate::data::load_width::sign_extend_load;
+use crate::isa::lsu;
 use super::cache::{Cache, PendingMiss};
 use super::state::{BarrelState, CustomOp, ExMa, MaWb, N_THREADS, Thread};
 use super::thread_mmio;
@@ -47,11 +47,11 @@ fn execute_load(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
 
     // Store-buffer forwarding
     if let Some(v) = state.store_buffer.forward(addr) {
-        return mawb_from(ex_ma, sign_extend_load(v, addr, funct3));
+        return mawb_from(ex_ma, lsu::load(v, addr, funct3));
     }
     // D-L1 cache
     if let Some(raw) = state.dcache.lookup(addr) {
-        return mawb_from(ex_ma, sign_extend_load(raw, addr, funct3));
+        return mawb_from(ex_ma, lsu::load(raw, addr, funct3));
     }
     // Cache miss — stall + rollback
     let line_addr = Cache::line_addr(addr);
@@ -83,7 +83,7 @@ fn execute_store(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
     // IRQ controller
     if state.irq.write_reg(addr, val) { return mawb_from(ex_ma, 0); }
     // DMA
-    let is_dma = state.dma.write_reg(addr, val, &state.ext_imem, &mut state.local_isram);
+    let is_dma = state.dma.write_reg(addr, val, &state.mem.imem, &mut state.mem.isram);
     if !is_dma {
         // SB / SH: merge the byte lanes into the current word — the newest
         // copy is in the store buffer, else the D-L1, else memory (read
@@ -92,7 +92,7 @@ fn execute_store(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
             let old = state.store_buffer.forward(addr)
                 .or_else(|| state.dcache.peek_line_mut(addr).map(|l| l.data[Cache::word_offset(addr)]))
                 .unwrap_or_else(|| state.dmem_read(addr));
-            crate::sim::lsu::store_merge(old, val, addr, ex_ma.funct3)
+            lsu::store_merge(old, val, addr, ex_ma.funct3)
         } else { val };
         // D-L1 write-through
         if let Some(line) = state.dcache.peek_line_mut(addr) {

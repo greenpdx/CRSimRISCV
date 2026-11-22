@@ -30,6 +30,7 @@ pub mod bus;
 pub mod cache;
 pub mod dma;
 pub mod irq_controller;
+pub mod mem;
 pub mod store_buffer;
 pub mod thread_mmio;
 
@@ -82,13 +83,13 @@ impl BarrelState {
         // ── Counters: cycle (clocks done) in every thread; instret for
         // the thread whose instruction leaves WB.
         let cyc = self.cycle_count as u32;
-        for t in self.threads.iter_mut() { t.sys.csrs.set_counter(crate::sim::system::addr::CYCLE, cyc); }
+        for t in self.threads.iter_mut() { t.sys.csrs.set_counter(crate::isa::csr::addr::CYCLE, cyc); }
 
         // ── 1. WB ────────────────────────────────────────────────
         stage_wb::compute_wb(self, &prev_ma_wb);
         if prev_ma_wb.valid {
             if let Some(t) = self.threads.get_mut(prev_ma_wb.thread as usize) {
-                t.sys.csrs.bump(crate::sim::system::addr::INSTRET);
+                t.sys.csrs.bump(crate::isa::csr::addr::INSTRET);
             }
         }
 
@@ -254,10 +255,10 @@ impl BarrelState {
     }
 
     pub fn reset(&mut self) {
-        let was_imem = std::mem::take(&mut self.ext_imem);
+        let was_imem = std::mem::take(&mut self.mem.imem);
         *self = Self::default();
-        self.ext_imem = was_imem;
-        // Re-zero ext_dmem in default(); ext_imem is preserved.
+        self.mem.imem = was_imem;
+        // Data memory re-zeroed by default(); instruction memory is preserved.
     }
 
     /// Advance the bus arbiter by one cycle. If the bus is busy,

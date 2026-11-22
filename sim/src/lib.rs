@@ -1,54 +1,33 @@
-//! RV32I single-cycle simulator + opcode/phase activity verifier.
+//! RISC-V cores for the visualizer, and the wasm API the panels use.
 //!
-//! Mirrors the Vue/Pinia visualizer at `src/` (TS) one-to-one:
-//! - `data/`        ↔ `src/data/*.ts`        (pure tables + functions)
-//! - `components/`  ↔ `src/components/*.vue` (props as struct fields, no display)
-//! - `sim/`         ↔ `src/stores/cpuState.ts` (`step()` execution)
-//! - `verify/`      expected (phase → active component set) matrix per opcode
+//! - `isa`         the instruction set (crate `rv-isa`)
+//! - `data/`       single-cycle tables: decoder, ALU control, ALU, component ids
+//! - `sim/`        the cores (single-cycle, pipeline, barrel, out-of-order),
+//!                 the system unit, the memory hierarchy
+//! - `verify/`     expected (phase → active component set) matrix per opcode
 
-pub mod types {
-    pub mod cpu;
-}
+/// The instruction set (fields, immediates, load / store lanes, MUL, CSRs, registers).
+pub use rv_isa as isa;
 
 pub mod data {
-    pub mod register_data;
     pub mod alu_data;
     pub mod alu_control_data;
     pub mod control_data;
-    pub mod imm_data;
-    pub mod load_width;
     pub mod netlist;
-}
-
-pub mod components {
-    pub mod pc_register;
-    pub mod pc_adder;
-    pub mod alu_unit;
-    pub mod alu_control_unit;
-    pub mod decoder_control;
-    pub mod imm_generator;
-    pub mod load_store;
-    pub mod io_block;
-    pub mod mux_unit;
-    pub mod regfile;
-    pub mod ram;
-    pub mod rom;
 }
 
 pub mod sim {
     pub mod phase;
     pub mod trace;
     pub mod micro;
-    pub mod trap;
     pub mod system;
+    pub mod mem;
     pub mod decode;
     pub mod forwarding;
     pub mod execute;
     pub mod cpu_state;
     pub mod pipeline;
     pub mod barrel;
-    pub mod lsu;
-    pub mod mul;
     pub mod memsys;
     pub mod ooo;
 }
@@ -58,7 +37,6 @@ pub mod verify {
     pub mod programs;
 }
 
-pub mod disasm;
 
 #[cfg(feature = "wasm")]
 pub mod wasm_api;

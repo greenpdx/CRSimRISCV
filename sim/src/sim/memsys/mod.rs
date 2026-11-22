@@ -29,6 +29,7 @@ pub mod examples;
 pub mod system;
 
 pub use cache::{Cache, Line, Mesi, LINE_BYTES, LINE_WORDS};
+use crate::sim::mem::{Pages, Port};
 pub use crate::sim::pipeline::tlb::{EntryCmp, EntryFlush, TLB_ENTRIES};
 
 pub const N_CORES: usize = 2;
@@ -47,24 +48,9 @@ impl Default for Latency {
     fn default() -> Self { Self { l1: 1, l2: 4, mem: 20, rom: 8 } }
 }
 
-/// Physical RAM of any size: sparse 4 KiB pages, made on first write;
-/// words never written read 0.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
-#[derive(Debug, Clone, Default)]
-pub struct Ram { pages: std::collections::HashMap<u32, Vec<u32>> }
-
-impl Ram {
-    pub fn get(&self, pa: u32) -> u32 { self.pages.get(&(pa >> 12)).map_or(0, |p| p[((pa >> 2) & 0x3ff) as usize]) }
-    pub fn set(&mut self, pa: u32, v: u32) { self.pages.entry(pa >> 12).or_insert_with(|| vec![0; 1024])[((pa >> 2) & 0x3ff) as usize] = v; }
-}
-
 #[cfg_attr(feature = "wasm", derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheId { L1I, L1D, L2 }
-
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Port { Fetch, Load, Store, Walk }
 
 #[cfg_attr(feature = "wasm", derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,7 +167,7 @@ pub struct Stats {
 #[derive(Debug, Clone)]
 pub struct MemSystem {
     /// Physical RAM (any size, sparse).
-    pub ram: Ram,
+    pub ram: Pages,
     /// Boot ROM contents (`ROM_BYTES` from `ROM_BASE`).
     pub rom: Vec<u32>,
     pub l1i: [Cache; N_CORES],
@@ -210,7 +196,7 @@ impl Default for MemSystem {
 impl MemSystem {
     pub fn new() -> Self {
         Self {
-            ram: Ram::default(),
+            ram: Pages::default(),
             rom: vec![0; (ROM_BYTES / 4) as usize],
             l1i: [Cache::new(4, 2), Cache::new(4, 2)],
             l1d: [Cache::new(4, 2), Cache::new(4, 2)],

@@ -56,118 +56,61 @@ pub struct Decoded {
     pub imm: u32,
 }
 
-const fn imm_i(i: u32) -> u32 { ((i as i32) >> 20) as u32 }
-const fn imm_s(i: u32) -> u32 { ((((i as i32) >> 25) << 5) as u32) | ((i >> 7) & 0x1f) }
-const fn imm_b(i: u32) -> u32 {
-    let v = ((i >> 31) & 1) << 12 | ((i >> 7) & 1) << 11 | ((i >> 25) & 0x3f) << 5 | ((i >> 8) & 0xf) << 1;
-    ((v << 19) as i32 >> 19) as u32
-}
-const fn imm_u(i: u32) -> u32 { i & 0xffff_f000 }
-const fn imm_j(i: u32) -> u32 {
-    let v = ((i >> 31) & 1) << 20 | ((i >> 12) & 0xff) << 12 | ((i >> 20) & 1) << 11 | ((i >> 21) & 0x3ff) << 1;
-    ((v << 11) as i32 >> 11) as u32
-}
-
+/// The core's view of an instruction (`isa::instr::decode`): its unit, its
+/// registers and its immediate.
 pub fn decode(i: u32) -> Decoded {
-    let opc = i & 0x7f;
-    let rd = ((i >> 7) & 0x1f) as u8;
-    let f3 = ((i >> 12) & 7) as u8;
-    let rs1 = ((i >> 15) & 0x1f) as u8;
-    let rs2 = ((i >> 20) & 0x1f) as u8;
-    let f7 = (i >> 25) as u8;
-    let ill = Decoded { op: Op::Illegal, unit: Unit::Sys, rd: 0, rs1: 0, rs2: 0, imm: i };
+    use crate::isa::alu::AluOp as A;
+    use crate::isa::instr::{decode, Instr};
+    let alu = |op: A| match op {
+        A::Add => AluOp::Add, A::Sub => AluOp::Sub, A::Sll => AluOp::Sll, A::Slt => AluOp::Slt,
+        A::Sltu => AluOp::Sltu, A::Xor => AluOp::Xor, A::Srl => AluOp::Srl, A::Sra => AluOp::Sra,
+        A::Or => AluOp::Or, A::And => AluOp::And, A::PassA | A::PassB => unreachable!("no RV32I encoding"),
+    };
     let d = |op, unit, rd, rs1, rs2, imm| Decoded { op, unit, rd, rs1, rs2, imm };
-    match opc {
-        0x37 => d(Op::Alu { op: AluOp::Lui, imm: true }, Unit::Alu, rd, 0, 0, imm_u(i)),
-        0x17 => d(Op::Alu { op: AluOp::Auipc, imm: true }, Unit::Alu, rd, 0, 0, imm_u(i)),
-        0x6f => d(Op::Jal, Unit::Br, rd, 0, 0, imm_j(i)),
-        0x67 if f3 == 0 => d(Op::Jalr, Unit::Br, rd, rs1, 0, imm_i(i)),
-        0x63 if f3 != 2 && f3 != 3 => d(Op::Branch { f3 }, Unit::Br, 0, rs1, rs2, imm_b(i)),
-        0x03 => match f3 {
-            0 => d(Op::Load { size: 1, signed: true }, Unit::Lsu, rd, rs1, 0, imm_i(i)),
-            1 => d(Op::Load { size: 2, signed: true }, Unit::Lsu, rd, rs1, 0, imm_i(i)),
-            2 => d(Op::Load { size: 4, signed: false }, Unit::Lsu, rd, rs1, 0, imm_i(i)),
-            4 => d(Op::Load { size: 1, signed: false }, Unit::Lsu, rd, rs1, 0, imm_i(i)),
-            5 => d(Op::Load { size: 2, signed: false }, Unit::Lsu, rd, rs1, 0, imm_i(i)),
-            _ => ill,
+    let sys = |op| d(op, Unit::Sys, 0, 0, 0, 0);
+    match decode(i) {
+        Instr::Lui { rd, imm } => d(Op::Alu { op: AluOp::Lui, imm: true }, Unit::Alu, rd, 0, 0, imm),
+        Instr::Auipc { rd, imm } => d(Op::Alu { op: AluOp::Auipc, imm: true }, Unit::Alu, rd, 0, 0, imm),
+        Instr::Jal { rd, imm } => d(Op::Jal, Unit::Br, rd, 0, 0, imm),
+        Instr::Jalr { rd, rs1, imm } => d(Op::Jalr, Unit::Br, rd, rs1, 0, imm),
+        Instr::Branch { rs1, rs2, imm, .. } => d(Op::Branch { f3: ((i >> 12) & 7) as u8 }, Unit::Br, 0, rs1, rs2, imm),
+        Instr::Load { rd, rs1, imm, size, signed } => d(Op::Load { size, signed: signed && size < 4 }, Unit::Lsu, rd, rs1, 0, imm),
+        Instr::Store { rs1, rs2, imm, size } => d(Op::Store { size }, Unit::Lsu, 0, rs1, rs2, imm),
+        Instr::OpImm { op, rd, rs1, imm } => d(Op::Alu { op: alu(op), imm: true }, Unit::Alu, rd, rs1, 0, imm),
+        Instr::Op { op, rd, rs1, rs2 } => d(Op::Alu { op: alu(op), imm: false }, Unit::Alu, rd, rs1, rs2, 0),
+        Instr::Mul { op, rd, rs1, rs2 } => d(Op::Mul { f3: op }, Unit::Mul, rd, rs1, rs2, 0),
+        Instr::Fence | Instr::FenceI | Instr::Wfi | Instr::SfenceVma { .. } => sys(Op::Fence),
+        Instr::Ecall => sys(Op::Ecall),
+        Instr::Ebreak => sys(Op::Ebreak),
+        Instr::Mret => sys(Op::Mret),
+        // CSRRW/S/C use rs1; the I forms carry zimm in the rs1 field
+        Instr::Csr { op, imm_form, rd, src, csr } => Decoded {
+            op: Op::Csr { f3: op.to_u8() | (imm_form as u8) << 2, csr }, unit: Unit::Sys,
+            rd, rs1: if imm_form { 0 } else { src }, rs2: 0, imm: src as u32,
         },
-        0x23 if f3 <= 2 => d(Op::Store { size: 1 << f3 }, Unit::Lsu, 0, rs1, rs2, imm_s(i)),
-        0x13 => {
-            let op = match (f3, f7) {
-                (0, _) => AluOp::Add, (2, _) => AluOp::Slt, (3, _) => AluOp::Sltu,
-                (4, _) => AluOp::Xor, (6, _) => AluOp::Or, (7, _) => AluOp::And,
-                (1, 0) => AluOp::Sll, (5, 0) => AluOp::Srl, (5, 0x20) => AluOp::Sra,
-                _ => return ill,
-            };
-            d(Op::Alu { op, imm: true }, Unit::Alu, rd, rs1, 0, imm_i(i))
-        }
-        0x33 if f7 == 1 => if f3 <= 3 { d(Op::Mul { f3 }, Unit::Mul, rd, rs1, rs2, 0) } else { ill },   // Zmmul: no divide
-        0x33 => {
-            let op = match (f3, f7) {
-                (0, 0) => AluOp::Add, (0, 0x20) => AluOp::Sub, (1, 0) => AluOp::Sll,
-                (2, 0) => AluOp::Slt, (3, 0) => AluOp::Sltu, (4, 0) => AluOp::Xor,
-                (5, 0) => AluOp::Srl, (5, 0x20) => AluOp::Sra, (6, 0) => AluOp::Or, (7, 0) => AluOp::And,
-                _ => return ill,
-            };
-            d(Op::Alu { op, imm: false }, Unit::Alu, rd, rs1, rs2, 0)
-        }
-        0x0f => d(Op::Fence, Unit::Sys, 0, 0, 0, 0),
-        0x73 => match f3 {
-            0 => match i >> 20 {
-                0 if rd == 0 && rs1 == 0 => d(Op::Ecall, Unit::Sys, 0, 0, 0, 0),
-                1 if rd == 0 && rs1 == 0 => d(Op::Ebreak, Unit::Sys, 0, 0, 0, 0),
-                0x302 => d(Op::Mret, Unit::Sys, 0, 0, 0, 0),
-                0x105 => d(Op::Fence, Unit::Sys, 0, 0, 0, 0),                       // WFI
-                _ if f7 == 0x09 => d(Op::Fence, Unit::Sys, 0, 0, 0, 0),             // SFENCE.VMA
-                _ => ill,
-            },
-            4 => ill,
-            _ => {
-                // CSRRW/S/C use rs1; the I forms (f3 ≥ 5) carry zimm in the rs1 field
-                let src = if f3 < 4 { rs1 } else { 0 };
-                Decoded { op: Op::Csr { f3, csr: (i >> 20) as u16 }, unit: Unit::Sys, rd, rs1: src, rs2: 0, imm: rs1 as u32 }
-            }
-        },
-        _ => ill,
+        // SRET (no S-mode), custom-0, reserved encodings
+        Instr::Sret | Instr::Custom0 { .. } | Instr::Illegal =>
+            Decoded { op: Op::Illegal, unit: Unit::Sys, rd: 0, rs1: 0, rs2: 0, imm: i },
     }
 }
 
 /// ALU result (both operands already chosen: `b` = rs2 or the immediate).
 pub fn alu(op: AluOp, a: u32, b: u32, pc: u32) -> u32 {
-    match op {
-        AluOp::Add => a.wrapping_add(b),
-        AluOp::Sub => a.wrapping_sub(b),
-        AluOp::Sll => a << (b & 31),
-        AluOp::Slt => ((a as i32) < (b as i32)) as u32,
-        AluOp::Sltu => (a < b) as u32,
-        AluOp::Xor => a ^ b,
-        AluOp::Srl => a >> (b & 31),
-        AluOp::Sra => ((a as i32) >> (b & 31)) as u32,
-        AluOp::Or => a | b,
-        AluOp::And => a & b,
-        AluOp::Lui => b,
-        AluOp::Auipc => pc.wrapping_add(b),
-    }
+    use crate::isa::alu::{alu, AluOp as A};
+    let (op, a) = match op {
+        AluOp::Add => (A::Add, a), AluOp::Sub => (A::Sub, a), AluOp::Sll => (A::Sll, a),
+        AluOp::Slt => (A::Slt, a), AluOp::Sltu => (A::Sltu, a), AluOp::Xor => (A::Xor, a),
+        AluOp::Srl => (A::Srl, a), AluOp::Sra => (A::Sra, a), AluOp::Or => (A::Or, a),
+        AluOp::And => (A::And, a), AluOp::Lui => (A::PassB, a), AluOp::Auipc => (A::Add, pc),
+    };
+    alu(op, a, b)
 }
 
 /// MUL family (Zmmul).
-pub fn mul(f3: u8, a: u32, b: u32) -> u32 {
-    match f3 {
-        0 => a.wrapping_mul(b),
-        1 => ((a as i32 as i64 * b as i32 as i64) >> 32) as u32,
-        2 => ((a as i32 as i128 * b as u64 as i128) >> 32) as u32,
-        _ => ((a as u64 * b as u64) >> 32) as u32,
-    }
-}
+pub fn mul(f3: u8, a: u32, b: u32) -> u32 { crate::isa::mul::mul(f3, a, b) }
 
-/// Conditional branch outcome.
+/// Conditional branch outcome (funct3 010 / 011 never decode as branches).
 pub fn branch_taken(f3: u8, a: u32, b: u32) -> bool {
-    match f3 {
-        0 => a == b,
-        1 => a != b,
-        4 => (a as i32) < (b as i32),
-        5 => (a as i32) >= (b as i32),
-        6 => a < b,
-        _ => a >= b,
-    }
+    use crate::isa::branch::{taken, Cond};
+    match Cond::from_funct3(f3) { Some(c) => taken(c, a, b), None => false }
 }

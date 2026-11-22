@@ -3,25 +3,11 @@
 //! page walks go through L1I / L1D / L2 and report events.
 
 use cpu_sim::sim::memsys::system::MemPanelSystem;
-use cpu_sim::sim::memsys::{BusReq, Event, Mesi, Outcome, Port};
-use cpu_sim::sim::system::{addr, PrivMode};
-
-fn addi(rd: u32, rs1: u32, imm: i32) -> u32 { ((imm as u32 & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x13 }
-fn lui(rd: u32, imm20: u32) -> u32 { (imm20 << 12) | (rd << 7) | 0x37 }
-fn lw(rd: u32, rs1: u32, off: i32) -> u32 { ((off as u32 & 0xfff) << 20) | (rs1 << 15) | (2 << 12) | (rd << 7) | 0x03 }
-fn sw(rs2: u32, rs1: u32, off: i32) -> u32 {
-    let o = off as u32 & 0xfff;
-    ((o >> 5) << 25) | (rs2 << 20) | (rs1 << 15) | (2 << 12) | ((o & 0x1f) << 7) | 0x23
-}
-fn branch(f3: u32, rs1: u32, rs2: u32, off: i32) -> u32 {
-    let o = off as u32;
-    ((o >> 12) & 1) << 31 | ((o >> 5) & 0x3f) << 25 | rs2 << 20 | rs1 << 15 | f3 << 12 | ((o >> 1) & 0xf) << 8 | ((o >> 11) & 1) << 7 | 0x63
-}
-fn bne(rs1: u32, rs2: u32, off: i32) -> u32 { branch(1, rs1, rs2, off) }
-fn beq(rs1: u32, rs2: u32, off: i32) -> u32 { branch(0, rs1, rs2, off) }
-fn csrr(rd: u32, csr: u32) -> u32 { (csr << 20) | (2 << 12) | (rd << 7) | 0x73 }
-const SPIN: u32 = 0x0000_006f;
-const NOP: u32 = 0x13;
+use cpu_sim::sim::mem::Port;
+use cpu_sim::sim::memsys::{BusReq, Event, Mesi, Outcome};
+use cpu_sim::isa::csr::addr;
+use cpu_sim::sim::system::PrivMode;
+use cpu_sim::isa::encode::{NOP, SPIN, addi, beq, bne, csrr, lui, lw, sw};
 
 /// Run, collecting every event.
 fn run(sys: &mut MemPanelSystem, cycles: usize) -> Vec<Event> {

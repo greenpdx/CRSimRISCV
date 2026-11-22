@@ -46,19 +46,3 @@ pub const OPCODE_TABLE: &[OpcodeEntry] = &[
 pub fn opcode_by_value(opcode: u8) -> Option<&'static OpcodeEntry> {
     OPCODE_TABLE.iter().find(|e| e.opcode == opcode)
 }
-
-/// Branch condition per funct3 — which ALU flag to test.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BranchCondition { Zero, NotZero, Neg, NotNeg, Carry, NotCarry }
-
-pub fn branch_condition(funct3: u8) -> Option<BranchCondition> {
-    match funct3 {
-        0b000 => Some(BranchCondition::Zero),     // BEQ
-        0b001 => Some(BranchCondition::NotZero),  // BNE
-        0b100 => Some(BranchCondition::Neg),      // BLT
-        0b101 => Some(BranchCondition::NotNeg),   // BGE
-        0b110 => Some(BranchCondition::Carry),    // BLTU
-        0b111 => Some(BranchCondition::NotCarry), // BGEU
-        _ => None,
-    }
-}

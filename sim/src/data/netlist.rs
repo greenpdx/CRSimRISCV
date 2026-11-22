@@ -5,7 +5,8 @@
 //! topology; the simulator only needs the component identifier set, since
 //! per-phase activation is driven by `step()` rather than by topology walking.
 
-use crate::types::cpu::ComponentId;
+/// Stable component identifier (key of the activity trace).
+pub type ComponentId = &'static str;
 
 pub const PC:             ComponentId = "pc";
 pub const ROM:            ComponentId = "rom";

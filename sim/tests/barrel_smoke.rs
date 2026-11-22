@@ -5,7 +5,7 @@
 //! "dispatch one thread per cycle in round-robin order, run its
 //! instruction, write back to its slot's regfile."
 
-use cpu_sim::sim::barrel::{BarrelState, EXT_DMEM_BASE, N_THREADS};
+use cpu_sim::sim::barrel::{BarrelState, N_THREADS};
 
 /// Convenience: build a barrel CPU with all 8 threads active and
 /// each thread's PC pre-set to its own start address.

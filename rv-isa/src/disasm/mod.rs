@@ -15,8 +15,7 @@ mod zk;
 mod v;
 mod system;
 mod misc_mem;
-pub(crate) mod csrs;
-pub(crate) mod descriptions;
+pub mod descriptions;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Disasm {

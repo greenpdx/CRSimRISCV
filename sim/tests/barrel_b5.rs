@@ -1,16 +1,7 @@
 //! Phase B5 — scheduler modes + single-thread forwarding fallback.
 
 use cpu_sim::sim::barrel::{BarrelState, N_THREADS, SchedMode};
-
-const NOP: u32 = 0x00000013;
-fn addi(rd: u32, rs1: u32, imm: i32) -> u32 {
-    (((imm as u32) & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x13
-}
-fn lw(rd: u32, rs1: u32, off: i32) -> u32 {
-    (((off as u32) & 0xfff) << 20) | (rs1 << 15) | (0b010 << 12) | (rd << 7) | 0x03
-}
-fn lui(rd: u32, imm: u32) -> u32 { (imm << 12) | (rd << 7) | 0x37 }
-fn jal_spin() -> u32 { 0x0000006f }
+use cpu_sim::isa::encode::{NOP, SPIN, addi, lui, lw};
 
 // ── Scheduler mode tests ─────────────────────────────────────────
 
@@ -26,7 +17,7 @@ fn sched_priority_strict_picks_highest_first() {
         cpu.threads[s].priority = if s == 0 { 3 } else { 1 };
     }
     let mut rom = vec![NOP; 16];
-    rom[0] = jal_spin();
+    rom[0] = SPIN;
     cpu.load_program(&rom);
     cpu.prewarm_icache();
     for _ in 0..200 { cpu.step(); }
@@ -48,7 +39,7 @@ fn sched_aged_priority_eventually_runs_low_priority() {
     cpu.threads[5].active = true;
     cpu.threads[5].pc = 0;
     cpu.threads[5].priority = 0;
-    let nop_rom = vec![jal_spin(); 16];
+    let nop_rom = vec![SPIN; 16];
     cpu.load_program(&nop_rom);
     cpu.prewarm_icache();
     for _ in 0..200 { cpu.step(); }
@@ -68,7 +59,7 @@ fn sched_two_class_pinned_runs_when_active() {
         cpu.threads[s].pc = 0;
         cpu.threads[s].priority = 1;
     }
-    let nop_rom = vec![jal_spin(); 16];
+    let nop_rom = vec![SPIN; 16];
     cpu.load_program(&nop_rom);
     cpu.prewarm_icache();
     for _ in 0..100 { cpu.step(); }
@@ -94,7 +85,7 @@ fn sched_two_class_pinned_runs_when_active() {
 
 #[test]
 fn sched_round_robin_still_works_as_default() {
-    let mut cpu = BarrelState::new();
+    let cpu = BarrelState::new();
     assert_eq!(cpu.sched_mode, SchedMode::RoundRobin);
 }
 
@@ -108,7 +99,7 @@ fn forward_back_to_back_addi_no_stall_single_thread() {
     let mut rom = vec![NOP; 16];
     rom[0] = addi(5, 0, 7);       // x5 = 7
     rom[1] = addi(6, 5, 1);       // x6 = x5 + 1 = 8 (depends on x5)
-    rom[2] = jal_spin();
+    rom[2] = SPIN;
     let mut cpu = BarrelState::new();
     cpu.threads[0].active = true;
     cpu.threads[0].pc = 0;
@@ -128,7 +119,7 @@ fn forward_three_dependent_alu_ops() {
     rom[0] = addi(5, 0, 1);       // x5 = 1
     rom[1] = addi(6, 5, 2);       // x6 = x5 + 2 = 3   (depends on x5)
     rom[2] = addi(7, 6, 4);       // x7 = x6 + 4 = 7   (depends on x6)
-    rom[3] = jal_spin();
+    rom[3] = SPIN;
     let mut cpu = BarrelState::new();
     cpu.threads[0].active = true;
     cpu.threads[0].pc = 0;
@@ -155,7 +146,7 @@ fn forward_load_use_stall_then_forward() {
     rom[0] = lui(6, 0x10000);     // x6 = 0x10000000 (RAM base)
     rom[1] = lw(7, 6, 0);         // x7 = MEM[x6]
     rom[2] = addi(8, 7, 1);       // x8 = x7 + 1   (load-use!)
-    rom[3] = jal_spin();
+    rom[3] = SPIN;
     let mut cpu = BarrelState::new();
     cpu.threads[0].active = true;
     cpu.threads[0].pc = 0;

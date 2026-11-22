@@ -1,6 +1,7 @@
 //! Privilege modes, the CSR file and Zicsr execution (shared by all cores).
 
 use std::collections::BTreeMap;
+use crate::isa::csr::addr;
 use super::irq::{IRQ_SSI, IRQ_STI, IRQ_SEI};
 
 #[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize))]
@@ -11,40 +12,6 @@ pub enum PrivMode { U = 0, S = 1, M = 3 }
 impl PrivMode {
     pub fn as_str(self) -> &'static str { match self { PrivMode::U=>"U", PrivMode::S=>"S", PrivMode::M=>"M" } }
     pub fn from_bits(b: u8) -> PrivMode { match b & 0x3 { 1 => PrivMode::S, 0 => PrivMode::U, _ => PrivMode::M } }
-}
-
-// ── Standard CSR addresses ─────────────────────────────────────────────────
-pub mod addr {
-    // S-mode
-    pub const SSTATUS: u16 = 0x100;
-    pub const SIE:     u16 = 0x104;
-    pub const STVEC:   u16 = 0x105;
-    pub const SSCRATCH:u16 = 0x140;
-    pub const SEPC:    u16 = 0x141;
-    pub const SCAUSE:  u16 = 0x142;
-    pub const STVAL:   u16 = 0x143;
-    pub const SIP:     u16 = 0x144;
-    pub const SATP:    u16 = 0x180;
-    // M-mode
-    pub const MSTATUS: u16 = 0x300;
-    pub const MISA:    u16 = 0x301;
-    pub const MEDELEG: u16 = 0x302;
-    pub const MIDELEG: u16 = 0x303;
-    pub const MIE:     u16 = 0x304;
-    pub const MTVEC:   u16 = 0x305;
-    pub const MSCRATCH:u16 = 0x340;
-    pub const MEPC:    u16 = 0x341;
-    pub const MCAUSE:  u16 = 0x342;
-    pub const MTVAL:   u16 = 0x343;
-    pub const MIP:     u16 = 0x344;
-    pub const MVENDORID: u16 = 0xF11;
-    pub const MARCHID: u16 = 0xF12;
-    pub const MIMPID:  u16 = 0xF13;
-    pub const MHARTID: u16 = 0xF14;
-    // Unprivileged counters (read-only views; the core advances them)
-    pub const CYCLE:   u16 = 0xC00;
-    pub const TIME:    u16 = 0xC01;
-    pub const INSTRET: u16 = 0xC02;
 }
 
 // ── mstatus / sstatus bit positions ────────────────────────────────────────
@@ -152,24 +119,4 @@ impl CsrFile {
     /// Set a counter / read-only CSR from the core (hardware side), e.g.
     /// cycle, instret, misa, mhartid.
     pub fn set_counter(&mut self, addr: u16, v: u32) { self.regs.insert(addr, v); }
-}
-
-
-// ── Zicsr execution ────────────────────────────────────────────────────────
-
-/// Result of a CSR instruction: rd ← `old`; CSR ← `new` when `write`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CsrResult { pub old: u32, pub new: u32, pub write: bool }
-
-/// CSRRW / CSRRS / CSRRC and the immediate forms (funct3 bit 2 = zimm).
-/// `rs1` is the register number (= zimm for the immediate forms).
-/// RS / RC with rs1 = x0 (zimm = 0) do not write.
-pub fn csr_exec(old: u32, funct3: u8, rs1: u8, rs1_val: u32) -> CsrResult {
-    let src = if funct3 & 0b100 != 0 { rs1 as u32 } else { rs1_val };
-    match funct3 & 0b011 {
-        0b01 => CsrResult { old, new: src, write: true },
-        0b10 => CsrResult { old, new: old | src, write: rs1 != 0 },
-        0b11 => CsrResult { old, new: old & !src, write: rs1 != 0 },
-        _    => CsrResult { old, new: old, write: false },
-    }
 }

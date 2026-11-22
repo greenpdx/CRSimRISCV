@@ -1,7 +1,7 @@
 [package]
 name = "cpu-sim"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [lib]
 path = "src/lib.rs"
@@ -9,14 +9,11 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["wasm"]
-wasm = ["dep:wasm-bindgen", "dep:serde", "dep:serde-wasm-bindgen", "dep:serde_json"]
+wasm = ["dep:wasm-bindgen", "dep:serde", "dep:serde-wasm-bindgen", "dep:serde_json", "rv-isa/serde"]
 
 [dependencies]
-wasm-bindgen     = { version = "0.2", optional = true }
-serde            = { version = "1",   optional = true, features = ["derive"] }
-serde-wasm-bindgen = { version = "0.6", optional = true }
-serde_json       = { version = "1",   optional = true }
-
-[profile.release]
-opt-level = "s"
-lto = true
+rv-isa             = { workspace = true }
+wasm-bindgen       = { workspace = true, optional = true }
+serde              = { workspace = true, optional = true }
+serde-wasm-bindgen = { workspace = true, optional = true }
+serde_json         = { workspace = true, optional = true }

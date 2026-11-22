@@ -12,7 +12,7 @@
 //!   Zicsr (CSRRW/CSRRS/CSRRC, immediate variants)
 
 use super::{r, Disasm};
-use crate::disasm::csrs::csr_name;
+use crate::csr::csr_name;
 
 pub fn decode(instr: u32) -> Option<Disasm> {
     if instr & 0x7f != 0b1110011 { return None; }

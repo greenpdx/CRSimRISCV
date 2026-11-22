@@ -3,7 +3,7 @@
 //! `system.rs` and `misc_mem.rs` so the M / Zicsr extensions can override them.
 
 use super::{r, Disasm};
-use crate::data::imm_data::{extract_immediate, ImmSel};
+use crate::imm::{extract_immediate, ImmSel};
 
 pub fn decode(instr: u32) -> Option<Disasm> {
     if instr == 0 || instr == 0x0000_0013 { return Some(Disasm::nop()); }

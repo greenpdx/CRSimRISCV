@@ -1,6 +1,7 @@
 //! Trap entry (exceptions and interrupts), MRET / SRET.
 
 use super::csr::*;
+use crate::isa::csr::addr;
 
 // Synchronous exception cause codes (mcause without the interrupt bit)
 pub const EXC_INSTR_ADDR_MISALIGNED: u32 = 0;

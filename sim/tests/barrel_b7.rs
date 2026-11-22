@@ -1,17 +1,9 @@
 //! Phase B7 — IRQ injection + per-thread CSRs.
 
-use cpu_sim::sim::system::{addr, PrivMode};
+use cpu_sim::isa::csr::addr;
+use cpu_sim::sim::system::PrivMode;
 use cpu_sim::sim::barrel::{BarrelState, N_THREADS};
-
-const NOP: u32 = 0x00000013;
-fn addi(rd: u32, rs1: u32, imm: i32) -> u32 {
-    (((imm as u32) & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x13
-}
-fn lui(rd: u32, imm: u32) -> u32 { (imm << 12) | (rd << 7) | 0x37 }
-fn lw(rd: u32, rs1: u32, off: i32) -> u32 {
-    (((off as u32) & 0xfff) << 20) | (rs1 << 15) | (0b010 << 12) | (rd << 7) | 0x03
-}
-fn jal_spin() -> u32 { 0x0000006f }
+use cpu_sim::isa::encode::{NOP, SPIN, addi, csrrs, csrrw, lui, lw};
 
 #[test]
 fn b7_inject_irq_activates_locked_slot() {
@@ -29,9 +21,9 @@ fn b7_inject_irq_activates_locked_slot() {
         cpu.threads[s].pc = 0;
     }
     let mut rom = vec![NOP; 64];
-    rom[0]  = jal_spin();
+    rom[0]  = SPIN;
     rom[16] = addi(5, 0, 99);    // 0x40 — handler entry
-    rom[17] = jal_spin();
+    rom[17] = SPIN;
     cpu.load_program(&rom);
     cpu.prewarm_icache();
 
@@ -120,7 +112,7 @@ fn b7_illegal_instr_traps_to_mtvec() {
     // Wait, 0x0b IS the custom-0 opcode. Use something else.
     rom[0] = 0x0000_007F;  // opcode 0x7F is reserved → illegal
     rom[64] = addi(6, 0, 0x42); // handler at mtvec=0x100 (word 64)
-    rom[65] = jal_spin();
+    rom[65] = SPIN;
     cpu.threads[0].active = true;
     cpu.threads[0].pc = 0;
     // Spinners
@@ -128,7 +120,7 @@ fn b7_illegal_instr_traps_to_mtvec() {
         cpu.threads[s].active = true;
         cpu.threads[s].pc = 0x80;
     }
-    rom[32] = jal_spin(); // spinners at 0x80
+    rom[32] = SPIN; // spinners at 0x80
     cpu.load_program(&rom);
     cpu.prewarm_icache();
 
@@ -145,7 +137,7 @@ fn b7_ecall_traps_with_correct_cause() {
     let mut rom = vec![NOP; 128];
     rom[0] = 0x00000073;  // ECALL
     rom[64] = addi(6, 0, 0x55);
-    rom[65] = jal_spin();
+    rom[65] = SPIN;
     cpu.threads[0].active = true;
     cpu.threads[0].pc = 0;
     cpu.threads[0].sys.priv_mode = PrivMode::from_bits(3); // M-mode
@@ -153,7 +145,7 @@ fn b7_ecall_traps_with_correct_cause() {
         cpu.threads[s].active = true;
         cpu.threads[s].pc = 0x80;
     }
-    rom[32] = jal_spin();
+    rom[32] = SPIN;
     cpu.load_program(&rom);
     cpu.prewarm_icache();
 
@@ -173,7 +165,7 @@ fn b7_mret_restores_pc() {
     // 0x08: jal spin
     rom[0]  = 0x00000073;  // ECALL
     rom[1]  = addi(7, 0, 99);
-    rom[2]  = jal_spin();
+    rom[2]  = SPIN;
     // Handler at 0x100:
     rom[64] = 0x30200073;  // MRET
     cpu.threads[0].active = true;
@@ -182,7 +174,7 @@ fn b7_mret_restores_pc() {
         cpu.threads[s].active = true;
         cpu.threads[s].pc = 0x80;
     }
-    rom[32] = jal_spin();
+    rom[32] = SPIN;
     cpu.load_program(&rom);
     cpu.prewarm_icache();
 
@@ -206,8 +198,8 @@ fn b7_irq_controller_routing() {
     cpu.threads[2].pc = 0x40;
     let mut rom = vec![NOP; 32];
     rom[16] = addi(6, 0, 0x77);  // handler at 0x40
-    rom[17] = jal_spin();
-    rom[0]  = jal_spin();
+    rom[17] = SPIN;
+    rom[0]  = SPIN;
     cpu.threads[0].active = true;
     cpu.threads[0].pc = 0;
     cpu.load_program(&rom);
@@ -222,13 +214,6 @@ fn b7_irq_controller_routing() {
 
 // ── CSR instructions + thread MMIO tests ───────────────────────
 
-fn enc_csrrw(rd: u32, csr: u32, rs1: u32) -> u32 {
-    (csr << 20) | (rs1 << 15) | (1 << 12) | (rd << 7) | 0x73
-}
-fn enc_csrrs(rd: u32, csr: u32, rs1: u32) -> u32 {
-    (csr << 20) | (rs1 << 15) | (2 << 12) | (rd << 7) | 0x73
-}
-
 #[test]
 fn b7_csrrw_reads_and_writes_mcause() {
     // Thread 0 writes mcause via CSRRW, reads it back.
@@ -241,10 +226,10 @@ fn b7_csrrw_reads_and_writes_mcause() {
     }
     let mut rom = vec![NOP; 32];
     rom[0] = addi(6, 0, 42);                     // x6 = 42
-    rom[1] = enc_csrrw(7, 0x342, 6);             // csrrw x7, mcause, x6 → x7=old, mcause=42
-    rom[2] = enc_csrrs(8, 0x342, 0);             // csrrs x8, mcause, x0 → x8=mcause (= 42)
-    rom[3] = jal_spin();
-    rom[8] = jal_spin();
+    rom[1] = csrrw(7, 0x342, 6);             // csrrw x7, mcause, x6 → x7=old, mcause=42
+    rom[2] = csrrs(8, 0x342, 0);             // csrrs x8, mcause, x0 → x8=mcause (= 42)
+    rom[3] = SPIN;
+    rom[8] = SPIN;
     cpu.load_program(&rom);
     cpu.prewarm_icache();
     for _ in 0..100 { cpu.step(); }
@@ -265,9 +250,9 @@ fn b7_csrrw_global_mtvec() {
     }
     let mut rom = vec![NOP; 32];
     rom[0] = addi(6, 0, 0x80);
-    rom[1] = enc_csrrw(0, 0x305, 6);             // csrrw x0, mtvec, x6 → mtvec=0x80
-    rom[2] = jal_spin();
-    rom[8] = jal_spin();
+    rom[1] = csrrw(0, 0x305, 6);             // csrrw x0, mtvec, x6 → mtvec=0x80
+    rom[2] = SPIN;
+    rom[8] = SPIN;
     cpu.load_program(&rom);
     cpu.prewarm_icache();
     for _ in 0..60 { cpu.step(); }
@@ -293,8 +278,8 @@ fn b7_thread_mmio_t0_reads_t3_regs() {
     rom[0] = lui(6, 0x40004);                    // x6 = 0x40004000
     rom[1] = addi(6, 6, 0x314);                  // x6 = 0x40004314
     rom[2] = lw(7, 6, 0);                        // x7 = MEM[0x40004314] = T3.x5
-    rom[3] = jal_spin();
-    rom[16] = jal_spin();
+    rom[3] = SPIN;
+    rom[16] = SPIN;
     cpu.load_program(&rom);
     cpu.prewarm_icache();
     for _ in 0..100 { cpu.step(); }
@@ -315,10 +300,10 @@ fn b7_thread_mmio_denied_for_non_t0() {
     // T3's code: try to load from TMMIO.
     rom[0]  = lui(6, 0x40004);
     rom[1]  = lw(7, 6, 0);
-    rom[2]  = jal_spin();
-    rom[16] = jal_spin();
+    rom[2]  = SPIN;
+    rom[16] = SPIN;
     rom[64] = addi(8, 0, 0x99);   // trap handler at 0x100
-    rom[65] = jal_spin();
+    rom[65] = SPIN;
     cpu.load_program(&rom);
     cpu.prewarm_icache();
     for _ in 0..100 { cpu.step(); }

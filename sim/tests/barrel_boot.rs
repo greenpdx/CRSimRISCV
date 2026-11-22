@@ -3,28 +3,18 @@
 //! FORKs general workers 3..7, then enters workload.
 
 use cpu_sim::sim::barrel::{
-    dma::{DMA_SRC, DMA_DST, DMA_COUNT, DMA_TRIGGER, DMA_STATUS},
-    BarrelState, ISRAM_BASE, ISRAM_BYTES_PER_SLOT, N_THREADS,
+    dma::{DMA_SRC, DMA_DST, DMA_COUNT, DMA_TRIGGER},
+    BarrelState, N_THREADS,
 };
+use cpu_sim::isa::encode::{NOP, SPIN, addi, lui, lw};
 
-const NOP: u32 = 0x00000013;
-
-fn addi(rd: u32, rs1: u32, imm: i32) -> u32 {
-    (((imm as u32) & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x13
-}
-fn lui(rd: u32, imm: u32) -> u32 { (imm << 12) | (rd << 7) | 0x37 }
 fn sw(rs1: u32, rs2: u32, off: i32) -> u32 {
     let imm = off as u32 & 0xfff;
     (((imm >> 5) & 0x7f) << 25) | (rs2 << 20) | (rs1 << 15) | (0b010 << 12) | (((imm) & 0x1f) << 7) | 0x23
 }
-fn lw(rd: u32, rs1: u32, off: i32) -> u32 {
-    (((off as u32) & 0xfff) << 20) | (rs1 << 15) | (0b010 << 12) | (rd << 7) | 0x03
-}
 fn fork(rd: u32, rs1: u32, rs2: u32) -> u32 {
     (0x00 << 25) | (rs2 << 20) | (rs1 << 15) | (0 << 12) | (rd << 7) | 0x0b
 }
-fn done() -> u32 { (0x02 << 25) | 0x0b }
-fn jal_spin() -> u32 { 0x0000006f }
 
 /// Helper: build a DMA "copy N words from ext_imem[src_word] to
 /// slot's I-SRAM" instruction sequence. Uses t3 (x28) as scratch
@@ -63,17 +53,17 @@ fn barrel_boot_sequence_dma_and_fork() {
     // ── Handler code for slot 1 (will be DMA'd into I-SRAM) ──
     // Located at ext_imem word 64 = byte 0x100
     rom[64] = addi(6, 0, 0x11);   // x6 = 0x11 (marker)
-    rom[65] = jal_spin();
+    rom[65] = SPIN;
 
     // ── Handler code for slot 2 ──
     // Located at ext_imem word 80 = byte 0x140
     rom[80] = addi(6, 0, 0x22);
-    rom[81] = jal_spin();
+    rom[81] = SPIN;
 
     // ── Worker code for slots 3..7 ──
     // Located at ext_imem word 128 = byte 0x200
     rom[128] = addi(5, 5, 1);     // increment counter
-    rom[129] = jal_spin();
+    rom[129] = SPIN;
 
     // ── T0 boot code at 0x000 ──
     let mut boot: Vec<u32> = Vec::new();
@@ -118,7 +108,7 @@ fn barrel_boot_sequence_dma_and_fork() {
     }
 
     // Step 9: T0 spins
-    boot.push(jal_spin());
+    boot.push(SPIN);
 
     // Place boot code at start of ROM
     for (i, &w) in boot.iter().enumerate() {
@@ -185,8 +175,8 @@ fn barrel_dma_register_read_write() {
     rom[2]  = sw(28, 29, 0);           // sw t4, 0(t3) → DMA_SRC=0x42
     // Read DMA_SRC back into x7
     rom[3]  = lw(7, 28, 0);            // lw x7, 0(t3) → should be 0x42
-    rom[4]  = jal_spin();
-    rom[16] = jal_spin();              // spinners at 0x40
+    rom[4]  = SPIN;
+    rom[16] = SPIN;              // spinners at 0x40
     cpu.load_program(&rom);
     cpu.prewarm_icache();
 
@@ -200,16 +190,16 @@ fn barrel_dma_copies_to_isram() {
     // Direct DMA test: write DMA regs to copy 4 words from
     // ext_imem[0] into slot 2's I-SRAM.
     let mut cpu = BarrelState::new();
-    cpu.ext_imem[0] = 0xAAAA_0001;
-    cpu.ext_imem[1] = 0xBBBB_0002;
-    cpu.ext_imem[2] = 0xCCCC_0003;
-    cpu.ext_imem[3] = 0xDDDD_0004;
+    cpu.mem.imem[0] = 0xAAAA_0001;
+    cpu.mem.imem[1] = 0xBBBB_0002;
+    cpu.mem.imem[2] = 0xCCCC_0003;
+    cpu.mem.imem[3] = 0xDDDD_0004;
 
     // Direct register poke (bypass the pipeline).
-    cpu.dma.write_reg(DMA_SRC, 0, &cpu.ext_imem.clone(), &mut cpu.local_isram);
-    cpu.dma.write_reg(DMA_DST, 2, &cpu.ext_imem.clone(), &mut cpu.local_isram);
-    cpu.dma.write_reg(DMA_COUNT, 4, &cpu.ext_imem.clone(), &mut cpu.local_isram);
-    cpu.dma.write_reg(DMA_TRIGGER, 0, &cpu.ext_imem.clone(), &mut cpu.local_isram);
+    cpu.dma.write_reg(DMA_SRC, 0, &cpu.mem.imem.clone(), &mut cpu.mem.isram);
+    cpu.dma.write_reg(DMA_DST, 2, &cpu.mem.imem.clone(), &mut cpu.mem.isram);
+    cpu.dma.write_reg(DMA_COUNT, 4, &cpu.mem.imem.clone(), &mut cpu.mem.isram);
+    cpu.dma.write_reg(DMA_TRIGGER, 0, &cpu.mem.imem.clone(), &mut cpu.mem.isram);
 
     assert_eq!(cpu.isram_read(2, 0), 0xAAAA_0001);
     assert_eq!(cpu.isram_read(2, 4), 0xBBBB_0002);

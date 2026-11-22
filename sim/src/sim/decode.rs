@@ -1,37 +1,16 @@
-//! Shared instruction decode logic for both the 5-stage pipeline
-//! and the 8-thread barrel processor.
+//! Decode for the decoder-table cores (single-cycle, 5-stage pipeline,
+//! barrel): which instruction it is comes from `isa::instr::decode`; the
+//! control signals of an RV32I instruction from the decoder table
+//! (`data::control_data`).
 //!
 //! Generic over register-file access via the `RegRead` trait so
 //! the same decode functions work with the pipeline's single
 //! regfile and the barrel's per-thread regfiles.
 
 use crate::data::control_data::opcode_by_value;
-use crate::data::imm_data::{extract_immediate, ImmSel};
-
-// ── Instruction field extraction ────────────────────────────────
-
-#[derive(Debug, Clone, Copy)]
-pub struct InstrFields {
-    pub opcode:   u8,
-    pub rd:       u8,
-    pub funct3:   u8,
-    pub rs1:      u8,
-    pub rs2:      u8,
-    pub funct7:   u8,
-    pub funct7b30: u8,
-}
-
-pub fn extract_fields(instr: u32) -> InstrFields {
-    InstrFields {
-        opcode:    (instr & 0x7f) as u8,
-        rd:        ((instr >>  7) & 0x1f) as u8,
-        funct3:    ((instr >> 12) & 0x07) as u8,
-        rs1:       ((instr >> 15) & 0x1f) as u8,
-        rs2:       ((instr >> 20) & 0x1f) as u8,
-        funct7:    ((instr >> 25) & 0x7f) as u8,
-        funct7b30: ((instr >> 30) & 0x1) as u8,
-    }
-}
+use crate::isa::instr::{decode, Instr};
+use crate::isa::fields::InstrFields;
+use crate::isa::imm::{extract_immediate, ImmSel};
 
 // ── Classification helpers ──────────────────────────────────────
 
@@ -40,53 +19,19 @@ pub fn is_jump(opcode: u8) -> bool { opcode == 0b1101111 || opcode == 0b1100111 
 pub fn is_jalr(opcode: u8) -> bool { opcode == 0b1100111 }
 pub fn is_auipc(opcode: u8) -> bool { opcode == 0b0010111 }
 
-/// funct3 / funct7 checks for the RV32I opcodes of the decoder table (the
-/// table itself only looks at the opcode). False = illegal instruction.
-/// The M extension (funct7 = 0000001) is not RV32I: callers with Zmmul
-/// test for MUL before this.
-pub fn encoding_ok(f: &InstrFields) -> bool {
-    match f.opcode {
-        0b0110011 => f.funct7 == 0 || (f.funct7 == 0b010_0000 && (f.funct3 == 0 || f.funct3 == 5)),
-        0b0010011 => match f.funct3 {
-            1 => f.funct7 == 0,
-            5 => f.funct7 == 0 || f.funct7 == 0b010_0000,
-            _ => true,
-        },
-        0b0000011 => matches!(f.funct3, 0 | 1 | 2 | 4 | 5),
-        0b0100011 => f.funct3 < 3,
-        0b1100011 => f.funct3 != 2 && f.funct3 != 3,
-        0b1100111 => f.funct3 == 0,
-        _ => true,
-    }
-}
-
 // ── SYSTEM trap kind ────────────────────────────────────────────
 
-/// Map SYSTEM funct3==0 funct12 → trap kind.
-/// 0=none, 1=illegal, 2=ecall, 3=ebreak, 4=mret, 5=sret.
-pub fn system_trap_kind(funct12: u32) -> u8 {
-    match funct12 {
-        0x000 => 2, // ECALL
-        0x001 => 3, // EBREAK
-        0x302 => 4, // MRET
-        0x102 => 5, // SRET
-        0x105 => 0, // WFI (treated as NOP)
-        _     => 1, // illegal
+/// Trap kind of a decoded SYSTEM funct3 = 0 instruction:
+/// 0 = none (WFI: no-op), 1 = illegal, 2 = ecall, 3 = ebreak, 4 = mret, 5 = sret.
+pub fn system_trap_kind(i: &Instr) -> u8 {
+    match i {
+        Instr::Ecall => 2,
+        Instr::Ebreak => 3,
+        Instr::Mret => 4,
+        Instr::Sret => 5,
+        Instr::Wfi => 0,
+        _ => 1,
     }
-}
-
-// ── CSR decode ──────────────────────────────────────────────────
-
-/// Decode CSR op from SYSTEM funct3.
-/// Returns (csr_op, is_imm_form). csr_op: 0=invalid, 1=RW, 2=RS, 3=RC.
-pub fn decode_csr_op(funct3: u8) -> (u8, bool) {
-    let op = match funct3 & 0b011 {
-        0b01 => 1u8,
-        0b10 => 2,
-        0b11 => 3,
-        _    => 0,
-    };
-    (op, (funct3 & 0b100) != 0)
 }
 
 // ── Register access trait ───────────────────────────────────────
@@ -120,13 +65,12 @@ pub struct StandardDecode {
 
 /// Decode a standard RV32I instruction. Returns `None` for unknown
 /// opcodes and reserved funct3 / funct7 encodings (the caller should treat it as an illegal-instruction
-/// trap). `f` must be from `extract_fields(instr)`.
+/// trap). `f` must be from `isa::fields::extract_fields(instr)`.
 pub fn decode_standard<R: RegRead>(
     regs: &R, instr: u32, f: &InstrFields,
 ) -> Option<StandardDecode> {
-    let entry = opcode_by_value(f.opcode)?;
-    if !encoding_ok(f) { return None; }
-    let s = entry.signals;
+    if !decode(instr).is_base_rv32i() { return None; }
+    let s = opcode_by_value(f.opcode)?.signals;
     let imm = extract_immediate(instr, ImmSel::from_u8(s.imm_sel)) as u32;
     Some(StandardDecode {
         rs1_data: regs.read_reg(f.rs1),
@@ -157,18 +101,8 @@ pub struct CsrDecode {
 
 /// Decode a SYSTEM funct3!=0 CSR instruction. Returns `None` if
 /// the funct3 doesn't map to a valid CSR op (= illegal).
-pub fn decode_csr_instr<R: RegRead>(
-    regs: &R, instr: u32, f: &InstrFields,
-) -> Option<CsrDecode> {
-    let (csr_op, imm_form) = decode_csr_op(f.funct3);
-    if csr_op == 0 { return None; }
-    let csr_addr = ((instr >> 20) & 0xfff) as u16;
-    let write_val = if imm_form { f.rs1 as u32 } else { regs.read_reg(f.rs1) };
-    Some(CsrDecode {
-        csr_op,
-        csr_addr,
-        csr_uimm: f.rs1,
-        csr_imm_form: imm_form,
-        write_val,
-    })
+pub fn decode_csr_instr<R: RegRead>(regs: &R, instr: u32) -> Option<CsrDecode> {
+    let Instr::Csr { op, imm_form, src, csr, .. } = decode(instr) else { return None };
+    let write_val = if imm_form { src as u32 } else { regs.read_reg(src) };
+    Some(CsrDecode { csr_op: op.to_u8(), csr_addr: csr, csr_uimm: src, csr_imm_form: imm_form, write_val })
 }
