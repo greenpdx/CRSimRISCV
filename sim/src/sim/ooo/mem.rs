@@ -5,7 +5,8 @@
 //!
 //! Stores are written at commit (posted: no stall).
 
-use crate::sim::memsys::{Event, MemSystem, Port, Ram};
+use crate::sim::mem::{Bus, Pages, Port};
+use crate::sim::memsys::{Event, MemSystem};
 
 #[cfg_attr(feature = "wasm", derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,14 +17,14 @@ pub struct OooMem {
     pub mode: MemMode,
     /// Fixed mode: latency of a fetch / load
     pub fixed_latency: u64,
-    pub ram: Ram,
+    pub ram: Pages,
     /// Caches mode: the hierarchy (this core is core 0)
     pub caches: Box<MemSystem>,
 }
 
 impl OooMem {
     pub fn new(mode: MemMode) -> Self {
-        Self { mode, fixed_latency: 2, ram: Ram::default(), caches: Box::new(MemSystem::new()) }
+        Self { mode, fixed_latency: 2, ram: Pages::default(), caches: Box::new(MemSystem::new()) }
     }
 
     /// Start of a cycle (caches mode: lets the hierarchy time this cycle's accesses).
@@ -75,24 +76,28 @@ impl OooMem {
     }
 }
 
-/// The `size`-byte value at byte address `pa` inside word `w`.
+/// Word view (outside / tests): `read` goes through the caches in caches
+/// mode (its latency is dropped), `write` is a committed store.
+impl Bus for OooMem {
+    fn read(&mut self, addr: u32, port: Port) -> u32 { self.read_word(addr, port).0 }
+    fn write(&mut self, addr: u32, word: u32, _port: Port) { self.store(addr, word, 4) }
+    fn peek(&self, addr: u32) -> u32 { OooMem::peek(self, addr) }
+    fn poke(&mut self, addr: u32, word: u32) { self.load_words(addr & !3, &[word]) }
+}
+
+/// funct3 of a load / store of `size` bytes.
+const fn funct3(size: u8, signed: bool) -> u8 {
+    match (size, signed) { (1, true) => 0, (2, true) => 1, (1, false) => 4, (2, false) => 5, _ => 2 }
+}
+
+/// The `size`-byte value at byte address `pa` inside word `w` (a halfword
+/// is taken from its aligned half of the word).
 pub fn extract(w: u32, pa: u32, size: u8, signed: bool) -> u32 {
-    let sh = (pa & 3) * 8;
-    match (size, signed) {
-        (1, true) => (w >> sh) as u8 as i8 as i32 as u32,
-        (1, false) => (w >> sh) & 0xff,
-        (2, true) => (w >> (sh & 16)) as u16 as i16 as i32 as u32,
-        (2, false) => (w >> (sh & 16)) & 0xffff,
-        _ => w,
-    }
+    let pa = if size == 2 { pa & !1 } else { pa };
+    crate::isa::lsu::load(w, pa, funct3(size, signed))
 }
 
 /// Word `old` with `size` bytes of `val` written at byte address `pa`.
 pub fn merge(old: u32, pa: u32, val: u32, size: u8) -> u32 {
-    let sh = (pa & 3) * 8;
-    match size {
-        1 => (old & !(0xff << sh)) | ((val & 0xff) << sh),
-        2 => { let sh = sh & 16; (old & !(0xffff << sh)) | ((val & 0xffff) << sh) }
-        _ => val,
-    }
+    crate::isa::lsu::store_merge(old, val, pa, funct3(size, true))
 }

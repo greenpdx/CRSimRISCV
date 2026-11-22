@@ -20,7 +20,8 @@ use std::fmt::{Debug, Write};
 use cpu_sim::sim::barrel::{BarrelState, EXT_DMEM_BASE};
 use cpu_sim::sim::cpu_state::CpuState;
 use cpu_sim::sim::memsys::{self, system::MemPanelSystem};
-use cpu_sim::sim::ooo::{self, examples::enc, mem::MemMode, OooCpu};
+use cpu_sim::isa::encode as enc;
+use cpu_sim::sim::ooo::{self, mem::MemMode, OooCpu};
 use cpu_sim::sim::pipeline::PipelineState;
 use cpu_sim::sim::system::SysUnit;
 
@@ -218,7 +219,7 @@ fn single(words: &[u32], zmmul: bool, traps: bool) -> Run {
         v.u64(c.cycle_count);
     }
     a.sys(&c.sys);
-    a.words(&c.ram); a.dbg(&c.ram_extra); a.u32(c.io_data);
+    a.words(&c.mem.ram); a.dbg(&c.mem.ram_extra); a.u32(c.mem.io_data);
     Run { arch: a.0, view: v.0, regs: c.registers }
 }
 
@@ -242,7 +243,7 @@ fn pipeline(words: &[u32], mode: u8) -> Run {
         pipeline_view(&mut v, &c);
     }
     a.sys(&c.sys);
-    a.words(&c.machine_ram); a.words(&c.user_ram); a.u32(c.io_data);
+    let f = c.mem.flat().unwrap(); a.words(&f.machine_ram); a.words(&f.user_ram); a.u32(f.io_data);
     Run { arch: a.0, view: v.0, regs: c.registers }
 }
 
@@ -261,7 +262,7 @@ fn barrel(words: &[u32], all_threads: bool) -> Run {
         v.dbg(&(c.sched_mode, c.current_thread, c.sched_history, c.sched_history_idx, c.cycle_count, c.halted));
     }
     for t in &c.threads { a.sys(&t.sys); }
-    a.words(&c.ext_dmem); a.u32(c.io_data);
+    a.words(&c.mem.dmem); a.u32(c.mem.io_data);
     Run { arch: a.0, view: v.0, regs: c.threads[0].regs }
 }
 
@@ -452,4 +453,54 @@ fn illegal_instructions_trap() {
     // The pipeline has no M extension: MUL is illegal too.
     let r = pipeline(&with_handler(&[enc::mul(3, 1, 1)]), 0);
     assert_eq!((r.regs[1], r.regs[5]), (1, 2), "pipeline MUL");
+}
+
+/// BLT / BGE are signed compares also when `rs1 - rs2` overflows (the
+/// flag-based cores decide N ≠ V, not N).
+#[test]
+fn blt_bge_signed_when_the_subtraction_overflows() {
+    use enc::*;
+    let p = vec![
+        lui(1, 0x80000),        // x1 = INT_MIN
+        addi(2, 0, 1),          // x2 = 1
+        blt(1, 2, 8),           // taken: INT_MIN < 1
+        addi(3, 3, 1),
+        bge(2, 1, 8),           // taken: 1 >= INT_MIN
+        addi(4, 4, 1),
+        blt(2, 1, 8),           // not taken
+        addi(5, 5, 1),
+        bge(1, 2, 8),           // not taken
+        addi(6, 6, 1),
+        SPIN,
+    ];
+    let want = [0, 0, 1, 1];
+    let regs = |r: Run| [r.regs[3], r.regs[4], r.regs[5], r.regs[6]];
+    assert_eq!(regs(single(&p, true, true)), want, "single-cycle");
+    for mode in 0..3u8 { assert_eq!(regs(pipeline(&p, mode)), want, "pipeline mode {mode}"); }
+    assert_eq!(regs(ooo_run(&p, &[], MemMode::Fixed, OOO_DB)), want, "out-of-order");
+}
+
+/// Reserved encodings trap as illegal instruction on every core with traps;
+/// FENCE and WFI are no-ops. The handler counts traps in x1 (x1 = 16 + traps),
+/// x5 = last mcause. An illegal instruction writes no register.
+#[test]
+fn reserved_encodings_trap_fence_and_wfi_do_not() {
+    use enc::*;
+    let p = with_handler(&[
+        MRET | 3 << 7,                  // MRET with rd = x3
+        i(0, 0, 2, 0, 0x0f),            // MISC-MEM funct3 010
+        i(0x340, 1, 4, 4, 0x73),        // SYSTEM funct3 100, rd = x4
+        ECALL | 1 << 15,                // ECALL with rs1 ≠ 0
+        0x0ff0_000f,                    // FENCE iorw, iorw
+        WFI,
+        addi(1, 1, 16),
+    ]);
+    let want = (20, 0, 0, 2);
+    let regs = |r: Run| (r.regs[1], r.regs[3], r.regs[4], r.regs[5]);
+    assert_eq!(regs(single(&p, true, true)), want, "single-cycle");
+    for mode in 0..3u8 { assert_eq!(regs(pipeline(&p, mode)), want, "pipeline mode {mode}"); }
+    assert_eq!(regs(ooo_run(&p, &[], MemMode::Fixed, OOO_DB)), want, "out-of-order");
+    // Barrel (one thread, straight-line): FENCE / FENCE.I are no-ops, not traps
+    let r = barrel(&[0x0ff0_000f, FENCE_I, addi(1, 0, 7), SPIN], false);
+    assert_eq!(r.regs[1], 7, "barrel FENCE");
 }

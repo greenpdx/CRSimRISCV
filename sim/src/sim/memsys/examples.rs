@@ -4,7 +4,8 @@
 
 use super::system::MemPanelSystem;
 use super::ROM_BASE;
-use crate::sim::system::{addr, PrivMode};
+use crate::isa::csr::addr;
+use crate::sim::system::PrivMode;
 
 pub struct Example {
     pub name: &'static str,
@@ -13,34 +14,7 @@ pub struct Example {
     pub setup: fn(&mut MemPanelSystem),
 }
 
-// ── RV32I encoders ──────────────────────────────────────────────────────
-pub mod enc {
-    pub fn addi(rd: u32, rs1: u32, imm: i32) -> u32 { ((imm as u32 & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x13 }
-    pub fn lui(rd: u32, imm20: u32) -> u32 { (imm20 << 12) | (rd << 7) | 0x37 }
-    pub fn lw(rd: u32, rs1: u32, off: i32) -> u32 { ((off as u32 & 0xfff) << 20) | (rs1 << 15) | (2 << 12) | (rd << 7) | 0x03 }
-    pub fn sw(rs2: u32, rs1: u32, off: i32) -> u32 {
-        let o = off as u32 & 0xfff;
-        ((o >> 5) << 25) | (rs2 << 20) | (rs1 << 15) | (2 << 12) | ((o & 0x1f) << 7) | 0x23
-    }
-    pub fn add(rd: u32, rs1: u32, rs2: u32) -> u32 { (rs2 << 20) | (rs1 << 15) | (rd << 7) | 0x33 }
-    fn branch(f3: u32, rs1: u32, rs2: u32, off: i32) -> u32 {
-        let o = off as u32;
-        ((o >> 12) & 1) << 31 | ((o >> 5) & 0x3f) << 25 | rs2 << 20 | rs1 << 15 | f3 << 12 | ((o >> 1) & 0xf) << 8 | ((o >> 11) & 1) << 7 | 0x63
-    }
-    pub fn beq(rs1: u32, rs2: u32, off: i32) -> u32 { branch(0, rs1, rs2, off) }
-    pub fn bne(rs1: u32, rs2: u32, off: i32) -> u32 { branch(1, rs1, rs2, off) }
-    pub fn csrr(rd: u32, csr: u32) -> u32 { (csr << 20) | (2 << 12) | (rd << 7) | 0x73 }
-    pub fn csrw(csr: u32, rs1: u32) -> u32 { (csr << 20) | (rs1 << 15) | (1 << 12) | 0x73 }
-    /// sfence.vma rs1, rs2 (x0 = all addresses / all ASIDs)
-    pub fn sfence(rs1: u32, rs2: u32) -> u32 { (0x09 << 25) | (rs2 << 20) | (rs1 << 15) | 0x73 }
-    pub fn jalr(rd: u32, rs1: u32, off: i32) -> u32 { ((off as u32 & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x67 }
-    pub const FENCE_I: u32 = 0x0000_100f;
-    pub const SPIN: u32 = 0x0000_006f;   // j .
-    pub const NOP: u32 = 0x0000_0013;
-    pub const MRET: u32 = 0x3020_0073;
-    pub const SFENCE_VMA: u32 = 0x1200_0073;
-}
-use enc::*;
+use crate::isa::encode::*;
 
 /// Code at 0: hart 1 jumps to 0x40, hart 0 falls into `core0` at 0x08.
 fn split(core0: &[u32], core1: &[u32]) -> Vec<u32> { split_at(core0, core1, 0x40) }

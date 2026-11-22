@@ -1,12 +1,14 @@
 //! Per-thread state and pipeline registers for the 8-thread barrel
 //! processor.
 
+use super::mem::BarrelMem;
 use super::bus::Bus;
 use super::cache::Cache;
 use super::dma::DmaController;
 use super::irq_controller::IrqController;
 use super::store_buffer::StoreBuffer;
-use crate::sim::system::{addr, csr_exec, PrivMode, SysUnit};
+use crate::isa::csr::{addr, csr_exec};
+use crate::sim::system::{PrivMode, SysUnit};
 
 /// CSRs the barrel shares across all threads (one value, mirrored into
 /// every thread's system unit on write): the trap vector, interrupt
@@ -295,14 +297,8 @@ pub struct BarrelState {
 
     // External memory (Princeton-style: separate code and data
     // arrays for B1 simplicity; later phases unify and add caches).
-    pub ext_imem: Vec<u32>,
-    pub ext_dmem: Vec<u32>,
-    pub io_data: u32,
-
-    /// Local 16 KiB instruction scratchpads, one per slot 0/1/2.
-    /// Single-cycle, never misses, only fetchable by the owning
-    /// slot. Mapped at `ISRAM_BASE + ISRAM_BYTES_PER_SLOT * slot`.
-    pub local_isram: [Box<[u32; ISRAM_WORDS_PER_SLOT]>; ISRAM_N_SLOTS],
+    /// External instruction / data memory, the per-slot I-SRAMs, the I/O word.
+    pub mem: BarrelMem,
 
     /// Shared 4 KiB I-L1 (slots 3..7 always; slots 0..2 when their
     /// PC is outside their local I-SRAM range).
@@ -349,14 +345,7 @@ impl Default for BarrelState {
             // active) is set by `BarrelState::reset_boot()` in later
             // phases when custom-0 / IRQ controller exists.
             threads: std::array::from_fn(|i| Thread::idle_hart(i as u8)),
-            ext_imem: vec![0x0000_0013; EXT_IMEM_WORDS], // NOPs
-            ext_dmem: vec![0; EXT_DMEM_WORDS],
-            io_data: 0,
-            local_isram: [
-                Box::new([0x0000_0013; ISRAM_WORDS_PER_SLOT]),
-                Box::new([0x0000_0013; ISRAM_WORDS_PER_SLOT]),
-                Box::new([0x0000_0013; ISRAM_WORDS_PER_SLOT]),
-            ],
+            mem: BarrelMem::default(),
             icache: Cache::new("I-L1"),
             dcache: Cache::new("D-L1"),
             store_buffer: StoreBuffer::new(),
@@ -419,60 +408,25 @@ impl BarrelState {
     /// Load a flat instruction image into external instruction
     /// memory starting at byte address 0.
     pub fn load_program(&mut self, words: &[u32]) {
-        for (i, w) in words.iter().enumerate() {
-            if i < self.ext_imem.len() { self.ext_imem[i] = *w; }
-        }
+        for (d, w) in self.mem.imem.iter_mut().zip(words) { *d = *w; }
     }
 
-    pub fn imem_read(&self, addr: u32) -> u32 {
-        let idx = (addr >> 2) as usize;
-        self.ext_imem.get(idx).copied().unwrap_or(0)
-    }
-
-    pub fn dmem_read(&self, addr: u32) -> u32 {
-        let idx = ((addr & !3).wrapping_sub(EXT_DMEM_BASE) >> 2) as usize;
-        self.ext_dmem.get(idx).copied().unwrap_or(0)
-    }
-
-    pub fn dmem_write(&mut self, addr: u32, val: u32) {
-        let idx = ((addr & !3).wrapping_sub(EXT_DMEM_BASE) >> 2) as usize;
-        if idx < self.ext_dmem.len() { self.ext_dmem[idx] = val; }
-    }
+    pub fn imem_read(&self, addr: u32) -> u32 { self.mem.imem_read(addr) }
+    pub fn dmem_read(&self, addr: u32) -> u32 { self.mem.dmem_read(addr) }
+    pub fn dmem_write(&mut self, addr: u32, val: u32) { self.mem.dmem_write(addr, val) }
 
     /// Load a flat instruction image into a slot's local I-SRAM
     /// (slot must be 0..2). Words past the SRAM size are ignored.
-    pub fn load_isram(&mut self, slot: u8, words: &[u32]) {
-        if (slot as usize) >= ISRAM_N_SLOTS { return; }
-        let dst = &mut self.local_isram[slot as usize];
-        for (i, w) in words.iter().enumerate() {
-            if i < dst.len() { dst[i] = *w; }
-        }
-    }
+    pub fn load_isram(&mut self, slot: u8, words: &[u32]) { self.mem.load_isram(slot, words) }
 
     /// Read a single instruction word from a slot's I-SRAM at the
     /// given local byte offset. Out-of-range returns NOP.
-    pub fn isram_read(&self, slot: u8, byte_off: u32) -> u32 {
-        let s = slot as usize;
-        if s >= ISRAM_N_SLOTS { return 0x0000_0013; }
-        let idx = (byte_off >> 2) as usize;
-        if idx < ISRAM_WORDS_PER_SLOT {
-            self.local_isram[s][idx]
-        } else {
-            0x0000_0013
-        }
-    }
+    pub fn isram_read(&self, slot: u8, byte_off: u32) -> u32 { self.mem.isram_read(slot, byte_off) }
 
     /// Returns `Some(slot)` if `pc` falls in slot N's I-SRAM range
     /// (N = 0, 1, or 2). Used by stage_if to decide whether to
     /// route the fetch to local SRAM or external memory.
-    pub fn isram_slot_of(pc: u32) -> Option<u8> {
-        if pc >= ISRAM_BASE && pc < ISRAM_TOP {
-            let off = pc - ISRAM_BASE;
-            Some((off / ISRAM_BYTES_PER_SLOT) as u8)
-        } else {
-            None
-        }
-    }
+    pub fn isram_slot_of(pc: u32) -> Option<u8> { BarrelMem::isram_slot_of(pc) }
 
     /// Read a CSR of thread `slot` (its system unit). The shared CSRs
     /// (`SHARED_CSRS`) read the same in every thread; an out-of-range slot
@@ -562,13 +516,13 @@ impl BarrelState {
     /// access. NOT something a real CPU would do.
     pub fn prewarm_icache(&mut self) {
         use super::cache::{CACHE_LINE_WORDS, CACHE_LINE_BYTES};
-        let n = self.ext_imem.len();
+        let n = self.mem.imem.len();
         let lines = (n + CACHE_LINE_WORDS - 1) / CACHE_LINE_WORDS;
         for l in 0..lines {
             let mut data = [0u32; CACHE_LINE_WORDS];
             for w in 0..CACHE_LINE_WORDS {
                 let idx = l * CACHE_LINE_WORDS + w;
-                if idx < n { data[w] = self.ext_imem[idx]; }
+                if idx < n { data[w] = self.mem.imem[idx]; }
             }
             let line_addr = (l as u32) * CACHE_LINE_BYTES;
             self.icache.install(line_addr, data);

@@ -4,26 +4,17 @@
 //! they exercise miss-fill and stall behavior.
 
 use cpu_sim::sim::barrel::{
-    bus::{BusState, MISS_LATENCY},
-    cache::{Cache, CACHE_LINE_BYTES},
+    bus::BusState,
     BarrelState, EXT_DMEM_BASE, N_THREADS,
 };
+use cpu_sim::isa::encode::{NOP, SPIN, addi, lui, lw};
 
-const NOP: u32 = 0x00000013;
-fn addi(rd: u32, rs1: u32, imm: i32) -> u32 {
-    (((imm as u32) & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x13
-}
-fn lw(rd: u32, rs1: u32, off: i32) -> u32 {
-    (((off as u32) & 0xfff) << 20) | (rs1 << 15) | (0b010 << 12) | (rd << 7) | 0x03
-}
 fn sw(rs1: u32, rs2: u32, off: i32) -> u32 {
     let imm = off as u32 & 0xfff;
     let imm11_5 = (imm >> 5) & 0x7f;
     let imm4_0  = imm & 0x1f;
     (imm11_5 << 25) | (rs2 << 20) | (rs1 << 15) | (0b010 << 12) | (imm4_0 << 7) | 0x23
 }
-fn lui(rd: u32, imm: u32) -> u32 { (imm << 12) | (rd << 7) | 0x37 }
-fn jal_spin() -> u32 { 0x0000006f }
 
 #[test]
 fn barrel_icache_miss_then_hit() {
@@ -32,7 +23,7 @@ fn barrel_icache_miss_then_hit() {
     // line is a hit.
     let mut rom = vec![NOP; 16];
     rom[0] = addi(5, 0, 7);
-    rom[1] = jal_spin();
+    rom[1] = SPIN;
     let mut cpu = BarrelState::new();
     cpu.activate_all();
     for i in 0..N_THREADS { cpu.set_thread_pc(i as u8, 0); }
@@ -61,9 +52,9 @@ fn barrel_icache_miss_stalls_only_one_thread() {
     let mut rom = vec![NOP; 64];
     // Slot 0 starts at byte 0x40 (a different line than the spinners)
     rom[16] = addi(5, 0, 1);    // 0x40
-    rom[17] = jal_spin();
+    rom[17] = SPIN;
     // Spinners at byte 0x00
-    rom[0] = jal_spin();
+    rom[0] = SPIN;
 
     let mut cpu = BarrelState::new();
     cpu.threads[0].active = true;
@@ -101,7 +92,7 @@ fn barrel_dcache_load_miss_then_hit() {
     let mut rom = vec![NOP; 32];
     rom[0] = lui(6, EXT_DMEM_BASE >> 12);  // x6 = 0x10000000
     rom[1] = lw(7, 6, 0);                  // load
-    rom[2] = jal_spin();
+    rom[2] = SPIN;
     let mut cpu = BarrelState::new();
     cpu.threads[0].active = true;
     cpu.threads[0].pc = 0;
@@ -112,7 +103,7 @@ fn barrel_dcache_load_miss_then_hit() {
         cpu.threads[s].pc = 0x40;
         cpu.threads[s].priority = 1;
     }
-    rom[16] = jal_spin();
+    rom[16] = SPIN;
     cpu.load_program(&rom);
     cpu.prewarm_icache();
     // Pre-write a value into RAM at 0x10000000.
@@ -132,7 +123,7 @@ fn barrel_store_buffer_drains_to_external_memory() {
     rom[0] = lui(6, EXT_DMEM_BASE >> 12);  // base
     rom[1] = addi(7, 0, 0x123);            // value
     rom[2] = sw(6, 7, 0);                  // store
-    rom[3] = jal_spin();
+    rom[3] = SPIN;
     let mut cpu = BarrelState::new();
     cpu.threads[0].active = true;
     cpu.threads[0].pc = 0;
@@ -142,7 +133,7 @@ fn barrel_store_buffer_drains_to_external_memory() {
         cpu.threads[s].pc = 0x20;
         cpu.threads[s].priority = 1;
     }
-    rom[8] = jal_spin();
+    rom[8] = SPIN;
     cpu.load_program(&rom);
     cpu.prewarm_icache();
 
@@ -163,7 +154,7 @@ fn barrel_store_then_load_forwards_from_buffer() {
     rom[1] = addi(7, 0, 0x77);
     rom[2] = sw(6, 7, 0);
     rom[3] = lw(8, 6, 0);
-    rom[4] = jal_spin();
+    rom[4] = SPIN;
     let mut cpu = BarrelState::new();
     cpu.threads[0].active = true;
     cpu.threads[0].pc = 0;
@@ -173,7 +164,7 @@ fn barrel_store_then_load_forwards_from_buffer() {
         cpu.threads[s].pc = 0x20;
         cpu.threads[s].priority = 1;
     }
-    rom[8] = jal_spin();
+    rom[8] = SPIN;
     cpu.load_program(&rom);
     cpu.prewarm_icache();
 
@@ -213,7 +204,7 @@ fn barrel_icache_hits_after_prewarm() {
     // prewarm_icache should mean the very first fetch is a hit.
     let mut rom = vec![NOP; 16];
     rom[0] = addi(5, 0, 9);
-    rom[1] = jal_spin();
+    rom[1] = SPIN;
     let mut cpu = BarrelState::new();
     cpu.activate_all();
     for i in 0..N_THREADS { cpu.set_thread_pc(i as u8, 0); }

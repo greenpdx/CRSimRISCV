@@ -1,0 +1,11 @@
+[package]
+name = "rv-isa"
+description = "RISC-V instruction set: fields, immediates, load / store lanes, multiply, CSRs, registers, encoders, disassembler"
+version.workspace = true
+edition.workspace = true
+
+[features]
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { workspace = true, optional = true }

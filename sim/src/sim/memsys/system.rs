@@ -9,9 +9,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::{MemSystem, N_CORES};
-use crate::sim::pipeline::state::Hier;
+use crate::sim::pipeline::mem::{Hier, PipeMem};
 use crate::sim::pipeline::PipelineState;
-use crate::sim::system::addr;
+use crate::isa::csr::addr;
 
 pub struct MemPanelSystem {
     pub cores: Vec<PipelineState>,
@@ -28,7 +28,7 @@ impl MemPanelSystem {
         let mem = Rc::new(RefCell::new(MemSystem::new()));
         let cores = (0..N_CORES).map(|i| {
             let mut c = PipelineState::new();
-            c.hier = Some(Hier { core: i as u8, sys: mem.clone() });
+            c.mem = PipeMem::Hier(Hier { core: i as u8, sys: mem.clone() });
             c.sys.csrs.set_counter(addr::MHARTID, i as u32);
             c
         }).collect();

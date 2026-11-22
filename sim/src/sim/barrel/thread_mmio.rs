@@ -17,7 +17,8 @@
 //!
 //! Total: 8 slots × 0x100 = 0x800 bytes.
 
-use crate::sim::system::{addr, PrivMode};
+use crate::isa::csr::addr;
+use crate::sim::system::PrivMode;
 use super::state::{BarrelState, N_THREADS};
 
 pub const TMMIO_BASE: u32 = 0x4000_4000;

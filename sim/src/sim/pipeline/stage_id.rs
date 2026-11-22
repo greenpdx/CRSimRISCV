@@ -7,10 +7,12 @@
 //!
 //! Also runs the **load-use hazard detection**.
 
+use crate::isa::instr::{decode, Instr};
+use crate::isa::fields::extract_fields;
 use crate::sim::decode::{
-    self, RegRead, extract_fields, is_jalr, system_trap_kind,
+    self, RegRead, is_jalr, system_trap_kind,
 };
-use super::csr::{csr_op_from_funct3, CsrOp};
+use crate::isa::csr::CsrOp;
 use super::state::{ControlBits, IdEx, IfId, PipelineState};
 
 // ── RegRead impl for pipeline's single regfile ──────────────────
@@ -53,9 +55,11 @@ pub fn compute_id(state: &PipelineState, if_id: &IfId) -> Option<IdEx> {
     // is unknown → illegal trap.
     let is_system = f.opcode == 0b1110011;
 
-    // MISC-MEM (FENCE, FENCE.I): a NOP here — memory is in order, and in
-    // memory-panel mode a store already invalidates the matching L1I line.
-    if f.opcode == 0b0001111 {
+    let d = decode(instr);
+
+    // FENCE, FENCE.I: a NOP here — memory is in order, and in memory-panel
+    // mode a store already invalidates the matching L1I line.
+    if matches!(d, Instr::Fence | Instr::FenceI) {
         return Some(IdEx { valid: true, pc: if_id.pc, pc_plus4: if_id.pc_plus4, instr, opcode: f.opcode, ..IdEx::default() });
     }
 
@@ -99,9 +103,9 @@ pub fn compute_id(state: &PipelineState, if_id: &IfId) -> Option<IdEx> {
     // ── SYSTEM opcode (0x73) ────────────────────────────────
     if f.funct3 != 0 {
         // CSR instruction — use shared decode.
-        match decode::decode_csr_instr(&regs, instr, &f) {
+        match decode::decode_csr_instr(&regs, instr) {
             Some(c) => {
-                let csr_op = csr_op_from_funct3(f.funct3);
+                let csr_op = CsrOp::from_funct3(f.funct3);
                 let _is_csr = csr_op != CsrOp::None;
                 return Some(IdEx {
                     valid: true, pc: if_id.pc, pc_plus4: if_id.pc_plus4, instr,
@@ -131,15 +135,8 @@ pub fn compute_id(state: &PipelineState, if_id: &IfId) -> Option<IdEx> {
     }
 
     // SYSTEM funct3==0 — ECALL/EBREAK/MRET/SRET/WFI/SFENCE.VMA
-    let funct12 = (instr >> 20) & 0xfff;
-    let funct7  = (instr >> 25) & 0x7f;
-    let mut trap_kind = 0u8;
-    let mut is_sfence = false;
-    if funct7 == 0x09 {
-        is_sfence = true;
-    } else {
-        trap_kind = system_trap_kind(funct12);
-    }
+    let is_sfence = matches!(d, Instr::SfenceVma { .. });
+    let trap_kind = if is_sfence { 0 } else { system_trap_kind(&d) };
 
     // SFENCE.VMA rs1, rs2 reads its operands (vaddr, ASID); EX forwards
     // them: rs1 → ex_ma.csr_write_val, rs2 → ex_ma.rs2_data.

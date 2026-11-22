@@ -284,8 +284,8 @@ export const useCpuPhasesRef = defineStore('cpuPhasesRef', () => {
       switch (branchCond) {
         case 'zero':   return ctx!.flags.zero
         case '!zero':  return !ctx!.flags.zero
-        case 'neg':    return ctx!.flags.negative
-        case '!neg':   return !ctx!.flags.negative
+        case 'lt':     return ctx!.flags.negative !== ctx!.flags.overflow
+        case '!lt':    return ctx!.flags.negative === ctx!.flags.overflow
         case 'carry':  return ctx!.flags.carry
         case '!carry': return !ctx!.flags.carry
         default:       return false

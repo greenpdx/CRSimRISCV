@@ -1,13 +1,9 @@
 //! Tests for the 5-stage pipeline simulator.
 //! See `sim/docs/pipeline-plan.md` §13 for the full test plan.
 
-use cpu_sim::sim::system::{addr, PrivMode};
+use cpu_sim::isa::csr::addr;
+use cpu_sim::sim::system::PrivMode;
 use cpu_sim::sim::pipeline::PipelineState;
-
-/// Run the pipeline for `n` cycles (helper for readability).
-fn run(cpu: &mut PipelineState, n: usize) {
-    for _ in 0..n { cpu.step(); }
-}
 
 /// Run until either a fixed cycle limit or until the program is "done"
 /// (PC stops advancing for two cycles in a row, indicating a spin loop).
@@ -52,7 +48,7 @@ fn pipeline_two_adds_no_hazard() {
 fn pipeline_load_use_stall() {
     let mut cpu = PipelineState::new();
     // Pre-seed RAM[0x10000] = 42 via direct write through the model
-    cpu.machine_ram[0] = 42;
+    cpu.ram_write(0x10000, 42);
     cpu.load_program(&[
         0x000102b7, // lui  x5, 0x10            (x5 = 0x10000)
         0x0002a303, // lw   x6, 0(x5)           (x6 = 42)
@@ -718,7 +714,7 @@ fn pipeline_sv32_store_sets_a_and_d_bits() {
 fn pipeline_sv32_sum_allows_s_to_access_u_page() {
     let mut cpu = PipelineState::new();
     // Need a second RAM page for the L0 table.
-    cpu.machine_ram.resize(2048, 0);
+    cpu.mem.flat_mut().unwrap().machine_ram.resize(2048, 0);
     let root = 0x10000u32;
     cpu.sys.csrs.write(addr::SATP, (1 << 31) | (root >> 12));
     // L1[0] = identity superpage covering code (no U).

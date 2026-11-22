@@ -638,8 +638,8 @@ export const useCpuStateRef = defineStore('cpuRef', () => {
       switch (branchCond) {
         case 'zero':   return flags.zero
         case '!zero':  return !flags.zero
-        case 'neg':    return flags.negative
-        case '!neg':   return !flags.negative
+        case 'lt':     return flags.negative !== flags.overflow
+        case '!lt':    return flags.negative === flags.overflow
         case 'carry':  return flags.carry
         case '!carry': return !flags.carry
         default:       return false

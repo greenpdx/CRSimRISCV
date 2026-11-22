@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use crate::encoder::*;
-use crate::registers::reg_number;
+use rv_isa::encode::{b, i, j, r, s, shift, u};
+use rv_isa::reg::reg_number;
 use serde::Serialize;
 
 #[derive(Serialize, Clone)]
@@ -177,27 +177,27 @@ fn encode_instruction(
             // mv rd, rs → addi rd, rs, 0
             let rd = parse_reg(&operands, 0)?;
             let rs = parse_reg(&operands, 1)?;
-            return Ok(encode_i(0b0010011, rd, 0, rs, 0));
+            return Ok(i(0, rs, 0, rd, 0b0010011));
         }
         "li" => {
             // li rd, imm → addi rd, x0, imm (only for small immediates)
             let rd = parse_reg(&operands, 0)?;
             let imm = resolve_imm(&operands, 1, current_addr, labels)?;
-            return Ok(encode_i(0b0010011, rd, 0, 0, imm));
+            return Ok(i(imm, 0, 0, rd, 0b0010011));
         }
         "j" => {
             // j label → jal x0, label
             let imm = resolve_imm(&operands, 0, current_addr, labels)?;
-            return Ok(encode_j(0b1101111, 0, imm));
+            return Ok(j(imm, 0, 0b1101111));
         }
         "ret" => {
             // ret → jalr x0, x1, 0
-            return Ok(encode_i(0b1100111, 0, 0, 1, 0));
+            return Ok(i(0, 1, 0, 0, 0b1100111));
         }
         "call" => {
             // call label → jal x1, label
             let imm = resolve_imm(&operands, 0, current_addr, labels)?;
-            return Ok(encode_j(0b1101111, 1, imm));
+            return Ok(j(imm, 1, 0b1101111));
         }
         _ => {}
     }
@@ -239,19 +239,19 @@ fn encode_instruction(
             let rd = parse_reg(&operands, 0)?;
             let rs1 = parse_reg(&operands, 1)?;
             let shamt = resolve_imm(&operands, 2, current_addr, labels)? as u32;
-            return Ok(encode_i_shift(0b0010011, rd, 0b001, rs1, shamt, 0b0000000));
+            return Ok(shift(0b0000000, shamt, rs1, 0b001, rd, 0b0010011));
         }
         "srli" => {
             let rd = parse_reg(&operands, 0)?;
             let rs1 = parse_reg(&operands, 1)?;
             let shamt = resolve_imm(&operands, 2, current_addr, labels)? as u32;
-            return Ok(encode_i_shift(0b0010011, rd, 0b101, rs1, shamt, 0b0000000));
+            return Ok(shift(0b0000000, shamt, rs1, 0b101, rd, 0b0010011));
         }
         "srai" => {
             let rd = parse_reg(&operands, 0)?;
             let rs1 = parse_reg(&operands, 1)?;
             let shamt = resolve_imm(&operands, 2, current_addr, labels)? as u32;
-            return Ok(encode_i_shift(0b0010011, rd, 0b101, rs1, shamt, 0b0100000));
+            return Ok(shift(0b0100000, shamt, rs1, 0b101, rd, 0b0010011));
         }
         _ => {}
     }
@@ -268,9 +268,9 @@ fn encode_instruction(
 
     // Store: op rs2, offset(rs1)
     match mnemonic.as_str() {
-        "sb" => return store_type(&operands, 0b0100011, 0b000),
-        "sh" => return store_type(&operands, 0b0100011, 0b001),
-        "sw" => return store_type(&operands, 0b0100011, 0b010),
+        "sb" => return store_type(&operands, 0b000),
+        "sh" => return store_type(&operands, 0b001),
+        "sw" => return store_type(&operands, 0b010),
         _ => {}
     }
 
@@ -281,7 +281,7 @@ fn encode_instruction(
             return Err(format!("{} expects {} operands, got {}", mnemonic, n, operands.len()));
         }
         let target = operands[n - 1];
-        branch_type(&[rs1, rs2, target], 0b1100011, f3, current_addr, labels)
+        branch_type(&[rs1, rs2, target], f3, current_addr, labels)
     };
     let op = |i: usize| operands.get(i).copied().unwrap_or("");
     match mnemonic.as_str() {
@@ -300,12 +300,12 @@ fn encode_instruction(
 
     // Branch: op rs1, rs2, label/offset
     match mnemonic.as_str() {
-        "beq"  => return branch_type(&operands, 0b1100011, 0b000, current_addr, labels),
-        "bne"  => return branch_type(&operands, 0b1100011, 0b001, current_addr, labels),
-        "blt"  => return branch_type(&operands, 0b1100011, 0b100, current_addr, labels),
-        "bge"  => return branch_type(&operands, 0b1100011, 0b101, current_addr, labels),
-        "bltu" => return branch_type(&operands, 0b1100011, 0b110, current_addr, labels),
-        "bgeu" => return branch_type(&operands, 0b1100011, 0b111, current_addr, labels),
+        "beq"  => return branch_type(&operands, 0b000, current_addr, labels),
+        "bne"  => return branch_type(&operands, 0b001, current_addr, labels),
+        "blt"  => return branch_type(&operands, 0b100, current_addr, labels),
+        "bge"  => return branch_type(&operands, 0b101, current_addr, labels),
+        "bltu" => return branch_type(&operands, 0b110, current_addr, labels),
+        "bgeu" => return branch_type(&operands, 0b111, current_addr, labels),
         _ => {}
     }
 
@@ -315,12 +315,12 @@ fn encode_instruction(
             let rd = parse_reg(&operands, 0)?;
             let imm = resolve_imm(&operands, 1, current_addr, labels)?;
             // LUI takes the upper 20 bits: imm is the page number, shifted left by 12
-            return Ok(encode_u(0b0110111, rd, imm << 12));
+            return Ok(u(imm as u32, rd, 0b0110111));
         }
         "auipc" => {
             let rd = parse_reg(&operands, 0)?;
             let imm = resolve_imm(&operands, 1, current_addr, labels)?;
-            return Ok(encode_u(0b0010111, rd, imm << 12));
+            return Ok(u(imm as u32, rd, 0b0010111));
         }
         _ => {}
     }
@@ -331,11 +331,11 @@ fn encode_instruction(
             if operands.len() == 1 {
                 // jal label → jal x1, label
                 let imm = resolve_imm(&operands, 0, current_addr, labels)?;
-                return Ok(encode_j(0b1101111, 1, imm));
+                return Ok(j(imm, 1, 0b1101111));
             }
             let rd = parse_reg(&operands, 0)?;
             let imm = resolve_imm(&operands, 1, current_addr, labels)?;
-            return Ok(encode_j(0b1101111, rd, imm));
+            return Ok(j(imm, rd, 0b1101111));
         }
         _ => {}
     }
@@ -346,11 +346,11 @@ fn encode_instruction(
             let rd = parse_reg(&operands, 0)?;
             let rs1 = parse_reg(&operands, 1)?;
             let imm = resolve_imm(&operands, 2, current_addr, labels)?;
-            return Ok(encode_i(0b1100111, rd, 0b000, rs1, imm));
+            return Ok(i(imm, rs1, 0b000, rd, 0b1100111));
         } else if operands.len() == 2 {
             let rd = parse_reg(&operands, 0)?;
             let (offset, rs1) = parse_offset_reg(operands[1])?;
-            return Ok(encode_i(0b1100111, rd, 0b000, rs1, offset));
+            return Ok(i(offset, rs1, 0b000, rd, 0b1100111));
         }
         return Err("jalr requires 2 or 3 operands".into());
     }
@@ -376,7 +376,7 @@ fn encode_instruction(
                 parse_reg(&operands, 2)?
             };
             // CSR encoding: I-type with csr addr in imm[11:0], rs1/uimm in rs1 field
-            return Ok(encode_i(0b1110011, rd, funct3, rs1_or_uimm, csr_addr as i32));
+            return Ok(i(csr_addr as i32, rs1_or_uimm, funct3, rd, 0b1110011));
         }
         _ => {}
     }
@@ -432,7 +432,7 @@ fn r_type(operands: &[&str], opcode: u32, funct3: u32, funct7: u32) -> Result<u3
     let rd = parse_reg(operands, 0)?;
     let rs1 = parse_reg(operands, 1)?;
     let rs2 = parse_reg(operands, 2)?;
-    Ok(encode_r(opcode, rd, funct3, rs1, rs2, funct7))
+    Ok(r(funct7, rs2, rs1, funct3, rd, opcode))
 }
 
 fn i_type_alu(
@@ -445,24 +445,23 @@ fn i_type_alu(
     let rd = parse_reg(operands, 0)?;
     let rs1 = parse_reg(operands, 1)?;
     let imm = resolve_imm(operands, 2, current_addr, labels)?;
-    Ok(encode_i(opcode, rd, funct3, rs1, imm))
+    Ok(i(imm, rs1, funct3, rd, opcode))
 }
 
 fn load_type(operands: &[&str], opcode: u32, funct3: u32) -> Result<u32, String> {
     let rd = parse_reg(operands, 0)?;
     let (offset, rs1) = parse_offset_reg(operands.get(1).ok_or("missing offset(reg)")?)?;
-    Ok(encode_i(opcode, rd, funct3, rs1, offset))
+    Ok(i(offset, rs1, funct3, rd, opcode))
 }
 
-fn store_type(operands: &[&str], opcode: u32, funct3: u32) -> Result<u32, String> {
+fn store_type(operands: &[&str], funct3: u32) -> Result<u32, String> {
     let rs2 = parse_reg(operands, 0)?;
     let (offset, rs1) = parse_offset_reg(operands.get(1).ok_or("missing offset(reg)")?)?;
-    Ok(encode_s(opcode, funct3, rs1, rs2, offset))
+    Ok(s(offset, rs2, rs1, funct3))
 }
 
 fn branch_type(
     operands: &[&str],
-    opcode: u32,
     funct3: u32,
     current_addr: u32,
     labels: &HashMap<String, u32>,
@@ -470,7 +469,7 @@ fn branch_type(
     let rs1 = parse_reg(operands, 0)?;
     let rs2 = parse_reg(operands, 1)?;
     let imm = resolve_imm(operands, 2, current_addr, labels)?;
-    Ok(encode_b(opcode, funct3, rs1, rs2, imm))
+    Ok(b(imm, rs1, rs2, funct3))
 }
 
 #[cfg(test)]

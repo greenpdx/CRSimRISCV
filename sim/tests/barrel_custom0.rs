@@ -1,7 +1,8 @@
 //! Phase B2 — custom-0 instructions for the barrel processor.
 //! FORK / JOIN / DONE / YIELD / TID / FORKRET, opcode 0x0b.
 
-use cpu_sim::sim::barrel::{BarrelState, EXT_DMEM_BASE, N_THREADS};
+use cpu_sim::sim::barrel::{BarrelState, N_THREADS};
+use cpu_sim::isa::encode::{NOP, SPIN, addi};
 
 // ── Helper: set up a barrel CPU with slot 0 = parent, slot 1 =
 // inactive (FORK target), slots 2..7 = spinning at a NOP loop in
@@ -35,20 +36,6 @@ fn yield_()                          -> u32 { enc(0x03, 0, 0, 0) }
 fn tid(rd: u32)                      -> u32 { enc(0x04, 0, 0, rd) }
 fn forkret(rd_src: u32)              -> u32 { enc(0x05, 0, 0, rd_src) }
 
-// Standard RV32I encoders
-const NOP: u32 = 0x00000013;
-fn addi(rd: u32, rs1: u32, imm: i32) -> u32 {
-    (((imm as u32) & 0xfff) << 20) | (rs1 << 15) | (0 << 12) | (rd << 7) | 0x13
-}
-fn jal_spin() -> u32 { 0x0000006f } // jal x0, 0
-fn lui(rd: u32, imm: u32) -> u32 { (imm << 12) | (rd << 7) | 0x37 }
-fn sw(rs1: u32, rs2: u32, off: i32) -> u32 {
-    let imm = off as u32 & 0xfff;
-    let imm11_5 = (imm >> 5) & 0x7f;
-    let imm4_0  = imm & 0x1f;
-    (imm11_5 << 25) | (rs2 << 20) | (rs1 << 15) | (0b010 << 12) | (imm4_0 << 7) | 0x23
-}
-
 // ── TID ───────────────────────────────────────────────────────────
 #[test]
 fn barrel_tid_writes_current_thread_id() {
@@ -58,7 +45,7 @@ fn barrel_tid_writes_current_thread_id() {
     for i in 0..N_THREADS {
         let base = i * 2;
         rom[base + 0] = tid(5);
-        rom[base + 1] = jal_spin();
+        rom[base + 1] = SPIN;
     }
     let mut cpu = BarrelState::new();
     cpu.activate_all();
@@ -91,10 +78,10 @@ fn barrel_fork_allocates_lowest_free_slot() {
     rom[0]  = addi(7, 0, 0x40);
     rom[1]  = addi(8, 0, 0);
     rom[2]  = fork(5, 7, 8);
-    rom[3]  = jal_spin();
+    rom[3]  = SPIN;
     rom[16] = addi(6, 0, 99);
-    rom[17] = jal_spin();
-    rom[32] = jal_spin();
+    rom[17] = SPIN;
+    rom[32] = SPIN;
     let mut cpu = cpu_with_spinners(0x80);
     cpu.load_program(&rom);
     cpu.prewarm_icache();
@@ -112,7 +99,7 @@ fn barrel_fork_returns_minus1_when_full() {
     rom[0] = addi(7, 0, 0x40);    // dummy start pc
     rom[1] = addi(8, 0, 0);
     rom[2] = fork(5, 7, 8);
-    rom[3] = jal_spin();
+    rom[3] = SPIN;
     let mut cpu = BarrelState::new();
     cpu.activate_all();
     for i in 0..N_THREADS {
@@ -133,11 +120,11 @@ fn barrel_join_blocks_until_child_done() {
     rom[2]  = fork(5, 7, 8);
     rom[3]  = join(5);
     rom[4]  = addi(6, 0, 7);
-    rom[5]  = jal_spin();
+    rom[5]  = SPIN;
     rom[16] = addi(6, 0, 99);
     rom[17] = done();
-    rom[18] = jal_spin();
-    rom[32] = jal_spin();
+    rom[18] = SPIN;
+    rom[32] = SPIN;
     let mut cpu = cpu_with_spinners(0x80);
     cpu.load_program(&rom);
     cpu.prewarm_icache();
@@ -168,10 +155,10 @@ fn barrel_join_on_finished_thread_no_block() {
     rom[10] = NOP;
     rom[11] = join(5);
     rom[12] = addi(6, 0, 42);
-    rom[13] = jal_spin();
+    rom[13] = SPIN;
     rom[16] = done();
-    rom[17] = jal_spin();
-    rom[32] = jal_spin();
+    rom[17] = SPIN;
+    rom[32] = SPIN;
     let mut cpu = cpu_with_spinners(0x80);
     cpu.load_program(&rom);
     cpu.prewarm_icache();
@@ -231,15 +218,15 @@ fn barrel_forkret_passes_return_value_to_parent_a0() {
     rom[1]  = addi(8, 0, 0);
     rom[2]  = fork(5, 7, 8);
     rom[3]  = join(5);
-    rom[4]  = jal_spin();
+    rom[4]  = SPIN;
     rom[16] = addi(10, 0, 0x55);
     // pad so child's addi has time to retire before forkret reads its rd
     rom[17] = NOP;
     rom[18] = NOP;
     rom[19] = NOP;
     rom[20] = forkret(10);
-    rom[21] = jal_spin();
-    rom[32] = jal_spin();
+    rom[21] = SPIN;
+    rom[32] = SPIN;
     let mut cpu = cpu_with_spinners(0x80);
     cpu.load_program(&rom);
     cpu.prewarm_icache();

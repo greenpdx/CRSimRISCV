@@ -11,11 +11,11 @@
 //!   const trace = cpu.step();   // → { Fetch: ["pc","rom"], ... }
 //!   cpu.poke_register(3, 42);
 
-use crate::disasm::csrs::{csr_desc, csr_name};
-use crate::disasm::descriptions::mnemonic_desc;
+use crate::isa::csr::{csr_desc, csr_name};
+use crate::isa::disasm::descriptions::mnemonic_desc;
 use crate::sim::cpu_state::CpuState;
 use crate::sim::phase::Phase;
-use crate::sim::trap::{IRQ_MEI, IRQ_MSI, IRQ_MTI, IRQ_SEI, IRQ_SSI, IRQ_STI};
+use crate::sim::system::{IRQ_MEI, IRQ_MSI, IRQ_MTI, IRQ_SEI, IRQ_SSI, IRQ_STI};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
@@ -50,22 +50,22 @@ impl JsCpuState {
     /// Reset the core (registers, RAM, IO data, CSRs, traps) but keep the
     /// ROM, ROM / RAM sizes, I/O base and the traps option.
     pub fn reset_keep_rom(&mut self) {
-        let rom = std::mem::take(&mut self.inner.rom);
-        let ram_words = self.inner.ram.len();
-        let (io_base, traps, zmmul) = (self.inner.io_base, self.inner.traps_enabled, self.inner.zmmul);
-        let extra: Vec<u32> = self.inner.ram_extra.keys().copied().collect();
+        let rom = std::mem::take(&mut self.inner.mem.rom);
+        let ram_words = self.inner.mem.ram.len();
+        let (io_base, traps, zmmul) = (self.inner.mem.io_base, self.inner.traps_enabled, self.inner.zmmul);
+        let extra: Vec<u32> = self.inner.mem.ram_extra.keys().copied().collect();
         self.inner = CpuState::with_sizes(rom.len(), ram_words);
-        self.inner.rom = rom;
-        self.inner.io_base = io_base;
+        self.inner.mem.rom = rom;
+        self.inner.mem.io_base = io_base;
         self.inner.traps_enabled = traps;
         self.inner.zmmul = zmmul;
         // Written-outside-window words stay listed (zeroed), like the panel's RAM view
-        for a in extra { self.inner.ram_extra.insert(a, 0); }
+        for a in extra { self.inner.mem.ram_extra.insert(a, 0); }
     }
 
     /// Replace the whole ROM (padded with NOPs to its size).
     pub fn set_rom(&mut self, words: &[u32]) {
-        for (i, slot) in self.inner.rom.iter_mut().enumerate() {
+        for (i, slot) in self.inner.mem.rom.iter_mut().enumerate() {
             *slot = words.get(i).copied().unwrap_or(0x0000_0013);
         }
     }
@@ -74,10 +74,10 @@ impl JsCpuState {
     pub fn set_traps_enabled(&mut self, on: bool) { self.inner.traps_enabled = on; }
     #[wasm_bindgen(getter)] pub fn zmmul(&self) -> bool { self.inner.zmmul }
     pub fn set_zmmul(&mut self, on: bool) { self.inner.zmmul = on; }
-    #[wasm_bindgen(getter)] pub fn io_data(&self) -> u32 { self.inner.io_data }
-    pub fn set_io_data(&mut self, v: u32) { self.inner.io_data = v; }
-    #[wasm_bindgen(getter)] pub fn io_base(&self) -> u32 { self.inner.io_base }
-    pub fn set_io_base(&mut self, base: u32) { self.inner.io_base = base; }
+    #[wasm_bindgen(getter)] pub fn io_data(&self) -> u32 { self.inner.mem.io_data }
+    pub fn set_io_data(&mut self, v: u32) { self.inner.mem.io_data = v; }
+    #[wasm_bindgen(getter)] pub fn io_base(&self) -> u32 { self.inner.mem.io_base }
+    pub fn set_io_base(&mut self, base: u32) { self.inner.mem.io_base = base; }
     #[wasm_bindgen(getter)] pub fn pending_irq(&self) -> u32 { self.inner.sys.pending_irq }
     #[wasm_bindgen(getter)] pub fn trap_depth(&self) -> u32 { self.inner.sys.trap_depth }
 
@@ -96,9 +96,9 @@ impl JsCpuState {
 
     /// Restore a `save_state` string. Returns false if it does not parse.
     pub fn restore_state(&mut self, json: &str) -> bool {
-        match serde_json::from_str::<CpuState>(json) {
-            Ok(c) => { self.inner = c; true }
-            Err(_) => false,
+        match CpuState::from_json(json) {
+            Some(c) => { self.inner = c; true }
+            None => false,
         }
     }
 
@@ -139,7 +139,7 @@ impl JsCpuState {
     /// Disassemble one 32-bit instruction word.
     /// Returns `{ class, mnemonic, operands }`.
     pub fn disasm(&self, instr: u32) -> JsValue {
-        let d = crate::disasm::disassemble(instr);
+        let d = crate::isa::disasm::disassemble(instr);
         let desc = mnemonic_desc(&d.mnemonic).unwrap_or("").to_string();
         let s = DisasmJson { class: d.class, mnemonic: d.mnemonic, operands: d.operands, desc };
         serde_wasm_bindgen::to_value(&s).unwrap_or(JsValue::NULL)
@@ -522,10 +522,10 @@ impl JsPipelineState {
     pub fn registers(&self) -> Vec<u32> { self.inner.registers.to_vec() }
     /// Returns machine-side RAM (alias kept for back-compat with the
     /// pre-split visualizer code).
-    pub fn ram(&self) -> Vec<u32> { self.inner.machine_ram.clone() }
-    pub fn machine_ram(&self) -> Vec<u32> { self.inner.machine_ram.clone() }
-    pub fn user_ram(&self) -> Vec<u32> { self.inner.user_ram.clone() }
-    pub fn rom(&self) -> Vec<u32> { self.inner.rom.clone() }
+    pub fn ram(&self) -> Vec<u32> { self.inner.mem.flat().map(|f| f.machine_ram.clone()).unwrap_or_default() }
+    pub fn machine_ram(&self) -> Vec<u32> { self.inner.mem.flat().map(|f| f.machine_ram.clone()).unwrap_or_default() }
+    pub fn user_ram(&self) -> Vec<u32> { self.inner.mem.flat().map(|f| f.user_ram.clone()).unwrap_or_default() }
+    pub fn rom(&self) -> Vec<u32> { self.inner.mem.flat().map(|f| f.rom.clone()).unwrap_or_default() }
 
     // ── Per-cycle activity (for the visualizer) ────────────────────────
     #[wasm_bindgen(getter)] pub fn reg_read_mask(&self) -> u32 { self.inner.reg_read_mask }
@@ -624,7 +624,7 @@ impl JsPipelineState {
     }
     pub fn poke_rom(&mut self, byte_addr: u32, val: u32) {
         let idx = (byte_addr >> 2) as usize;
-        if idx < self.inner.rom.len() { self.inner.rom[idx] = val; }
+        if let Some(f) = self.inner.mem.flat_mut() { if let Some(w) = f.rom.get_mut(idx) { *w = val; } }
     }
 
     // ── Zicsr CSR accessors ────────────────────────────────────────────
@@ -838,8 +838,8 @@ impl JsBarrelState {
         if mask != 0 { self.inner.raise_irq(mask); }
     }
     pub fn clear_irq(&mut self) { self.inner.clear_irq(); }
-    pub fn ext_imem(&self) -> Vec<u32> { self.inner.ext_imem.clone() }
-    pub fn ext_dmem(&self) -> Vec<u32> { self.inner.ext_dmem.clone() }
+    pub fn ext_imem(&self) -> Vec<u32> { self.inner.mem.imem.clone() }
+    pub fn ext_dmem(&self) -> Vec<u32> { self.inner.mem.dmem.clone() }
     pub fn read_isram_word(&self, slot: u8, byte_off: u32) -> u32 {
         self.inner.isram_read(slot, byte_off)
     }

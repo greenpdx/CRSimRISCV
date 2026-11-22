@@ -17,6 +17,7 @@
 //! on the rising clock edge, but the combinational logic for stage N
 //! reads its pipeline-register input as latched on the previous edge.
 
+pub mod mem;
 pub mod state;
 pub mod csr;
 pub mod tlb;
@@ -27,7 +28,7 @@ pub mod stage_ex;
 pub mod stage_ma;
 pub mod stage_wb;
 
-use crate::sim::system::addr;
+use crate::isa::csr::addr;
 
 pub use state::{
     BranchMode, ControlBits, ExMa, ForwardSrc, IdEx, IfId, MaWb, PipelineState,
@@ -118,15 +119,12 @@ impl PipelineState {
         // Memory-panel mode: frozen while an earlier access is still in
         // flight; otherwise run the cycle and freeze for the rest of the
         // slower side's latency.
-        let hier = self.hier.clone();
-        if let Some(h) = &hier {
-            if h.sys.borrow_mut().core_begin(h.core as usize) {
-                self.cycle_count += 1;
-                return;
-            }
+        if self.mem.core_begin() {
+            self.cycle_count += 1;
+            return;
         }
         self.step_cycle();
-        if let Some(h) = &hier { h.sys.borrow_mut().core_end(h.core as usize); }
+        self.mem.core_end();
     }
 
     /// One clock of the pipeline (the body of `step`).
@@ -342,9 +340,11 @@ impl PipelineState {
     pub fn reset(&mut self) {
         self.pc = 0;
         self.registers = [0; 32];
-        for word in self.machine_ram.iter_mut() { *word = 0; }
-        for word in self.user_ram.iter_mut() { *word = 0; }
-        self.io_data = 0;
+        if let Some(f) = self.mem.flat_mut() {
+            f.machine_ram.fill(0);
+            f.user_ram.fill(0);
+            f.io_data = 0;
+        }
         self.reg_read_mask = 0;
         self.reg_write_mask = 0;
         self.last_ram_addr = 0;

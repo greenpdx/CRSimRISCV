@@ -10,35 +10,7 @@ pub struct OooExample {
     pub data: Vec<(u32, u32)>,
 }
 
-/// RV32I + Zmmul encoders.
-pub mod enc {
-    pub fn r(f7: u32, rs2: u32, rs1: u32, f3: u32, rd: u32, op: u32) -> u32 { f7 << 25 | rs2 << 20 | rs1 << 15 | f3 << 12 | rd << 7 | op }
-    pub fn i(imm: i32, rs1: u32, f3: u32, rd: u32, op: u32) -> u32 { ((imm as u32) & 0xfff) << 20 | rs1 << 15 | f3 << 12 | rd << 7 | op }
-    pub fn s(imm: i32, rs2: u32, rs1: u32, f3: u32) -> u32 { let m = imm as u32; ((m >> 5) & 0x7f) << 25 | rs2 << 20 | rs1 << 15 | f3 << 12 | (m & 0x1f) << 7 | 0x23 }
-    pub fn b(off: i32, rs1: u32, rs2: u32, f3: u32) -> u32 {
-        let o = off as u32;
-        ((o >> 12) & 1) << 31 | ((o >> 5) & 0x3f) << 25 | rs2 << 20 | rs1 << 15 | f3 << 12 | ((o >> 1) & 0xf) << 8 | ((o >> 11) & 1) << 7 | 0x63
-    }
-    pub fn jal(rd: u32, off: i32) -> u32 { let o = off as u32; ((o >> 20) & 1) << 31 | ((o >> 1) & 0x3ff) << 21 | ((o >> 11) & 1) << 20 | ((o >> 12) & 0xff) << 12 | rd << 7 | 0x6f }
-    pub fn jalr(rd: u32, rs1: u32, off: i32) -> u32 { i(off, rs1, 0, rd, 0x67) }
-    pub fn addi(rd: u32, rs1: u32, imm: i32) -> u32 { i(imm, rs1, 0, rd, 0x13) }
-    pub fn add(rd: u32, a: u32, b: u32) -> u32 { r(0, b, a, 0, rd, 0x33) }
-    pub fn sub(rd: u32, a: u32, b: u32) -> u32 { r(0x20, b, a, 0, rd, 0x33) }
-    pub fn mul(rd: u32, a: u32, b: u32) -> u32 { r(1, b, a, 0, rd, 0x33) }
-    pub fn lui(rd: u32, imm20: u32) -> u32 { imm20 << 12 | rd << 7 | 0x37 }
-    pub fn lw(rd: u32, rs1: u32, off: i32) -> u32 { i(off, rs1, 2, rd, 0x03) }
-    pub fn sw(rs2: u32, rs1: u32, off: i32) -> u32 { s(off, rs2, rs1, 2) }
-    /// bne rs1, rs2, off
-    pub fn bne(rs1: u32, rs2: u32, off: i32) -> u32 { b(off, rs1, rs2, 1) }
-    pub fn beq(rs1: u32, rs2: u32, off: i32) -> u32 { b(off, rs1, rs2, 0) }
-    pub fn csrr(rd: u32, csr: i32) -> u32 { i(csr, 0, 2, rd, 0x73) }
-    pub fn csrw(csr: i32, rs1: u32) -> u32 { i(csr, rs1, 1, 0, 0x73) }
-    pub const SPIN: u32 = 0x0000_006f;
-    pub const NOP: u32 = 0x0000_0013;
-    pub const ECALL: u32 = 0x0000_0073;
-    pub const MRET: u32 = 0x3020_0073;
-}
-use enc::*;
+use crate::isa::encode::*;
 
 pub fn examples() -> Vec<OooExample> {
     vec![

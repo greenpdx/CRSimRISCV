@@ -197,14 +197,14 @@ export const PC_SEL_LABEL: Record<0|1|2, string> = {
   2: '(rs1+imm)&~1  (JALR)',
 }
 
-// Branch condition per funct3 — which ALU flag to test
-export type BranchCondition = 'zero' | '!zero' | 'neg' | '!neg' | 'carry' | '!carry'
+// Branch condition per funct3 — which ALU flags of rs1 - rs2 to test
+export type BranchCondition = 'zero' | '!zero' | 'lt' | '!lt' | 'carry' | '!carry'
 
 export const BRANCH_CONDITION: Record<number, BranchCondition> = {
   0b000: 'zero',   // BEQ  — equal        → zero=1
   0b001: '!zero',  // BNE  — not equal    → zero=0
-  0b100: 'neg',    // BLT  — less than    → negative=1
-  0b101: '!neg',   // BGE  — >=           → negative=0
+  0b100: 'lt',     // BLT  — signed <     → negative ≠ overflow
+  0b101: '!lt',    // BGE  — signed >=    → negative = overflow
   0b110: 'carry',  // BLTU — unsigned <   → carry=1
   0b111: '!carry', // BGEU — unsigned >=  → carry=0
 }

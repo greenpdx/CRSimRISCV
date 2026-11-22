@@ -1,7 +1,7 @@
 //! ActivityTrace: which components fired in which phase during one `step()`.
 
 use crate::sim::phase::Phase;
-use crate::types::cpu::ComponentId;
+use crate::data::netlist::ComponentId;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]

@@ -1,6 +1,4 @@
 mod assembler;
-mod encoder;
-mod registers;
 
 use wasm_bindgen::prelude::*;
 

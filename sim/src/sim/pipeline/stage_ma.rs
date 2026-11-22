@@ -7,9 +7,8 @@
 //! Always-active components: `ma_wb_reg`, plus `ram` or `io` and
 //! `loadstore` if memory access.
 
-use crate::sim::lsu::store_merge;
-use crate::data::load_width::sign_extend_load;
-use super::csr::CsrOp;
+use crate::isa::lsu;
+use crate::isa::csr::CsrOp;
 use super::state::{ExMa, MaWb, PipelineState};
 use super::translate::{translate, AccessKind};
 
@@ -59,11 +58,11 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
 
     if ex_ma.ctrl.mem_read {
         let raw = if state.io_at(vaddr) {
-            state.io_data
+            state.mem.io_data()
         } else {
             state.priv_ram_read(addr)
         };
-        mem_data = sign_extend_load(raw, addr, funct3);
+        mem_data = lsu::load(raw, addr, funct3);
     }
 
     // Zicsr: CSR read/modify/write happens in MA. The old value goes
@@ -95,9 +94,10 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
         // already there (read without a second memory access).
         let sub_word = ex_ma.funct3 & 3 != 2;
         if state.io_at(vaddr) {
-            state.io_data = if sub_word { store_merge(state.io_data, ex_ma.rs2_data, vaddr, ex_ma.funct3) } else { ex_ma.rs2_data };
+            let io = state.mem.io_data();
+            state.mem.set_io_data(if sub_word { lsu::store_merge(io, ex_ma.rs2_data, vaddr, ex_ma.funct3) } else { ex_ma.rs2_data });
         } else {
-            let word = if sub_word { store_merge(state.word_peek(addr), ex_ma.rs2_data, addr, ex_ma.funct3) } else { ex_ma.rs2_data };
+            let word = if sub_word { lsu::store_merge(state.word_peek(addr), ex_ma.rs2_data, addr, ex_ma.funct3) } else { ex_ma.rs2_data };
             state.priv_ram_write(addr, word);
         }
     }

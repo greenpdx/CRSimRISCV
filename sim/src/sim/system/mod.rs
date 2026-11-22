@@ -13,7 +13,8 @@ pub mod csr;
 pub mod irq;
 pub mod trap;
 
-pub use csr::{addr, csr_exec, CsrFile, CsrResult, PrivMode};
+pub use csr::{CsrFile, PrivMode};
+use crate::isa::csr::{addr, csr_exec, CsrResult};
 pub use irq::*;
 pub use trap::*;
 
