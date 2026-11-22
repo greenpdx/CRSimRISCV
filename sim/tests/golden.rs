@@ -23,6 +23,8 @@ use cpu_sim::sim::memsys::{self, system::MemPanelSystem};
 use cpu_sim::isa::encode as enc;
 use cpu_sim::sim::ooo::{self, mem::MemMode, OooCpu};
 use cpu_sim::sim::pipeline::PipelineState;
+use cpu_sim::sim::pipeline::state as pl;
+use cpu_sim::sim::barrel::state as bl;
 use cpu_sim::sim::system::SysUnit;
 
 // ── Hash (FNV-1a 64: fixed, unlike std's DefaultHasher) ─────────────────────
@@ -223,8 +225,67 @@ fn single(words: &[u32], zmmul: bool, traps: bool) -> Run {
     Run { arch: a.0, view: v.0, regs: c.registers }
 }
 
+// Pipeline / barrel latches are hashed field by field as numbers (not by
+// `Debug`), so a reshape of the latches (`Latch<T>`, control enums) is proved
+// by an unchanged view stream: every value stays the same.
+
+fn p_ctrl(v: &mut H, c: &pl::ControlBits) {
+    for x in [c.reg_write as u32, c.alu_src as u32, c.alu_op as u32, c.mem.is_load() as u32, c.mem.is_store() as u32,
+              c.wb_sel.code() as u32, c.pc_sel.code() as u32, c.branch as u32, c.jump as u32, c.csr_op.to_u8() as u32,
+              c.is_sfence as u32] {
+        v.u32(x);
+    }
+}
+fn p_if_id(v: &mut H, r: &pl::IfId) {
+    v.words(&[r.valid as u32, r.pc, r.instr, r.pc_plus4, r.trap_kind.code() as u32, r.trap_value, r.flush_bubble as u32]);
+}
+fn p_id_ex(v: &mut H, r: &pl::IdEx) {
+    v.words(&[r.valid as u32, r.pc, r.pc_plus4, r.instr, r.rs1_data, r.rs2_data, r.imm, r.rs1_num as u32,
+              r.rs2_num as u32, r.rd_num as u32, r.funct3 as u32, r.funct7b30 as u32, r.opcode as u32]);
+    p_ctrl(v, &r.ctrl);
+    v.words(&[r.csr_addr as u32, r.csr_uimm as u32, r.csr_imm_form as u32, r.trap_kind.code() as u32, r.stall_reg as u32,
+              r.flush_bubble as u32, r.early_target, r.early_branch as u32, r.id_redirected as u32]);
+}
+fn p_ex_ma(v: &mut H, r: &pl::ExMa) {
+    v.words(&[r.valid as u32, r.instr, r.alu_result, r.rs2_data, r.pc_plus4, r.rd_num as u32, r.funct3 as u32,
+              r.branch_taken as u32, r.branch_target]);
+    p_ctrl(v, &r.ctrl);
+    v.words(&[r.csr_addr as u32, r.csr_write_val, r.csr_src_is_zero as u32, r.trap_kind.code() as u32, r.pc,
+              r.stall_reg as u32, r.flush_bubble as u32, r.early_redirected as u32]);
+}
+fn p_ma_wb(v: &mut H, r: &pl::MaWb) {
+    v.words(&[r.valid as u32, r.instr, r.alu_result, r.mem_data, r.pc_plus4, r.rd_num as u32]);
+    p_ctrl(v, &r.ctrl);
+    v.words(&[r.trap_kind.code() as u32, r.pc, r.trap_value, r.stall_reg as u32, r.flush_bubble as u32]);
+}
+
+fn b_ctrl(v: &mut H, c: &bl::ControlBits) {
+    v.words(&[c.reg_write as u32, c.alu_src as u32, c.alu_op as u32, c.mem.is_load() as u32, c.mem.is_store() as u32,
+              c.wb_sel.code() as u32, c.branch as u32, c.jump as u32, c.custom_op as u32]);
+}
+fn b_lt_if(v: &mut H, r: &bl::LtIf) { v.words(&[r.valid as u32, r.thread as u32, r.pc]); }
+fn b_if_di(v: &mut H, r: &bl::IfDi) { v.words(&[r.valid as u32, r.thread as u32, r.pc, r.instr, r.src as u32]); }
+fn b_di_ex(v: &mut H, r: &bl::DiEx) {
+    v.words(&[r.valid as u32, r.thread as u32, r.pc, r.pc_plus4, r.instr, r.rs1_data, r.rs2_data, r.imm,
+              r.rs1_num as u32, r.rs2_num as u32, r.rd_num as u32, r.funct3 as u32, r.funct7b30 as u32, r.opcode as u32]);
+    b_ctrl(v, &r.ctrl);
+    v.words(&[r.trap_kind.code() as u32, r.csr_op.to_u8() as u32, r.csr_addr as u32, r.csr_uimm as u32,
+              r.csr_imm_form as u32]);
+}
+fn b_ex_ma(v: &mut H, r: &bl::ExMa) {
+    v.words(&[r.valid as u32, r.thread as u32, r.instr, r.alu_result, r.rs1_data, r.rs2_data, r.pc_plus4,
+              r.rd_num as u32, r.funct3 as u32, r.branch_taken as u32, r.branch_target]);
+    b_ctrl(v, &r.ctrl);
+    v.words(&[r.trap_kind.code() as u32, r.pc, r.csr_op.to_u8() as u32, r.csr_addr as u32, r.csr_write_val,
+              r.csr_src_is_zero as u32]);
+}
+fn b_ma_wb(v: &mut H, r: &bl::MaWb) {
+    v.words(&[r.valid as u32, r.thread as u32, r.instr, r.alu_result, r.mem_data, r.pc_plus4, r.rd_num as u32]);
+    b_ctrl(v, &r.ctrl);
+}
+
 fn pipeline_view(v: &mut H, c: &PipelineState) {
-    v.dbg(&c.if_id); v.dbg(&c.id_ex); v.dbg(&c.ex_ma); v.dbg(&c.ma_wb); v.dbg(&c.last_wb);
+    p_if_id(v, &c.if_id); p_id_ex(v, &c.id_ex); p_ex_ma(v, &c.ex_ma); p_ma_wb(v, &c.ma_wb); p_ma_wb(v, &c.last_wb);
     v.dbg(&(c.last_stall, c.last_flush, c.last_forward_a, c.last_forward_b, c.last_trap_taken, c.last_stall_reg));
     v.dbg(&(c.reg_read_mask, c.reg_write_mask, c.last_ram_addr, c.last_ram_kind, c.last_ram_side));
     v.dbg(&c.last_csr_snapshot);
@@ -256,7 +317,8 @@ fn barrel(words: &[u32], all_threads: bool) -> Run {
         c.step();
         for t in &c.threads { a.u32(t.pc); a.words(&t.regs); }
         v.dbg(&c.threads);
-        v.dbg(&c.lt_if); v.dbg(&c.if_di); v.dbg(&c.di_ex); v.dbg(&c.ex_ma); v.dbg(&c.ma_wb); v.dbg(&c.last_wb);
+        b_lt_if(&mut v, &c.lt_if); b_if_di(&mut v, &c.if_di); b_di_ex(&mut v, &c.di_ex);
+        b_ex_ma(&mut v, &c.ex_ma); b_ma_wb(&mut v, &c.ma_wb); b_ma_wb(&mut v, &c.last_wb);
         v.dbg(&c.bus); v.dbg(&c.store_buffer); v.dbg(&c.dma); v.dbg(&c.irq);
         v.dbg(&(c.icache.hits, c.icache.misses, c.icache.pending, c.dcache.hits, c.dcache.misses, c.dcache.pending));
         v.dbg(&(c.sched_mode, c.current_thread, c.sched_history, c.sched_history_idx, c.cycle_count, c.halted));

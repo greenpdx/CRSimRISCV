@@ -19,21 +19,6 @@ pub fn is_jump(opcode: u8) -> bool { opcode == 0b1101111 || opcode == 0b1100111 
 pub fn is_jalr(opcode: u8) -> bool { opcode == 0b1100111 }
 pub fn is_auipc(opcode: u8) -> bool { opcode == 0b0010111 }
 
-// ── SYSTEM trap kind ────────────────────────────────────────────
-
-/// Trap kind of a decoded SYSTEM funct3 = 0 instruction:
-/// 0 = none (WFI: no-op), 1 = illegal, 2 = ecall, 3 = ebreak, 4 = mret, 5 = sret.
-pub fn system_trap_kind(i: &Instr) -> u8 {
-    match i {
-        Instr::Ecall => 2,
-        Instr::Ebreak => 3,
-        Instr::Mret => 4,
-        Instr::Sret => 5,
-        Instr::Wfi => 0,
-        _ => 1,
-    }
-}
-
 // ── Register access trait ───────────────────────────────────────
 
 /// Trait abstracting register-file reads. The pipeline implements

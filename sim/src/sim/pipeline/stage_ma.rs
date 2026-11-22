@@ -8,8 +8,7 @@
 //! `loadstore` if memory access.
 
 use crate::isa::lsu;
-use crate::isa::csr::CsrOp;
-use super::state::{ExMa, MaWb, PipelineState};
+use super::state::{ControlBits, CsrOp, ExMa, MaWb, MaWbData, PipelineState, TrapKind};
 use super::translate::{translate, AccessKind};
 
 /// Compute the MA stage outputs and apply any side effects (RAM/IO
@@ -29,26 +28,20 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
     // Sv32 translation for loads/stores. CSR ops and IO accesses skip
     // translation (IO is M-mode-only in our model). On fault, return
     // a MaWb carrying the trap kind so step() delivers the trap.
-    let needs_xlat = ex_ma.ctrl.mem_read || ex_ma.ctrl.mem_write;
+    let needs_xlat = ex_ma.ctrl.mem.is_access();
     let phys_addr = if needs_xlat && !state.io_at(vaddr) {
-        let access = if ex_ma.ctrl.mem_write { AccessKind::Store } else { AccessKind::Load };
+        let access = if ex_ma.ctrl.mem.is_store() { AccessKind::Store } else { AccessKind::Load };
         match translate(state, vaddr, access) {
             Ok(p) => p,
             Err(cause) => {
-                let trap_kind = if cause == 13 { 7 } else { 8 };
-                return MaWb {
-                    valid: true,
-                    instr: ex_ma.instr,
-                    alu_result: 0, mem_data: 0,
+                let trap_kind = if cause == 13 { TrapKind::LoadPageFault } else { TrapKind::StorePageFault };
+                return MaWb::new(ex_ma.pc, ex_ma.instr, MaWbData {
                     pc_plus4: ex_ma.pc_plus4,
-                    rd_num: 0,
-                    ctrl: super::state::ControlBits::default(),
+                    ctrl: ControlBits::default(),
                     trap_kind,
-                    trap_pc: ex_ma.trap_pc,
                     trap_value: vaddr,
-                    stall_reg: 0,
-                    flush_bubble: false,
-                };
+                    ..MaWbData::default()
+                });
             }
         }
     } else {
@@ -56,7 +49,7 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
     };
     let addr = phys_addr;
 
-    if ex_ma.ctrl.mem_read {
+    if ex_ma.ctrl.mem.is_load() {
         let raw = if state.io_at(vaddr) {
             state.mem.io_data()
         } else {
@@ -67,11 +60,11 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
 
     // Zicsr: CSR read/modify/write happens in MA. The old value goes
     // into `mem_data` so the WB stage can write it to rd via wb_sel=3.
-    if ex_ma.ctrl.csr_op != 0 {
+    if ex_ma.ctrl.csr_op != CsrOp::None {
         // Shared Zicsr unit: funct3[1:0] = the op; rs1 = 0 marks "no
         // write" for RS / RC (rs1 = x0 or zimm = 0, decided in EX).
         let addr = ex_ma.csr_addr;
-        let f3 = CsrOp::from_u8(ex_ma.ctrl.csr_op).to_u8();
+        let f3 = ex_ma.ctrl.csr_op.to_u8();
         let rs1_marker = if ex_ma.csr_src_is_zero { 0 } else { 1 };
         let r = state.sys.csr(addr, f3, rs1_marker, ex_ma.csr_write_val);
         mem_data = r.old;
@@ -89,7 +82,7 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
         state.sfence(va, asid);
     }
 
-    if ex_ma.ctrl.mem_write {
+    if ex_ma.ctrl.mem.is_store() {
         // SW writes the word; SB / SH merge their byte lanes into the word
         // already there (read without a second memory access).
         let sub_word = ex_ma.funct3 & 3 != 2;
@@ -102,16 +95,12 @@ pub fn compute_ma(state: &mut PipelineState, ex_ma: &ExMa) -> MaWb {
         }
     }
 
-    MaWb {
-        valid: true,
-        instr: ex_ma.instr,
+    MaWb::new(ex_ma.pc, ex_ma.instr, MaWbData {
         alu_result: ex_ma.alu_result,
         mem_data,
         pc_plus4: ex_ma.pc_plus4,
         rd_num: ex_ma.rd_num,
         ctrl: ex_ma.ctrl,
-        trap_kind: 0, trap_pc: 0, trap_value: 0,
-        stall_reg: 0,
-        flush_bubble: false,
-    }
+        ..MaWbData::default()
+    })
 }

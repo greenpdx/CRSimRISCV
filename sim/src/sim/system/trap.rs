@@ -17,7 +17,8 @@ pub const EXC_ECALL_FROM_S:          u32 = 9;
 pub const EXC_ECALL_FROM_M:          u32 = 11;
 
 // ── TrapInfo for the visualizer history ────────────────────────────────────
-#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy)]
 pub struct TrapInfo {
     pub cycle: u64,

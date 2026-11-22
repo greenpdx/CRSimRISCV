@@ -40,7 +40,9 @@ pub const ROM_BASE: u32 = 0xF000_0000;
 pub const ROM_BYTES: u32 = 0x1_0000;
 pub fn is_rom(pa: u32) -> bool { pa.wrapping_sub(ROM_BASE) < ROM_BYTES }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy)]
 pub struct Latency { pub l1: u64, pub l2: u64, pub mem: u64, /** per ROM word (uncached) */ pub rom: u64 }
 
@@ -48,21 +50,27 @@ impl Default for Latency {
     fn default() -> Self { Self { l1: 1, l2: 4, mem: 20, rom: 8 } }
 }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheId { L1I, L1D, L2 }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BusReq { BusRd, BusRdX, BusUpgr }
 
 /// Where an access was satisfied.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome { L1Hit, L2Hit, Memory, /** uncached boot ROM */ Rom }
 
 /// What the page-table walker found in a PTE.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PteVerdict {
     /// V = 1, R = W = X = 0: points to the next-level table.
@@ -80,13 +88,15 @@ pub enum PteVerdict {
 }
 
 /// One way's tag comparator in a cache lookup.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WayCmp { pub valid: bool, pub tag: u32, pub hit: bool }
 
 /// What happened, for the panel. `set` / `way` locate cache lines; `pa`
 /// is the line (or word) physical address.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[cfg_attr(feature = "wasm", serde(tag = "kind"))]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
@@ -153,7 +163,8 @@ pub enum Event {
 }
 
 /// Per-core counters.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Stats {
     pub tlb_hits: u32, pub tlb_misses: u32, pub walks: u32, pub page_faults: u32,
@@ -163,15 +174,20 @@ pub struct Stats {
     pub stall_cycles: u32, pub bus_wait_cycles: u32,
 }
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone)]
 pub struct MemSystem {
     /// Physical RAM (any size, sparse).
     pub ram: Pages,
     /// Boot ROM contents (`ROM_BYTES` from `ROM_BASE`).
     pub rom: Vec<u32>,
+    #[cfg_attr(feature = "wasm", tsify(type = "Cache<Mesi>[]"))]
     pub l1i: [Cache; N_CORES],
+    #[cfg_attr(feature = "wasm", tsify(type = "Cache<Mesi>[]"))]
     pub l1d: [Cache; N_CORES],
+    #[cfg_attr(feature = "wasm", tsify(type = "Cache<Mesi>"))]
     pub l2: Cache,
     pub lat: Latency,
     /// Current cycle (set by `begin_cycle`).

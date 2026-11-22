@@ -4,9 +4,13 @@
 //!   with the [`Port`] that asks) and from the outside (`peek` / `poke`: no
 //!   timing, no side effects — the panels, tests and program loading).
 //! - [`Pages`]: physical RAM of any size, sparse 4 KiB pages.
+//! - [`cache::Cache`]: the set-associative cache array.
+
+pub mod cache;
 
 /// Who is accessing memory.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Port { Fetch, Load, Store, Walk }
 
@@ -36,7 +40,8 @@ pub trait Bus {
 
 /// Physical RAM of any size: sparse 4 KiB pages, made on first write;
 /// words never written read 0.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Default)]
 pub struct Pages { pages: std::collections::HashMap<u32, Vec<u32>> }
 

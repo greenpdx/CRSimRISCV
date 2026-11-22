@@ -4,6 +4,8 @@
 use crate::alu::Flags;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(tsify::Tsify))]
+#[cfg_attr(feature = "ts", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Cond { Eq, Ne, Lt, Ge, Ltu, Geu }
 

@@ -11,7 +11,7 @@
 //!      set on the thread for later inspection.
 
 use super::cache::{Cache, PendingMiss};
-use super::state::{BarrelState, IfDi, ISRAM_BASE, ISRAM_BYTES_PER_SLOT, IfSrc, LtIf};
+use super::state::{BarrelState, IfDi, IfDiData, ISRAM_BASE, ISRAM_BYTES_PER_SLOT, IfSrc, LtIf};
 
 pub fn compute_if(state: &mut BarrelState, lt_if: &LtIf) -> IfDi {
     if !lt_if.valid {
@@ -25,10 +25,7 @@ pub fn compute_if(state: &mut BarrelState, lt_if: &LtIf) -> IfDi {
         if target_slot == thread && (thread as usize) < 3 {
             let off = pc - ISRAM_BASE - (target_slot as u32) * ISRAM_BYTES_PER_SLOT;
             let instr = state.isram_read(target_slot, off);
-            return IfDi {
-                valid: true, thread, pc, instr,
-                src: IfSrc::LocalIsram,
-            };
+            return IfDi::new(pc, instr, IfDiData { thread, src: IfSrc::LocalIsram });
         } else {
             // Foreign I-SRAM access → instruction access fault.
             // Deliver as a sync trap via the pipeline (trap_kind=5
@@ -44,10 +41,7 @@ pub fn compute_if(state: &mut BarrelState, lt_if: &LtIf) -> IfDi {
 
     // ── I-L1 cache for external instruction memory (Phase B4) ──
     if let Some(instr) = state.icache.lookup(pc) {
-        return IfDi {
-            valid: true, thread, pc, instr,
-            src: IfSrc::ICacheHit,
-        };
+        return IfDi::new(pc, instr, IfDiData { thread, src: IfSrc::ICacheHit });
     }
 
     // I-cache miss. Either start a new fill (cache idle) or join
@@ -61,11 +55,6 @@ pub fn compute_if(state: &mut BarrelState, lt_if: &LtIf) -> IfDi {
     state.icache.waiters[thread as usize] = true;
     state.threads[thread as usize].miss_pending = true;
 
-    IfDi {
-        valid: false,                // bubble for this cycle
-        thread,
-        pc,
-        instr: 0,
-        src: IfSrc::ICacheMiss,
-    }
+    // bubble for this cycle (the panel still shows the thread / PC)
+    IfDi { valid: false, pc, instr: 0, data: IfDiData { thread, src: IfSrc::ICacheMiss } }
 }

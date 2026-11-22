@@ -8,11 +8,13 @@ mod rv32i;
 mod m;
 mod a;
 mod b;
-mod fp;
-mod c;
-mod h;
 mod zk;
-mod v;
+// Extensions no core implements (compressed, F / D / Zfh / Q, hypervisor,
+// vector): the browser build leaves them out (feature `disasm-ext`).
+#[cfg(feature = "disasm-ext")] mod fp;
+#[cfg(feature = "disasm-ext")] mod c;
+#[cfg(feature = "disasm-ext")] mod h;
+#[cfg(feature = "disasm-ext")] mod v;
 mod system;
 mod misc_mem;
 pub mod descriptions;
@@ -36,12 +38,16 @@ impl Disasm {
 /// Format an integer register index as `xN`.
 pub(crate) fn r(i: u8) -> String { format!("x{}", i) }
 /// Format a floating-point register index as `fN`.
+#[cfg(feature = "disasm-ext")]
 pub(crate) fn fr(i: u8) -> String { format!("f{}", i) }
 
 pub fn disassemble(instr: u32) -> Disasm {
     // Compressed: low 2 bits ≠ 11 → 16-bit instruction lives in instr[15:0].
     if instr & 0x3 != 0x3 {
+        #[cfg(feature = "disasm-ext")]
         return c::decode16(instr as u16);
+        #[cfg(not(feature = "disasm-ext"))]
+        return Disasm::unknown((instr & 0x7f) as u8);
     }
     // Order matters: extensions override base shared opcodes.
     // - Zk before B (PACK/PACKH/BREV8/XPERM share Zbb-style opcodes).
@@ -50,9 +56,12 @@ pub fn disassemble(instr: u32) -> Disasm {
     if let Some(d) = a::try_decode(instr)        { return d; }
     if let Some(d) = zk::try_decode(instr)       { return d; }
     if let Some(d) = b::try_decode(instr)        { return d; }
-    if let Some(d) = v::try_decode(instr)        { return d; }
-    if let Some(d) = fp::try_decode(instr)       { return d; }
-    if let Some(d) = h::try_decode(instr)        { return d; }
+    #[cfg(feature = "disasm-ext")]
+    {
+        if let Some(d) = v::try_decode(instr)    { return d; }
+        if let Some(d) = fp::try_decode(instr)   { return d; }
+        if let Some(d) = h::try_decode(instr)    { return d; }
+    }
     if let Some(d) = system::decode(instr)       { return d; }
     if let Some(d) = misc_mem::decode(instr)     { return d; }
     if let Some(d) = rv32i::decode(instr)        { return d; }
@@ -60,6 +69,7 @@ pub fn disassemble(instr: u32) -> Disasm {
 }
 
 /// Disassemble a 16-bit compressed instruction directly.
+#[cfg(feature = "disasm-ext")]
 pub fn disassemble16(half: u16) -> Disasm { c::decode16(half) }
 
 #[cfg(test)]
@@ -199,6 +209,9 @@ mod tests {
         assert_eq!(mnem(instr), "BCLRI");
     }
 
+    #[cfg(feature = "disasm-ext")]
+    mod ext_fp_h {
+    use super::*;
     // ── F / D / Zfh / Q ────────────────────────────────────────────────
     fn op_fp(op: u32, fmt: u32, rs2: u32, rs1: u32, f3: u32, rd: u32) -> u32 {
         let funct7 = (op << 2) | fmt;
@@ -312,6 +325,7 @@ mod tests {
         assert_eq!(mnem(instr), "HFENCE.GVMA");
     }
 
+    }
     // ── Zk (scalar crypto) ─────────────────────────────────────────────
     #[test] fn aes32esi() {
         // bs=2, funct5=10001 (AES32ESI), f3=000
@@ -388,6 +402,9 @@ mod tests {
         assert_eq!(r.mnemonic, "ZEXT.H");
     }
 
+    #[cfg(feature = "disasm-ext")]
+    mod ext_c_v {
+    use super::*;
     // ── C (RV32C compressed) ───────────────────────────────────────────
     fn c16(half: u16) -> Disasm { disassemble(half as u32) }
 
@@ -617,5 +634,6 @@ mod tests {
         // nf=2 → seg3
         let r = d(vload(2, 0, 0b00, 1, 0b00000, 6, 0b110, 5));
         assert_eq!(r.mnemonic, "vlseg3e32.v");
+    }
     }
 }

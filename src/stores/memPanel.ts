@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Memory panel — two pipeline cores on the shared cache hierarchy, all in
-// Rust (sim/src/sim/memsys, wasm JsMemPanel). This store only steps the
+// Rust (sim/src/sim/memsys, wasm MemPanel). This store only steps the
 // machine and turns its per-cycle events into what the panel highlights.
 //
 // A core's highlights stay on its last access until it makes the next one,
@@ -10,57 +10,19 @@
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 
-export type Mesi = 'I' | 'S' | 'E' | 'M'
-export type CacheId = 'L1I' | 'L1D' | 'L2'
-export type Port = 'Fetch' | 'Load' | 'Store' | 'Walk'
-export type Outcome = 'L1Hit' | 'L2Hit' | 'Memory' | 'Rom'
-
-/** One event from the Rust memory system (serde tag = kind) */
-export interface WayCmp { valid: boolean; tag: number; hit: boolean }
-export type LookupEv = Extract<MemEvent, { kind: 'Lookup' }>
-export interface EntryCmp { valid: boolean; vpn_match: boolean; asid_match: boolean; global: boolean; hit: boolean }
-export interface EntryFlush { valid: boolean; va_match: boolean; asid_match: boolean; global: boolean; inval: boolean }
-export type PteVerdict = 'Pointer' | 'Leaf' | 'Invalid' | 'Reserved' | 'Misaligned' | 'NoLeaf'
-
-export type MemEvent =
-  | { kind: 'Bare'; core: number; port: Port; va: number }
-  | { kind: 'TlbLookup'; core: number; port: Port; va: number; asid: number; cmp: EntryCmp[]; hit: number | null; plru_before: number; plru_after: number }
-  | { kind: 'PermCheck'; core: number; port: Port; pte: number; priv_mode: number; sum: boolean; mxr: boolean; ok: boolean }
-  | { kind: 'PteAddr'; core: number; port: Port; level: number; base: number; vpn: number; addr: number }
-  | { kind: 'PteCheck'; core: number; port: Port; level: number; pte: number; verdict: PteVerdict }
-  | { kind: 'AdUpdate'; core: number; port: Port; pte_addr: number; old: number; new: number }
-  | { kind: 'TlbVictim'; core: number; port: Port; idx: number; was_invalid: boolean; plru_before: number; plru_after: number }
-  | { kind: 'Sfence'; core: number; va: number | null; asid: number | null; itlb: EntryFlush[]; dtlb: EntryFlush[] }
-  | { kind: 'TlbHit'; core: number; port: Port; idx: number; va: number; pa: number }
-  | { kind: 'TlbMiss'; core: number; port: Port; va: number }
-  | { kind: 'Walk'; core: number; port: Port; level: number; pte_addr: number; pte: number }
-  | { kind: 'TlbFill'; core: number; port: Port; idx: number; va: number; pa: number }
-  | { kind: 'PageFault'; core: number; port: Port; va: number; cause: number }
-  | { kind: 'Access'; core: number; port: Port; pa: number; outcome: Outcome; latency: number }
-  | { kind: 'Lookup'; core: number; cache: CacheId; pa: number; set: number; tag: number; ways: WayCmp[] }
-  | { kind: 'L1Hit'; core: number; cache: CacheId; set: number; way: number; pa: number }
-  | { kind: 'L1Miss'; core: number; cache: CacheId; set: number; pa: number }
-  | { kind: 'L2Hit'; core: number; set: number; way: number; pa: number }
-  | { kind: 'L2Miss'; core: number; set: number; pa: number }
-  | { kind: 'MemRead'; core: number; pa: number }
-  | { kind: 'MemWrite'; pa: number }
-  | { kind: 'RomRead'; core: number; pa: number; val: number }
-  | { kind: 'Fill'; core: number; cache: CacheId; set: number; way: number; pa: number; state: Mesi }
-  | { kind: 'Evict'; core: number; cache: CacheId; set: number; way: number; pa: number; dirty: boolean }
-  | { kind: 'WriteBack'; core: number; set: number; way: number; pa: number }
-  | { kind: 'StateChange'; core: number; cache: CacheId; set: number; way: number; pa: number; from: Mesi; to: Mesi }
-  | { kind: 'Snoop'; from: number; to: number; req: string; cache: CacheId; set: number; way: number; pa: number; before: Mesi; after: Mesi; flush: boolean }
-  | { kind: 'BusWait'; core: number; cycles: number }
-  | { kind: 'Stall'; core: number; left: number }
-
-export interface McStage { valid: boolean; pc: number; instr: number; bubble: boolean }
-export interface MpTlb { valid: boolean; vpn: number; ppn: number; pte: number; is_super: boolean; asid: number; global: boolean }
-export interface MpCore {
-  pc: number; priv_mode: number
-  satp: number; mstatus: number; mtvec: number; mepc: number; mcause: number; mtval: number; mhartid: number
-  stalled: boolean; stall_left: number; stages: McStage[]; itlb: MpTlb[]; dtlb: MpTlb[]
-  itlb_plru: number; dtlb_plru: number
+// Event / snapshot types generated from the Rust structs (sim/src/sim/memsys).
+import type {
+  MemPanel, Event, Mesi, CacheId, Port, Outcome, WayCmp, EntryCmp, EntryFlush, PteVerdict,
+  MpStage, MpTlb, MpCore, MpLine, MpCache, MpCaches, Stats,
+} from '../wasm/cpu_sim'
+export type {
+  Mesi, CacheId, Port, Outcome, WayCmp, EntryCmp, EntryFlush, PteVerdict, MpTlb, MpCore, MpLine, MpCache, MpCaches,
 }
+/** One event from the Rust memory system (serde tag = kind) */
+export type MemEvent = Event
+export type LookupEv = Extract<MemEvent, { kind: 'Lookup' }>
+export type McStage = MpStage
+export type MpStats = Stats
 
 // ── MMU phases: what the hardware does in one access, one step at a time ──
 export type Side = 'I' | 'D'
@@ -248,26 +210,8 @@ export function phaseText(p: Phase): string {
 /** CSRs the CPU block shows (priv is the mode, not a CSR, but changes on traps too) */
 export const CSR_NAMES = ['priv_mode', 'satp', 'mstatus', 'mtvec', 'mepc', 'mcause', 'mtval'] as const
 export type CsrName = typeof CSR_NAMES[number]
-export interface MpLine { state: Mesi; tag: number; lru: number; addr: number; data: number[] }
-export interface MpCache { sets: number; ways: number; lines: MpLine[] }
-export interface MpCaches { l1i: MpCache[]; l1d: MpCache[]; l2: MpCache }
-export interface MpStats {
-  tlb_hits: number; tlb_misses: number; walks: number; page_faults: number
-  l1i_hits: number; l1i_misses: number; l1d_hits: number; l1d_misses: number
-  l2_hits: number; l2_misses: number; rom_reads: number; accesses: number; total_latency: number
-  stall_cycles: number; bus_wait_cycles: number
-}
-
-interface Panel {
-  examples(): { name: string; about: string }[]
-  load_example(i: number): boolean
-  step(): MemEvent[]
-  readonly cycle: number
-  cores(): MpCore[]; caches(): MpCaches; stats(): MpStats[]
-  mem_words(pa: number, n: number): Uint32Array
-  mem_raw(pa: number, n: number): Uint32Array
-}
-interface Disasm { disasm(w: number): { mnemonic: string; operands: string } | null }
+type Panel = MemPanel
+type Disasm = (w: number) => { mnemonic: string; operands: string } | null
 
 /** Highlight kinds a cache line / set can get */
 export type LineMark = 'hit' | 'fill-l2' | 'fill-mem' | 'evict' | 'snoop' | 'state' | 'writeback'
@@ -431,10 +375,8 @@ export const useMemPanel = defineStore('memPanel', () => {
         try {
           const mod = await import('../wasm/cpu_sim.js')
           await mod.default()
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const m = mod as any
-          p = new m.JsMemPanel() as Panel
-          dis = new m.JsCpuState() as Disasm
+          p = new mod.MemPanel()
+          dis = mod.disasm
           examples.value = p.examples()
           error.value = null
           ready.value = true
@@ -571,7 +513,7 @@ export const useMemPanel = defineStore('memPanel', () => {
   }
 
   function asm(w: number): string {
-    const d = dis?.disasm(w >>> 0)
+    const d = dis?.(w >>> 0)
     return d ? `${d.mnemonic} ${d.operands}`.trim().toLowerCase() : ''
   }
 
@@ -581,7 +523,7 @@ export const useMemPanel = defineStore('memPanel', () => {
     return { cycle: p.cycle, cores: p.cores(), caches: p.caches(), stats: p.stats() }
   })
 
-  function memWords(pa: number, n: number) { return p ? { cached: Array.from(p.mem_words(pa, n)), raw: Array.from(p.mem_raw(pa, n)) } : { cached: [], raw: [] } }
+  function memWords(pa: number, n: number) { return p ? { cached: Array.from(p.mem(pa, n)), raw: Array.from(p.mem_raw(pa, n)) } : { cached: [], raw: [] } }
 
   return {
     ready, error, examples, exampleIndex, views, log, running, speed, snap, tick, csrChanged,

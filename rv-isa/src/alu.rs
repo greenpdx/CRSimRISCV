@@ -4,6 +4,8 @@
 //! codes for display (`code()` tables live with the core).
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(tsify::Tsify))]
+#[cfg_attr(feature = "ts", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AluOp { Add, Sub, Sll, Slt, Sltu, Xor, Srl, Sra, Or, And, PassA, PassB }
 
@@ -46,6 +48,8 @@ pub const fn alu(op: AluOp, a: u32, b: u32) -> u32 {
 
 /// ALU status flags.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(tsify::Tsify))]
+#[cfg_attr(feature = "ts", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Flags {
     /// result == 0

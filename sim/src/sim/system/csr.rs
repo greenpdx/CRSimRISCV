@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 use crate::isa::csr::addr;
 use super::irq::{IRQ_SSI, IRQ_STI, IRQ_SEI};
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PrivMode { U = 0, S = 1, M = 3 }
@@ -44,9 +46,12 @@ pub const SSTATUS_VIEW_MASK: u32 =
 pub const SIRQ_VIEW_MASK: u32 = IRQ_SSI | IRQ_STI | IRQ_SEI;
 
 // ── CsrFile ────────────────────────────────────────────────────────────────
-#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Default)]
 pub struct CsrFile {
+    #[cfg_attr(feature = "wasm", serde(with = "crate::sim::str_keys"))]
+    #[cfg_attr(feature = "wasm", tsify(type = "Record<string, number>"))]
     regs: BTreeMap<u16, u32>,
 }
 

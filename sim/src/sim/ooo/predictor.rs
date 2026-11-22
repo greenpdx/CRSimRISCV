@@ -5,7 +5,9 @@
 pub const BHT_SIZE: usize = 64;
 pub const BTB_SIZE: usize = 16;
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct BtbEntry {
     pub valid: bool,
@@ -17,7 +19,8 @@ pub struct BtbEntry {
 }
 
 /// What fetch predicted for one instruction.
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Prediction {
     pub taken: bool,

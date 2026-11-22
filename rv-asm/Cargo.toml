@@ -1,0 +1,15 @@
+[package]
+name = "rv-asm"
+version.workspace = true
+edition.workspace = true
+
+[features]
+serde = ["dep:serde"]
+# TypeScript declarations for the wasm module
+ts = ["serde", "dep:tsify", "dep:wasm-bindgen"]
+
+[dependencies]
+rv-isa = { workspace = true }
+serde  = { workspace = true, optional = true }
+tsify  = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }

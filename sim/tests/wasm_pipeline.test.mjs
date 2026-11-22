@@ -1,4 +1,4 @@
-// Node test wrapper for the JsPipelineState wasm interface.
+// Node test wrapper for the wasm Pipeline class (common core methods + extras).
 //
 // Run after building wasm:
 //   npm run wasm
@@ -27,15 +27,15 @@ const wasmBytes = await readFile(resolve(PKG_DIR, 'cpu_sim_bg.wasm'));
 const mod = await import(resolve(PKG_DIR, 'cpu_sim.js'));
 mod.initSync({ module: new WebAssembly.Module(wasmBytes) });
 
-const { JsPipelineState } = mod;
+const { Pipeline } = mod;
 
 // ─────────────────────────────────────────────────────────────────────────
 // helpers
 // ─────────────────────────────────────────────────────────────────────────
 
 function makeCpu(words = []) {
-  const cpu = new JsPipelineState();
-  if (words.length) cpu.load_program(new Uint32Array(words));
+  const cpu = new Pipeline();
+  if (words.length) cpu.load(0, new Uint32Array(words));
   return cpu;
 }
 
@@ -47,20 +47,20 @@ function step(cpu, n) {
 // 1. lifecycle: new + reset + load_program
 // ─────────────────────────────────────────────────────────────────────────
 test('lifecycle: new, reset, load_program', () => {
-  const cpu = new JsPipelineState();
-  assert.equal(cpu.cycle, 0n);
+  const cpu = new Pipeline();
+  assert.equal(cpu.cycle, 0);
   assert.equal(cpu.pc, 0);
   assert.equal(cpu.halted, false);
 
-  cpu.load_program(new Uint32Array([0x00700293, 0x00500313]));
-  const rom = cpu.rom();
+  cpu.load(0, new Uint32Array([0x00700293, 0x00500313]));
+  const rom = cpu.mem(0, 256);
   assert.equal(rom[0], 0x00700293);
   assert.equal(rom[1], 0x00500313);
 
   cpu.reset();
-  assert.equal(cpu.cycle, 0n);
+  assert.equal(cpu.cycle, 0);
   // ROM is preserved after reset
-  assert.equal(cpu.rom()[0], 0x00700293);
+  assert.equal(cpu.mem(0, 256)[0], 0x00700293);
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -68,13 +68,13 @@ test('lifecycle: new, reset, load_program', () => {
 // ─────────────────────────────────────────────────────────────────────────
 test('pc and cycle getters update on step', () => {
   const cpu = makeCpu([0x00000013, 0x00000013, 0x00000013]); // 3 NOPs
-  assert.equal(cpu.cycle, 0n);
+  assert.equal(cpu.cycle, 0);
   assert.equal(cpu.pc, 0);
   cpu.step();
-  assert.equal(cpu.cycle, 1n);
+  assert.equal(cpu.cycle, 1);
   assert.equal(cpu.pc, 4);
   step(cpu, 2);
-  assert.equal(cpu.cycle, 3n);
+  assert.equal(cpu.cycle, 3);
   assert.equal(cpu.pc, 12);
 });
 
@@ -84,7 +84,7 @@ test('pc and cycle getters update on step', () => {
 test('single addi flows through 5 stages', () => {
   const cpu = makeCpu([0x00700293]); // addi x5, x0, 7
   step(cpu, 5);
-  assert.equal(cpu.read_register(5), 7);
+  assert.equal(cpu.regs()[5], 7);
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ test('single addi flows through 5 stages', () => {
 // ─────────────────────────────────────────────────────────────────────────
 test('registers() returns Uint32Array of 32', () => {
   const cpu = makeCpu();
-  const regs = cpu.registers();
+  const regs = cpu.regs();
   // wasm-bindgen returns a typed array (Uint32Array) for Vec<u32> in --target web
   assert.equal(regs.length, 32);
   for (let i = 0; i < 32; i++) assert.equal(regs[i], 0);
@@ -106,11 +106,11 @@ test('pipeline-register snapshots have all expected fields', () => {
   cpu.step();
   cpu.step();
 
-  const ifid = cpu.if_id();
+  const ifid = cpu.snapshot().if_id;
   for (const k of ['valid', 'pc', 'instr', 'pc_plus4']) {
     assert.ok(k in ifid, `if_id missing ${k}`);
   }
-  const idex = cpu.id_ex();
+  const idex = cpu.snapshot().id_ex;
   for (const k of ['valid', 'pc', 'pc_plus4', 'rs1_data', 'rs2_data', 'imm',
                    'rs1_num', 'rs2_num', 'rd_num', 'funct3', 'funct7b30',
                    'opcode', 'ctrl']) {
@@ -120,12 +120,12 @@ test('pipeline-register snapshots have all expected fields', () => {
                    'wb_sel', 'pc_sel', 'branch', 'jump']) {
     assert.ok(k in idex.ctrl, `id_ex.ctrl missing ${k}`);
   }
-  const exma = cpu.ex_ma();
+  const exma = cpu.snapshot().ex_ma;
   for (const k of ['valid', 'alu_result', 'rs2_data', 'pc_plus4', 'rd_num',
                    'funct3', 'branch_taken', 'branch_target', 'ctrl']) {
     assert.ok(k in exma, `ex_ma missing ${k}`);
   }
-  const mawb = cpu.ma_wb();
+  const mawb = cpu.snapshot().ma_wb;
   for (const k of ['valid', 'alu_result', 'mem_data', 'pc_plus4', 'rd_num', 'ctrl']) {
     assert.ok(k in mawb, `ma_wb missing ${k}`);
   }
@@ -162,7 +162,7 @@ test('forward_a fires on RAW hazard', () => {
   ]);
   // Step until x6 is computed correctly via forwarding.
   step(cpu, 7);
-  assert.equal(cpu.read_register(6), 8);
+  assert.equal(cpu.regs()[6], 8);
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -175,15 +175,15 @@ test('stall flag fires on load-use hazard', () => {
     0x00630333, // add  x6, x6, x6     ← load-use
   ]);
   // Pre-seed RAM[0x10000]
-  cpu.poke_ram(0x10000, 21);
+  cpu.poke_mem(0x10000, 21);
 
   let sawStall = false;
   for (let i = 0; i < 10; i++) {
     cpu.step();
-    if (cpu.last_stall) sawStall = true;
+    if (cpu.snapshot().hazard.stall) sawStall = true;
   }
   assert.ok(sawStall, 'expected last_stall to be true at some cycle');
-  assert.equal(cpu.read_register(6), 42);
+  assert.equal(cpu.regs()[6], 42);
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -201,7 +201,7 @@ test('flush flag fires on taken branch', () => {
   let sawFlush = false;
   for (let i = 0; i < 20; i++) {
     cpu.step();
-    if (cpu.last_flush) sawFlush = true;
+    if (cpu.snapshot().hazard.flush) sawFlush = true;
   }
   assert.ok(sawFlush, 'expected last_flush at the cycle the branch was resolved');
 });
@@ -219,9 +219,9 @@ test('branch squashes the two instructions in flight', () => {
     0x0000006f,
   ]);
   step(cpu, 30);
-  assert.equal(cpu.read_register(10), 0, 'x10 must remain unwritten');
-  assert.equal(cpu.read_register(11), 0, 'x11 must remain unwritten');
-  assert.equal(cpu.read_register(12), 42);
+  assert.equal(cpu.regs()[10], 0, 'x10 must remain unwritten');
+  assert.equal(cpu.regs()[11], 0, 'x11 must remain unwritten');
+  assert.equal(cpu.regs()[12], 42);
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -236,8 +236,8 @@ test('JAL writes link address (PC+4) to ra', () => {
     0x0000006f,
   ]);
   step(cpu, 30);
-  assert.equal(cpu.read_register(1), 4);
-  assert.equal(cpu.read_register(12), 42);
+  assert.equal(cpu.regs()[1], 4);
+  assert.equal(cpu.regs()[12], 42);
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -253,27 +253,27 @@ test('JALR target uses forwarded rs1', () => {
     0x0000006f,
   ]);
   step(cpu, 30);
-  assert.equal(cpu.read_register(12), 42);
+  assert.equal(cpu.regs()[12], 42);
 });
 
 // ─────────────────────────────────────────────────────────────────────────
 // 13. pokes work mid-run
 // ─────────────────────────────────────────────────────────────────────────
 test('poke_register, poke_ram, poke_rom work', () => {
-  const cpu = new JsPipelineState();
+  const cpu = new Pipeline();
 
-  cpu.poke_register(5, 0xdeadbeef);
-  assert.equal(cpu.read_register(5), 0xdeadbeef);
+  cpu.poke_reg(5, 0xdeadbeef);
+  assert.equal(cpu.regs()[5], 0xdeadbeef);
 
-  cpu.poke_ram(0x10000, 0x12345678);
-  assert.equal(cpu.ram()[0], 0x12345678);
+  cpu.poke_mem(0x10000, 0x12345678);
+  assert.equal(cpu.mem(0x10000, 256)[0], 0x12345678);
 
-  cpu.poke_rom(0, 0x00700293);
-  assert.equal(cpu.rom()[0], 0x00700293);
+  cpu.poke_mem(0, 0x00700293);
+  assert.equal(cpu.mem(0, 256)[0], 0x00700293);
 
   // x0 is hard-wired to zero — pokes should be silently dropped.
-  cpu.poke_register(0, 0x99);
-  assert.equal(cpu.read_register(0), 0);
+  cpu.poke_reg(0, 0x99);
+  assert.equal(cpu.regs()[0], 0);
 });
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -304,7 +304,7 @@ test('active_components per stage reflects in-flight pipeline state', () => {
 // ─────────────────────────────────────────────────────────────────────────
 test('read_register(0) always returns 0', () => {
   const cpu = makeCpu();
-  assert.equal(cpu.read_register(0), 0);
-  cpu.poke_register(0, 0xff);
-  assert.equal(cpu.read_register(0), 0);
+  assert.equal(cpu.regs()[0], 0);
+  cpu.poke_reg(0, 0xff);
+  assert.equal(cpu.regs()[0], 0);
 });

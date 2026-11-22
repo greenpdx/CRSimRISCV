@@ -249,6 +249,7 @@
 </template>
 
 <script setup lang="ts">
+import type { AssemblerResult, Instruction } from '../wasm/cpu_sim'
 import { ref, computed, onMounted, onActivated, watch, nextTick } from 'vue'
 import { useCpuState } from '../stores/cpuState'
 import { useCpuPhases } from '../stores/cpuPhases'
@@ -298,17 +299,12 @@ const wizardArgs = ref<Record<string, string>>({})
 
 const REGISTERS_8 = ['X0', 'X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'X7']
 
-interface HexInstr {
-  address: number
-  value: number
-  hex: string
-  asm: string
-}
+type HexInstr = Instruction
 const hexOutput = ref<HexInstr[]>([])
 
 // ── WASM assembler ───────────────────────────────────────────────────────────
 
-let wasmAssemble: ((source: string) => any) | null = null
+let wasmAssemble: ((source: string) => AssemblerResult) | null = null
 
 const asmFileInput = ref<HTMLInputElement | null>(null)
 
@@ -371,7 +367,7 @@ function loadAsmFromStorage() {
 onMounted(async () => {
   loadAsmFromStorage()
   try {
-    const wasm = await import('../../assembler-wasm/pkg/rv32i_assembler.js')
+    const wasm = await import('../wasm/cpu_sim.js')
     await wasm.default()
     wasmAssemble = wasm.assemble
   } catch (err) {
@@ -607,7 +603,7 @@ function assembleCode() {
   }
   if (result.errors && result.errors.length) {
     asmErrors.value = result.errors.map(
-      (e: { line: number; message: string }) => `Line ${e.line}: ${e.message}`
+      e => `Line ${e.line}: ${e.message}`
     )
   }
 }

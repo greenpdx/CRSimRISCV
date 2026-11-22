@@ -1,9 +1,15 @@
+//! RV32I assembler (the editor panel). Exported to the browser by `cpu-sim`'s wasm module.
+
 use std::collections::HashMap;
 use rv_isa::encode::{b, i, j, r, s, shift, u};
 use rv_isa::reg::reg_number;
+#[cfg(feature = "serde")]
 use serde::Serialize;
 
-#[derive(Serialize, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(feature = "ts", derive(tsify::Tsify))]
+#[cfg_attr(feature = "ts", tsify(missing_as_null))]
+#[derive(Clone)]
 pub struct Instruction {
     pub address: u32,
     pub value: u32,
@@ -11,13 +17,18 @@ pub struct Instruction {
     pub asm: String,
 }
 
-#[derive(Serialize, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(feature = "ts", derive(tsify::Tsify))]
+#[cfg_attr(feature = "ts", tsify(missing_as_null))]
+#[derive(Clone)]
 pub struct AsmError {
     pub line: usize,
     pub message: String,
 }
 
-#[derive(Serialize)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(feature = "ts", derive(tsify::Tsify))]
+#[cfg_attr(feature = "ts", tsify(missing_as_null))]
 pub struct AssemblerResult {
     pub success: bool,
     pub instructions: Vec<Instruction>,

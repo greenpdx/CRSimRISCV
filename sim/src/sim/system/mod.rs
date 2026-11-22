@@ -18,7 +18,9 @@ use crate::isa::csr::{addr, csr_exec, CsrResult};
 pub use irq::*;
 pub use trap::*;
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, serde::Deserialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone)]
 pub struct SysUnit {
     pub csrs: CsrFile,

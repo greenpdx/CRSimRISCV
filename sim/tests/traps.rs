@@ -1,5 +1,6 @@
 //! Trap subsystem: external IRQs, ECALL, MRET/SRET, M↔S delegation.
 
+use cpu_sim::sim::core::Core;
 use cpu_sim::sim::cpu_state::CpuState;
 use cpu_sim::isa::csr::addr as csra;
 use cpu_sim::sim::system::{

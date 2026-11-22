@@ -9,6 +9,8 @@ use super::irq_controller::IrqController;
 use super::store_buffer::StoreBuffer;
 use crate::isa::csr::{addr, csr_exec};
 use crate::sim::system::{PrivMode, SysUnit};
+use crate::sim::forwarding::RegWriter;
+pub use crate::sim::stage::{CsrOp, Latch, MemKind, TrapKind, WbSel};
 
 /// CSRs the barrel shares across all threads (one value, mirrored into
 /// every thread's system unit on write): the trap vector, interrupt
@@ -151,21 +153,20 @@ pub struct ControlBits {
     pub reg_write: bool,
     pub alu_src: bool,    // false = rs2, true = imm
     pub alu_op: u8,
-    pub mem_read: bool,
-    pub mem_write: bool,
-    pub wb_sel: u8,       // 0 = ALU, 1 = Mem, 2 = PC+4
+    pub mem: MemKind,
+    pub wb_sel: WbSel,    // Alu (also the CSR old value), Mem, Pc4
     pub branch: bool,
     pub jump: bool,
     pub custom_op: CustomOp,
 }
 
+/// LT/IF payload: the thread the scheduler picked.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct LtIf {
-    pub valid: bool,
+pub struct LtIfData {
     pub thread: u8,
-    pub pc: u32,
 }
-impl LtIf { pub fn bubble() -> Self { Self::default() } }
+/// LT/IF stage register (`instr` is 0: not fetched yet).
+pub type LtIf = Latch<LtIfData>;
 
 /// Where an IF-stage instruction came from. Useful for the
 /// visualizer in later phases (B6) to color the fetch path.
@@ -180,23 +181,20 @@ pub enum IfSrc {
 }
 impl Default for IfSrc { fn default() -> Self { IfSrc::None } }
 
+/// IF/DI payload.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct IfDi {
-    pub valid: bool,
+pub struct IfDiData {
     pub thread: u8,
-    pub pc: u32,
-    pub instr: u32,
     pub src: IfSrc,
 }
-impl IfDi { pub fn bubble() -> Self { Self::default() } }
+/// IF/DI stage register.
+pub type IfDi = Latch<IfDiData>;
 
+/// DI/EX payload.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct DiEx {
-    pub valid: bool,
+pub struct DiExData {
     pub thread: u8,
-    pub pc: u32,
     pub pc_plus4: u32,
-    pub instr: u32,
     pub rs1_data: u32,
     pub rs2_data: u32,
     pub imm: u32,
@@ -207,22 +205,21 @@ pub struct DiEx {
     pub funct7b30: u8,
     pub opcode: u8,
     pub ctrl: ControlBits,
-    /// Sync trap kind: 0=none, 1=illegal, 2=ecall, 3=ebreak, 4=mret,
-    /// 5=instr_access_fault. Propagated through EX to step() for delivery.
-    pub trap_kind: u8,
+    /// Sync trap / MRET, delivered by step() after EX.
+    pub trap_kind: TrapKind,
     // ── Zicsr fields ──
-    pub csr_op: u8,         // 0=none, 1=RW, 2=RS, 3=RC
+    pub csr_op: CsrOp,
     pub csr_addr: u16,
     pub csr_uimm: u8,
     pub csr_imm_form: bool,
 }
-impl DiEx { pub fn bubble() -> Self { Self::default() } }
+/// DI/EX stage register.
+pub type DiEx = Latch<DiExData>;
 
+/// EX/MA payload.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct ExMa {
-    pub valid: bool,
+pub struct ExMaData {
     pub thread: u8,
-    pub instr: u32,
     pub alu_result: u32,
     pub rs1_data: u32,        // carried for custom-0 (FORK start_pc, FORKRET retval)
     pub rs2_data: u32,
@@ -232,28 +229,45 @@ pub struct ExMa {
     pub branch_taken: bool,
     pub branch_target: u32,
     pub ctrl: ControlBits,
-    pub trap_kind: u8,
-    pub trap_pc: u32,
+    /// Sync trap / MRET (mepc = the latch's `pc`).
+    pub trap_kind: TrapKind,
     // ── Zicsr fields ──
-    pub csr_op: u8,
+    pub csr_op: CsrOp,
     pub csr_addr: u16,
     pub csr_write_val: u32,
     pub csr_src_is_zero: bool,
 }
-impl ExMa { pub fn bubble() -> Self { Self::default() } }
+/// EX/MA stage register.
+pub type ExMa = Latch<ExMaData>;
 
+/// MA/WB payload.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct MaWb {
-    pub valid: bool,
+pub struct MaWbData {
     pub thread: u8,
-    pub instr: u32,
     pub alu_result: u32,
     pub mem_data: u32,
     pub pc_plus4: u32,
     pub rd_num: u8,
     pub ctrl: ControlBits,
 }
-impl MaWb { pub fn bubble() -> Self { Self::default() } }
+/// MA/WB stage register.
+pub type MaWb = Latch<MaWbData>;
+
+impl MaWbData {
+    /// The value WB writes to rd (and MA/WB forwards).
+    pub fn wb_value(&self) -> u32 { self.ctrl.wb_sel.select(self.alu_result, self.mem_data, self.pc_plus4) }
+}
+
+impl RegWriter for ExMa {
+    fn writes(&self) -> Option<u8> { (self.valid && self.ctrl.reg_write && self.rd_num != 0).then_some(self.rd_num) }
+    fn thread(&self) -> u8 { self.data.thread }
+    fn fwd_value(&self) -> u32 { self.alu_result }
+}
+impl RegWriter for MaWb {
+    fn writes(&self) -> Option<u8> { (self.valid && self.ctrl.reg_write && self.rd_num != 0).then_some(self.rd_num) }
+    fn thread(&self) -> u8 { self.data.thread }
+    fn fwd_value(&self) -> u32 { self.wb_value() }
+}
 
 // ─── Scheduler mode ─────────────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

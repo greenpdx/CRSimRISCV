@@ -1,6 +1,7 @@
 //! Single-cycle core: byte / halfword loads and stores, Zmmul (MUL block,
 //! on / off), misaligned accesses (trap with traps on, low bits ignored off).
 
+use cpu_sim::sim::core::Core;
 use cpu_sim::sim::cpu_state::CpuState;
 use cpu_sim::isa::csr::addr as csra;
 use cpu_sim::sim::system::EXC_ILLEGAL_INSTR;

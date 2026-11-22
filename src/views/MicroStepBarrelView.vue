@@ -6,101 +6,24 @@
 //
 
 import { computed, onMounted, ref, shallowRef } from 'vue'
+import { regionWords, type DisasmJson } from '../stores/wasmCore'
+import type { Barrel, BSnapshot as BarrelSnapshot } from '../wasm/cpu_sim'
 
 const emit = defineEmits<{ 'switch-cpu': [] }>()
 
-interface BCtrl {
-  reg_write: boolean
-  mem_read: boolean
-  mem_write: boolean
-  custom_op: number
-}
-interface BLtIf  { valid: boolean; thread: number; pc: number }
-interface BIfDi  { valid: boolean; thread: number; pc: number; instr: number; src: number }
-interface BDiEx  {
-  valid: boolean; thread: number; pc: number; instr: number;
-  rs1_num: number; rs2_num: number; rd_num: number; ctrl: BCtrl;
-}
-interface BExMa  {
-  valid: boolean; thread: number; instr: number;
-  alu_result: number; rd_num: number;
-  branch_taken: boolean; branch_target: number; ctrl: BCtrl;
-}
-interface BMaWb  {
-  valid: boolean; thread: number; instr: number;
-  alu_result: number; mem_data: number; rd_num: number; ctrl: BCtrl;
-}
-interface BThread {
-  pc: number
-  regs: number[]
-  active: boolean
-  waiting: number
-  priority: number
-  age: number
-  miss_pending: boolean
-  instr_access_fault: boolean
-  priv_mode: number
-  mstatus: number
-  mepc: number
-  mcause: number
-  mtval: number
-  mscratch: number
-  satp: number
-}
-interface BCache { hits: bigint | number; misses: bigint | number; busy: boolean }
-interface BSnapshot {
-  cycle: bigint
-  halted: boolean
-  sched_mode: number
-  current_thread: number
-  mtvec: number
-  mie: number
-  mip: number
-  threads: BThread[]
-  lt_if: BLtIf
-  if_di: BIfDi
-  di_ex: BDiEx
-  ex_ma: BExMa
-  ma_wb: BMaWb
-  last_wb: BMaWb
-  sched_history: number[]
-  icache: BCache
-  dcache: BCache
-  store_buf_count: number
-  bus: { state: number }
-}
-
-interface DisasmJson { class: string; mnemonic: string; operands: string; desc: string }
-
-type Cpu = {
-  reset(): void
-  step(): void
-  step_n(n: number): void
-  load_program(words: Uint32Array): void
-  load_isram(slot: number, words: Uint32Array): void
-  prewarm_icache(): void
-  set_thread_active(slot: number, active: boolean): void
-  set_thread_pc(slot: number, pc: number): void
-  set_thread_priority(slot: number, prio: number): void
-  activate_all(): void
-  set_sched_mode(m: number): void
-  inject_irq(slot: number): void
-  read_csr(slot: number, addr: number): number
-  write_csr(slot: number, addr: number, val: number): void
-  read_isram_word(slot: number, byte_off: number): number
-  ext_imem(): Uint32Array
-  ext_dmem(): Uint32Array
-  snapshot(): BSnapshot
-}
-type Disasmer = { disasm(instr: number): DisasmJson }
+// The wasm Barrel class and its snapshot types (generated from Rust).
+type Cpu = Barrel
+type BSnapshot = BarrelSnapshot
+type Disasmer = (instr: number) => DisasmJson
 
 const cpu = shallowRef<Cpu | null>(null)
+const imemBase = (c: Cpu) => c.regions().find(r => r.name === 'imem')?.base ?? 0
 const dis = shallowRef<Disasmer | null>(null)
 const romCache = ref<number[]>([])
 const ramCache = computed<number[]>(() => {
   renderTick.value
   if (!cpu.value) return []
-  return Array.from(cpu.value.ext_dmem())
+  return Array.from(regionWords(cpu.value, 'dmem'))
 })
 const ready = ref(false)
 const renderTick = ref(0)
@@ -213,32 +136,31 @@ const program = buildDemo()
 onMounted(async () => {
   const mod = await import('../wasm/cpu_sim.js')
   await mod.default()
-  const c = new (mod as any).JsBarrelState() as Cpu
-  c.load_program(program)
+  const c = new mod.Barrel()
+  c.load(imemBase(c), program)
   c.prewarm_icache()
   // Boot mode: only T0 active at pc=0.
   c.set_thread_active(0, true)
   c.set_thread_pc(0, 0)
   c.set_thread_priority(0, 3)
   cpu.value = c
-  romCache.value = Array.from(c.ext_imem())
-  const d = new (mod as any).JsCpuState() as unknown as Disasmer
-  dis.value = d
+  romCache.value = Array.from(regionWords(c, 'imem'))
+  dis.value = mod.disasm
   ready.value = true
 })
 
 function step()    { cpu.value?.step(); renderTick.value++ }
-function step8()   { cpu.value?.step_n(8); renderTick.value++ }
-function step32()  { cpu.value?.step_n(32); renderTick.value++ }
+function step8()   { cpu.value?.run(8); renderTick.value++ }
+function step32()  { cpu.value?.run(32); renderTick.value++ }
 function reset()   {
   if (!cpu.value) return
-  cpu.value.reset()
-  cpu.value.load_program(program)
+  cpu.value.clear()
+  cpu.value.load(imemBase(cpu.value), program)
   cpu.value.prewarm_icache()
   cpu.value.set_thread_active(0, true)
   cpu.value.set_thread_pc(0, 0)
   cpu.value.set_thread_priority(0, 3)
-  romCache.value = Array.from(cpu.value.ext_imem())
+  romCache.value = Array.from(regionWords(cpu.value, 'imem'))
   renderTick.value++
 }
 
@@ -250,7 +172,7 @@ const snap = computed<BSnapshot | null>(() => {
 
 function disasmShort(instr: number): string {
   if (!dis.value || instr === 0) return ''
-  const d = dis.value.disasm(instr >>> 0)
+  const d = dis.value(instr >>> 0)
   return `${d.mnemonic.padEnd(6)} ${d.operands}`
 }
 

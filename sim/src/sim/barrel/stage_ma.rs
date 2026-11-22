@@ -5,24 +5,24 @@
 
 use crate::isa::lsu;
 use super::cache::{Cache, PendingMiss};
-use super::state::{BarrelState, CustomOp, ExMa, MaWb, N_THREADS, Thread};
+use super::state::{BarrelState, CsrOp, CustomOp, ExMa, MaWb, MaWbData, N_THREADS, Thread};
 use super::thread_mmio;
 
 /// Build a MaWb from an ExMa with a given mem_data (helper to
 /// avoid repeating the 8-field construction everywhere).
 fn mawb_from(ex_ma: &ExMa, mem_data: u32) -> MaWb {
-    MaWb {
-        valid: true, thread: ex_ma.thread, instr: ex_ma.instr,
+    MaWb::new(ex_ma.pc, ex_ma.instr, MaWbData {
+        thread: ex_ma.thread,
         alu_result: ex_ma.alu_result, mem_data,
         pc_plus4: ex_ma.pc_plus4, rd_num: ex_ma.rd_num,
         ctrl: ex_ma.ctrl,
-    }
+    })
 }
 
 fn execute_csr(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
     let slot = ex_ma.thread;
     // Shared Zicsr unit (the shared CSRs are mirrored to every thread)
-    let old = state.csr_rmw(slot, ex_ma.csr_addr, ex_ma.csr_op, ex_ma.csr_src_is_zero, ex_ma.csr_write_val);
+    let old = state.csr_rmw(slot, ex_ma.csr_addr, ex_ma.csr_op.to_u8(), ex_ma.csr_src_is_zero, ex_ma.csr_write_val);
     let mut r = mawb_from(ex_ma, 0);
     r.alu_result = old; // old CSR value → WB writes to rd
     r
@@ -37,7 +37,7 @@ fn execute_load(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
     if thread_mmio::is_tmmio(addr) {
         let t = &state.threads[thread as usize];
         if !thread_mmio::check_access(thread, t.priv_bits()) {
-            state.take_sync_trap(thread, 5, ex_ma.trap_pc, addr);
+            state.take_sync_trap(thread, 5, ex_ma.pc, addr);
             return MaWb::bubble();
         }
         return mawb_from(ex_ma, thread_mmio::read(state, addr));
@@ -74,7 +74,7 @@ fn execute_store(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
     if thread_mmio::is_tmmio(addr) {
         let priv_m = state.threads[thread as usize].priv_bits();
         if !thread_mmio::check_access(thread, priv_m) {
-            state.take_sync_trap(thread, 7, ex_ma.trap_pc, addr);
+            state.take_sync_trap(thread, 7, ex_ma.pc, addr);
             return MaWb::bubble();
         }
         thread_mmio::write(state, addr, val);
@@ -111,9 +111,9 @@ fn execute_store(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
 pub fn compute_ma(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
     if !ex_ma.valid { return MaWb::bubble(); }
     if ex_ma.ctrl.custom_op != CustomOp::None { return execute_custom0(state, ex_ma); }
-    if ex_ma.csr_op != 0 { return execute_csr(state, ex_ma); }
-    if ex_ma.ctrl.mem_read { return execute_load(state, ex_ma); }
-    if ex_ma.ctrl.mem_write { return execute_store(state, ex_ma); }
+    if ex_ma.csr_op != CsrOp::None { return execute_csr(state, ex_ma); }
+    if ex_ma.ctrl.mem.is_load() { return execute_load(state, ex_ma); }
+    if ex_ma.ctrl.mem.is_store() { return execute_store(state, ex_ma); }
     mawb_from(ex_ma, 0)
 }
 
@@ -211,14 +211,12 @@ fn execute_custom0(state: &mut BarrelState, ex_ma: &ExMa) -> MaWb {
         CustomOp::None => unreachable!(),
     }
 
-    MaWb {
-        valid: true,
+    MaWb::new(ex_ma.pc, ex_ma.instr, MaWbData {
         thread: ex_ma.thread,
-        instr: ex_ma.instr,
         alu_result: result_for_rd,
         mem_data: 0,
         pc_plus4: ex_ma.pc_plus4,
         rd_num: ex_ma.rd_num,
         ctrl: ex_ma.ctrl,
-    }
+    })
 }

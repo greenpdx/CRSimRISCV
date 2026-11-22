@@ -8,7 +8,9 @@
 use crate::sim::mem::{Bus, Pages, Port};
 use crate::sim::memsys::{Event, MemSystem};
 
-#[cfg_attr(feature = "wasm", derive(serde::Serialize))]
+#[cfg_attr(feature = "wasm", derive(serde::Serialize, tsify::Tsify))]
+
+#[cfg_attr(feature = "wasm", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemMode { Fixed, Caches }
 

@@ -13,6 +13,8 @@ use crate::fields::extract_fields;
 use crate::imm::{imm_b, imm_i, imm_j, imm_s, imm_u};
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts", derive(tsify::Tsify))]
+#[cfg_attr(feature = "ts", tsify(missing_as_null))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Instr {
     Lui   { rd: u8, imm: u32 },

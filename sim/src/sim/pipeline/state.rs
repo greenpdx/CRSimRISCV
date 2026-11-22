@@ -14,6 +14,8 @@ use crate::sim::mem::Port;
 use crate::sim::memsys::Event;
 use super::mem::PipeMem;
 use super::mem::IO_BASE;
+use crate::sim::forwarding::RegWriter;
+pub use crate::sim::stage::{CsrOp, Latch, MemKind, PcSel, TrapKind, WbSel};
 
 /// Branch resolution strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,49 +54,40 @@ impl BranchMode {
 
 /// All control signals decoded from the instruction in ID, propagated
 /// forward through the pipeline registers. Each downstream stage only
-/// consults the bits it needs.
+/// consults the bits it needs. Panel codes: `wb_sel.code()`,
+/// `pc_sel.code()`, `csr_op.to_u8()`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ControlBits {
     pub reg_write: bool,
     pub alu_src:   bool,   // false=rs2, true=immediate
-    pub alu_op:    u8,     // 0|1|2
-    pub mem_read:  bool,
-    pub mem_write: bool,
-    pub wb_sel:    u8,     // 0=ALU, 1=Mem, 2=PC+4, 3=CSR
-    pub pc_sel:    u8,     // 0=PC+4, 1=PC+imm, 2=(rs1+imm)&~1
+    pub alu_op:    u8,     // ALU-control class 0|1|2
+    pub mem:       MemKind,
+    pub wb_sel:    WbSel,
+    pub pc_sel:    PcSel,
     pub branch:    bool,   // is this a conditional branch?
     pub jump:      bool,   // is this an unconditional jump (JAL/JALR)?
-    pub csr_op:    u8,     // 0=none, 1=RW, 2=RS, 3=RC (Zicsr Phase 1)
-    pub is_sfence: bool,   // SFENCE.VMA — flush TLB in MA stage (Phase 4.4)
+    pub csr_op:    CsrOp,  // Zicsr
+    pub is_sfence: bool,   // SFENCE.VMA — flush TLB in MA stage
 }
 
-/// IF/ID pipeline register. Holds an instruction that has been fetched
-/// but not yet decoded.
+/// IF/ID payload: an instruction fetched but not yet decoded.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct IfId {
-    pub valid: bool,
-    pub pc: u32,
-    pub instr: u32,
+pub struct IfIdData {
     pub pc_plus4: u32,
-    /// 0 = none, 6 = instruction page fault (set by IF translation)
-    pub trap_kind: u8,
+    /// None, or InstrPageFault (set by IF translation).
+    pub trap_kind: TrapKind,
     pub trap_value: u32,
     /// True if this bubble was inserted by a branch flush.
     pub flush_bubble: bool,
 }
+/// IF/ID pipeline register.
+pub type IfId = Latch<IfIdData>;
 
-impl IfId {
-    pub fn bubble() -> Self { Self::default() }
-}
-
-/// ID/EX pipeline register. Holds a decoded instruction with its operand
-/// values, immediate, and the full control vector.
+/// ID/EX payload: a decoded instruction with its operand values,
+/// immediate, and the full control vector.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct IdEx {
-    pub valid: bool,
-    pub pc: u32,
+pub struct IdExData {
     pub pc_plus4: u32,
-    pub instr: u32,           // original instruction word (for display)
     pub rs1_data: u32,
     pub rs2_data: u32,
     pub imm: u32,
@@ -105,15 +98,14 @@ pub struct IdEx {
     pub funct7b30: u8,
     pub opcode: u8,
     pub ctrl: ControlBits,
-    /// CSR address (instr[31:20]) when ctrl.csr_op != 0.
+    /// CSR address (instr bits 31:20) for a CSR instruction.
     pub csr_addr: u16,
     /// CSR immediate (rs1 field as zero-extended uimm) for CSRR*I.
     pub csr_uimm: u8,
     /// True if this is the immediate-form CSR op (uimm replaces rs1).
     pub csr_imm_form: bool,
-    /// Synchronous trap / mret kind decoded in ID:
-    /// 0 = none, 1 = illegal_instr, 2 = ecall_m, 3 = ebreak, 4 = mret.
-    pub trap_kind: u8,
+    /// Synchronous trap / xRET decoded in ID (or a page fault from IF).
+    pub trap_kind: TrapKind,
     /// If this entry is a stall-induced bubble, the register the
     /// younger instruction is waiting on. 0 = not a stall bubble.
     pub stall_reg: u8,
@@ -132,17 +124,12 @@ pub struct IdEx {
     /// fired. Propagated through stage_ex into `ExMa.early_redirected`.
     pub id_redirected: bool,
 }
+/// ID/EX pipeline register.
+pub type IdEx = Latch<IdExData>;
 
-impl IdEx {
-    pub fn bubble() -> Self { Self::default() }
-}
-
-/// EX/MA pipeline register. Holds the ALU result and the control bits
-/// the MA and WB stages still need.
+/// EX/MA payload: the ALU result and the control bits MA and WB still need.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct ExMa {
-    pub valid: bool,
-    pub instr: u32,            // original instruction word (for display)
+pub struct ExMaData {
     pub alu_result: u32,
     pub rs2_data: u32,         // for stores
     pub pc_plus4: u32,         // for JAL/JALR link
@@ -151,16 +138,15 @@ pub struct ExMa {
     pub branch_taken: bool,
     pub branch_target: u32,
     pub ctrl: ControlBits,
-    /// CSR address forwarded to MA when ctrl.csr_op != 0.
+    /// CSR address forwarded to MA for a CSR instruction.
     pub csr_addr: u16,
     /// Value to write into the CSR (rs1_data forwarded, or zero-extended uimm).
     pub csr_write_val: u32,
     /// Was rs1 == 0 / uimm == 0? (Determines whether CSR write occurs for RS/RC.)
     pub csr_src_is_zero: bool,
-    /// Trap/mret kind, propagated from ID. Resolved by `step()` after EX.
-    pub trap_kind: u8,
-    /// PC of the trapping instruction (saved into mepc on sync trap).
-    pub trap_pc: u32,
+    /// Trap/xRET kind, propagated from ID. Resolved by `step()` after EX
+    /// (mepc = the latch's `pc`).
+    pub trap_kind: TrapKind,
     /// Propagated stall-bubble tag (0 = not a stall bubble).
     pub stall_reg: u8,
     /// Propagated branch-flush bubble tag.
@@ -169,35 +155,41 @@ pub struct ExMa {
     /// Used so the EX-stage flush logic doesn't double-flush.
     pub early_redirected: bool,
 }
+/// EX/MA pipeline register.
+pub type ExMa = Latch<ExMaData>;
 
-impl ExMa {
-    pub fn bubble() -> Self { Self::default() }
-}
-
-/// MA/WB pipeline register. Holds the value that's about to be written
-/// back to the register file (or the alternatives the WB mux can choose
-/// among).
+/// MA/WB payload: the value about to be written back (or the alternatives
+/// the WB mux chooses among).
 #[derive(Debug, Clone, Copy, Default)]
-pub struct MaWb {
-    pub valid: bool,
-    pub instr: u32,            // original instruction word (for display)
+pub struct MaWbData {
     pub alu_result: u32,
     pub mem_data: u32,
     pub pc_plus4: u32,
     pub rd_num: u8,
     pub ctrl: ControlBits,
-    /// Trap kind for an MA-stage page fault (7=load, 8=store).
-    pub trap_kind: u8,
-    pub trap_pc: u32,
+    /// LoadPageFault / StorePageFault from MA translation (mepc = `pc`).
+    pub trap_kind: TrapKind,
     pub trap_value: u32,
     /// Propagated stall-bubble tag (0 = not a stall bubble).
     pub stall_reg: u8,
     /// Propagated branch-flush bubble tag.
     pub flush_bubble: bool,
 }
+/// MA/WB pipeline register.
+pub type MaWb = Latch<MaWbData>;
 
-impl MaWb {
-    pub fn bubble() -> Self { Self::default() }
+impl MaWbData {
+    /// The value WB writes to rd (and MA/WB forwards).
+    pub fn wb_value(&self) -> u32 { self.ctrl.wb_sel.select(self.alu_result, self.mem_data, self.pc_plus4) }
+}
+
+impl RegWriter for ExMa {
+    fn writes(&self) -> Option<u8> { (self.valid && self.ctrl.reg_write && self.rd_num != 0).then_some(self.rd_num) }
+    fn fwd_value(&self) -> u32 { self.alu_result }
+}
+impl RegWriter for MaWb {
+    fn writes(&self) -> Option<u8> { (self.valid && self.ctrl.reg_write && self.rd_num != 0).then_some(self.rd_num) }
+    fn fwd_value(&self) -> u32 { self.wb_value() }
 }
 
 pub use super::super::forwarding::ForwardSrc;
