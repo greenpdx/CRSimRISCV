@@ -235,3 +235,32 @@ fn barrel_forkret_passes_return_value_to_parent_a0() {
                "parent's a0 = child's FORKRET return value");
     assert!(!cpu.threads[1].active, "child done");
 }
+
+// ── The assembler's thread mnemonics run on the core ──────────────
+/// Assemble one block of source into words.
+fn asm(src: &str) -> Vec<u32> {
+    let r = rv_asm::assemble(src);
+    assert!(r.success, "{:?}", r.errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+    r.instructions.iter().map(|i| i.value).collect()
+}
+
+#[test]
+fn assembled_thread_instructions_run_on_the_barrel() {
+    // Parent forks a child, joins it and reads its own id; the child reads
+    // its id, yields once and returns a value with forkret.
+    let parent = asm("addi x7, x0, 0x40\naddi x8, x0, 0\nfork x5, x7, x8\njoin x5\ntid x9\naddi x10, x0, 77\njal x0, 0");
+    let child = asm("tid x6\nyield\naddi x11, x0, 5\nforkret x11");
+    let mut rom = vec![NOP; 64];
+    rom[..parent.len()].copy_from_slice(&parent);
+    rom[16..16 + child.len()].copy_from_slice(&child);
+    rom[32] = SPIN;
+    let mut cpu = cpu_with_spinners(0x80);
+    cpu.load_program(&rom);
+    cpu.prewarm_icache();
+    for _ in 0..400 { cpu.step(); }
+    assert_eq!(cpu.read_thread_register(0, 5), 1, "fork returned the child's slot");
+    assert_eq!(cpu.read_thread_register(1, 6), 1, "the child's tid");
+    assert_eq!(cpu.read_thread_register(0, 9), 0, "the parent's tid");
+    assert_eq!(cpu.read_thread_register(0, 10), 77, "the parent ran on after the join");
+    assert!(!cpu.threads[1].active, "the child ended with forkret");
+}

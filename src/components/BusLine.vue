@@ -86,6 +86,8 @@ const props = defineProps<{
   value:      number
   state:      SignalState
   showLabel?: boolean
+  /** Where the value label sits (default: the middle of the line) */
+  labelAt?:   Point
   /** If set, this bus only activates during this specific phase */
   phase?:     Phase
   /** Colour override (default: by net name) */
@@ -145,6 +147,7 @@ const busColor = computed(() => {
 
 /** Midpoint for value label */
 const midpoint = computed(() => {
+  if (props.labelAt) return props.labelAt
   const pts = props.points
   if (pts.length < 2) return { x: 0, y: 0 }
   const mid = Math.floor(pts.length / 2)

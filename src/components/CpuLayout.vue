@@ -26,7 +26,7 @@
       <!-- immSel → Imm Generator (bottom) -->
       <ControlLine
         net-id="ctrl_imm_sel"
-        :points="[{ x: DEC_PORT_X.imm_sel!, y: DEC_T }, { x: 569, y: IMM_Y + 52 }]"
+        :points="[{ x: DEC_PORT_X.imm_sel!, y: DEC_T }, { x: DEC_PORT_X.imm_sel!, y: DEC_T - 12 }, { x: IMM_X + 45, y: DEC_T - 12 }, { x: IMM_X + 45, y: IMM_Y + 52 }]"
         :asserted="busVal('ctrl_imm_sel') !== 5"
         :show-label="true"
         :phase="immChainPhase"
@@ -35,7 +35,7 @@
       <!-- ctrl_is_jalr → PC Sel MUX (bottom) -->
       <ControlLine
         net-id="ctrl_is_jalr"
-        :points="[{ x: DEC_PORT_X.is_jalr!, y: DEC_T }, { x: 640, y: pcsY + (config.enableCsr ? 114 : 72) }]"
+        :points="[{ x: DEC_PORT_X.is_jalr!, y: DEC_T }, { x: DEC_PORT_X.is_jalr!, y: pcsY + (config.enableCsr ? 118 : 74) }]"
         :asserted="cpu.controlStates['ctrl_is_jalr']?.asserted ?? false"
         :show-label="true"
         phase="pcupdate"
@@ -104,7 +104,7 @@
       <!-- ctrl_mem_write → Load / Store (top) -->
       <ControlLine
         net-id="ctrl_mem_write"
-        :points="[{ x: DEC_PORT_X.mem_write!, y: DEC_B }, { x: DEC_PORT_X.mem_write!, y: LS_Y - 10 }, { x: 365, y: LS_Y - 10 }, { x: 365, y: LS_Y }]"
+        :points="[{ x: DEC_PORT_X.mem_write!, y: DEC_B }, { x: DEC_PORT_X.mem_write!, y: DEC_B + 34 }, { x: 650, y: DEC_B + 34 }, { x: 650, y: LS_Y - 10 }, { x: 365, y: LS_Y - 10 }, { x: 365, y: LS_Y }]"
         :label-at="{ x: 452, y: LS_Y - 10 }"
         :asserted="cpu.controlStates['ctrl_mem_write']?.asserted ?? false"
         :show-label="true"
@@ -138,7 +138,7 @@
       <!-- PC → Adder -->
       <BusLine
         net-id="pc_out_adder"
-        :points="[{ x: 427, y: PC_OUT }, { x: 427, y: 195 }, { x: 773, y: 195 }, { x: 773, y: ADD_Y + 40 }]"
+        :points="[{ x: 427, y: PC_OUT }, { x: 427, y: PCFB_Y }, { x: 773, y: PCFB_Y }, { x: 773, y: ADD_Y + 40 }]"
         :bits="32"
         :value="cpu.pc"
         :state="busActive('pc_out') ? 'active' : 'idle'"
@@ -214,10 +214,10 @@
         phase="fetch"
         />
 
-      <!-- Instruction → Imm Gen -->
+      <!-- Instruction → Imm Gen: a branch of the IF output -->
       <BusLine
         net-id="instr_immgen"
-        :points="[{ x: 391, y: IMM_Y + 32 }, { x: 522, y: IMM_Y + 32 }]"
+        :points="[{ x: 380, y: IMM_Y + 32 }, { x: IMM_X - 2, y: IMM_Y + 32 }]"
         :bits="32"
         :value="busVal('instr')"
         :state="busActive('instr') ? 'active' : 'idle'"
@@ -240,7 +240,8 @@
 
       <BusLine
         net-id="immediate"
-        :points="[{ x: 632, y: IMM_Y + 32 }, { x: 675, y: IMM_Y + 32 }]"
+        :points="[{ x: IMM_X + 108, y: IMM_Y + 32 }, { x: IMM_TAP, y: IMM_Y + 32 }]"
+        :label-at="{ x: IMM_TAP + 70, y: IMM_Y + 32 }"
         :bits="32"
         :value="busVal('immediate')"
         :state="busActive('immediate') ? 'active' : 'idle'"
@@ -251,7 +252,7 @@
       <!-- Imm → +4/Imm mux -->
       <BusLine
         net-id="immediate_pcoffset"
-        :points="[{ x: 675, y: IMM_Y + 32 }, { x: 953, y: IMM_Y + 32 }, { x: 953, y: OFS_Y + 48 }, { x: 943, y: OFS_Y + 48 }]"
+        :points="[{ x: IMM_TAP, y: IMM_Y + 32 }, { x: 953, y: IMM_Y + 32 }, { x: 953, y: OFS_Y + 48 }, { x: 943, y: OFS_Y + 48 }]"
         :bits="32"
         :value="busVal('immediate')"
         :state="busActive('immediate') ? 'active' : 'idle'"
@@ -262,7 +263,7 @@
       <!-- Imm → down the left channel → ALU Src imm input -->
       <BusLine
         net-id="immediate_alusrc"
-        :points="[{ x: 675, y: IMM_Y + 32 }, { x: 675, y: IMM_Y + 64 }, { x: 426, y: IMM_Y + 64 }, { x: 426, y: DEC_B + 8 }, { x: 660, y: DEC_B + 8 }, { x: 660, y: AS_Y + 48 }, { x: AMX, y: AS_Y + 48 }]"
+        :points="[{ x: IMM_TAP, y: IMM_Y + 32 }, { x: IMM_TAP, y: AS_Y + 48 }, { x: AMX, y: AS_Y + 48 }]"
         :bits="32"
         :value="busVal('immediate')"
         :state="busActive('immediate') ? 'active' : 'idle'"
@@ -395,7 +396,7 @@
       <!-- ALU result → up the right channel → PC Sel JALR input -->
       <BusLine
         net-id="alu_result_vert_upper"
-        :points="[{ x: 1110, y: 636 }, { x: 1110, y: 236 }]"
+        :points="[{ x: 1110, y: 636 }, { x: 1110, y: JT_Y }]"
         :bits="32"
         :value="busVal('alu_result')"
         :state="busActive('alu_result') ? 'active' : 'idle'"
@@ -404,7 +405,7 @@
         />
       <BusLine
         net-id="jalr_target"
-        :points="[{ x: 1110, y: 236 }, { x: 720, y: 236 }, { x: 720, y: pcIn(1) }, { x: 697, y: pcIn(1) }]"
+        :points="[{ x: 1110, y: JT_Y }, { x: 720, y: JT_Y }, { x: 720, y: pcIn(1) }, { x: 697, y: pcIn(1) }]"
         :bits="32"
         :value="busVal('jalr_target')"
         :state="busActive('jalr_target') ? 'active' : 'idle'"
@@ -448,7 +449,7 @@
       <!-- PC+4 → WB Sel input 2 (JAL/JALR link) -->
       <BusLine
         net-id="pc_adder_result_wb"
-        :points="[{ x: 734, y: ADD_Y + 21 }, { x: 734, y: 260 }, { x: 1140, y: 260 }, { x: 1140, y: wbIn(2) }, { x: WB_X, y: wbIn(2) }]"
+        :points="[{ x: 734, y: ADD_Y + 21 }, { x: 734, y: P4_Y }, { x: 1140, y: P4_Y }, { x: 1140, y: wbIn(2) }, { x: WB_X, y: wbIn(2) }]"
         :bits="32"
         :value="busVal('pc_adder_result')"
         :state="busActive('pc_adder_result') ? 'active' : 'idle'"
@@ -460,7 +461,7 @@
       <BusLine
         v-if="config.enableCsr"
         net-id="csr_read_data"
-        :points="[{ x: CSR_X + 77, y: CSR_Y + 144 }, { x: CSR_X + 77, y: CSR_Y + 180 }, { x: 1125, y: CSR_Y + 180 }, { x: 1125, y: wbIn(3) }, { x: WB_X, y: wbIn(3) }]"
+        :points="[{ x: CSR_X + 77, y: CSR_Y + 144 }, { x: CSR_X + 77, y: P4_Y - 12 }, { x: 1125, y: P4_Y - 12 }, { x: 1125, y: wbIn(3) }, { x: WB_X, y: wbIn(3) }]"
         :bits="32"
         :value="busVal('csr_read_data')"
         :state="busActive('csr_read_data') ? 'active' : 'idle'"
@@ -534,7 +535,7 @@
     <!-- ══ Left column: instruction memory / I/O / data memory ══ -->
 
     <!-- ── Instruction memory (top left) ── -->
-    <div class="cpu-block" :style="px(MEM_X, 20)" @click="onRomClick">
+    <div class="cpu-block" :style="px(MEM_X, 20)" @mouseover="onRomHover" @mouseleave="onRomLeave">
       <RomBlock
         :words="cpu.romWords"
         :pc="cpu.pc"
@@ -626,10 +627,10 @@
       />
     </div>
 
-    <div class="cpu-block" :style="px(524, IMM_Y)">
+    <div class="cpu-block" :style="px(IMM_X, IMM_Y)">
       <ImmGenerator
-        :instruction="cpu.lastInstr"
-        :imm-sel="immSel"
+        :instruction="fetched ? cpu.lastInstr : 0"
+        :imm-sel="fetched ? immSel : 5"
         :active="busActive('immediate')"
       />
     </div>
@@ -641,14 +642,15 @@
     <!-- ══ Middle: decoder / control ══ -->
     <div class="cpu-block" :style="{ ...px(DEC_X, DEC_T), width: DEC_W + 'px' }">
       <DecoderControl
-        :opcode="opcode"
+        :opcode="fetched ? opcode : 0"
         :active="phases.currentPhase === 'decode'"
-        :asm-text="currentAsm"
+        :asm-text="decodedAsm"
         :phase-text="phases.phaseLabel"
-        :signals-override="decoderOverride"
+        :signals-override="fetched ? decoderOverride : undefined"
         :split="DEC_SPLIT"
         :badge-x="decBadgeX"
-        @asm-click="(e: MouseEvent) => showInstrPopup(currentAsm, e)"
+        @asm-hover="(e: MouseEvent) => hoverInstrPopup(decodedAsm, e.currentTarget as HTMLElement, 'below')"
+        @asm-leave="instrPopup?.leave()"
       />
     </div>
 
@@ -722,6 +724,8 @@
     <div class="cpu-block cpu-block--regs" :style="px(RF_X, RF_Y)">
       <RegisterFile
         :registers="cpu.registers"
+        :short-rows="16"
+        compact
       />
     </div>
 
@@ -729,14 +733,14 @@
     <div ref="clockBar" class="clock-bar">
       <!-- Views -->
       <button class="clock-btn clock-btn--edit" @click="openEditor">Edit</button>
-      <button class="clock-btn clock-btn--edit" @click="emit('switch-microstep-pipeline')">Pipeline</button>
-      <button class="clock-btn clock-btn--edit" @click="emit('switch-memory')">Memory</button>
-      <button class="clock-btn clock-btn--edit" @click="emit('switch-ooo')">OoO</button>
+      <!-- Panel select (Memory and OoO are reached from the Pipeline view) -->
       <div class="clock-menu">
-        <button class="clock-btn clock-btn--edit" @click.stop="toggleMenu('views')">More ▴</button>
+        <button class="clock-btn clock-btn--edit" @click.stop="toggleMenu('views')">Panels ▴</button>
         <div v-if="openMenu === 'views'" class="clock-menu__list">
-          <button class="clock-menu__item" @click="emit('switch-microstep')">μStep (single-cycle)</button>
+          <button class="clock-menu__item clock-menu__item--current" disabled>Single-cycle</button>
+          <button class="clock-menu__item" @click="emit('switch-microstep-pipeline')">Pipeline</button>
           <button class="clock-menu__item" @click="emit('switch-microstep-barrel')">Barrel</button>
+          <button class="clock-menu__item" @click="emit('switch-microstep')">μStep table (single-cycle)</button>
         </div>
       </div>
 
@@ -762,8 +766,8 @@
       <span class="clock-divider">|</span>
 
       <!-- Execution controls -->
-      <button class="clock-btn" @click="phases.microStep()" :disabled="phases.animating">Micro</button>
-      <button class="clock-btn" @click="phases.animatedStep()" :disabled="phases.animating">Step</button>
+      <button class="clock-btn" title="Advance one phase of the instruction" @click="phases.microStep()" :disabled="phases.animating">Phase</button>
+      <button class="clock-btn" title="Run to the next instruction" @click="phases.animatedStep()" :disabled="phases.animating">Next</button>
       <button class="clock-btn" @click="phases.toggleAutoRun()">{{ phases.autoRunning ? 'Stop' : 'Run' }}</button>
       <button class="clock-btn clock-btn--reset" @click="phases.reset()">Reset</button>
       <input
@@ -783,6 +787,12 @@
         <span class="clock-divider">|</span>
         <span class="clock-label clock-tag" :class="'mode-' + cpu.privMode">mode: {{ cpu.privMode }}</span>
         <span v-if="cpu.trapDepth > 0" class="clock-label clock-tag clock-tag--trap">IN_TRAP</span>
+        <span
+          v-if="irqPending.names"
+          class="clock-label clock-tag"
+          :class="irqPending.masked ? 'clock-tag--masked' : 'clock-tag--trap'"
+          :title="irqPending.masked ? irqPending.why : 'Taken at the start of the next instruction'"
+        >irq: {{ irqPending.names }}{{ irqPending.tag }}</span>
         <div class="clock-menu">
           <button class="clock-btn" @click.stop="toggleMenu('irq')">IRQ ▴</button>
           <div v-if="openMenu === 'irq'" class="clock-menu__list clock-menu__list--right">
@@ -842,9 +852,9 @@
 
           <div class="modal__section">Extensions</div>
           <div class="modal__row">
-            <label class="modal__label">Zicsr (CSR registers)</label>
-            <label class="modal__toggle">
-              <input type="checkbox" v-model="config.enableCsr" />
+            <label class="modal__label">Zicsr (CSR registers){{ cpu.trapsEnabled ? ' — needed by traps' : '' }}</label>
+            <label class="modal__toggle" :class="{ 'modal__toggle--off': cpu.trapsEnabled }">
+              <input type="checkbox" v-model="config.enableCsr" :disabled="cpu.trapsEnabled" />
               <span>{{ config.enableCsr ? 'Enabled' : 'Disabled' }}</span>
             </label>
           </div>
@@ -879,7 +889,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useCpuState } from '../stores/cpuState'
 import { useCpuPhases } from '../stores/cpuPhases'
 import { useCpuConfig } from '../stores/cpuConfig'
@@ -913,21 +923,48 @@ const phases = useCpuPhases()
 const config = useCpuConfig()
 const instrPopup = ref<InstanceType<typeof InstrPopup> | null>(null)
 
-function showInstrPopup(asm: string, event: MouseEvent) {
-  if (!asm || asm === 'nop') return
-  instrPopup.value?.show(asm.toUpperCase(), event.clientX + 10, event.clientY - 10)
+/** Raised interrupt lines, and why they are not being taken (if so) */
+const IRQ_BITS: [number, string][] = [[11, 'MEI'], [3, 'MSI'], [7, 'MTI'], [9, 'SEI'], [1, 'SSI'], [5, 'STI']]
+const irqPending = computed(() => {
+  void cpu.pc; void cpu.cycleCount; void cpu.csrRegisters
+  const p = cpu.pendingIrq
+  const names = IRQ_BITS.filter(([b]) => (p >>> b) & 1).map(([, n]) => n).join(' ')
+  if (!names) return { names: '', masked: false, why: '', tag: '' }
+  const mstatus = cpu.csrRead(0x300), mie = cpu.csrRead(0x304)
+  const globalOn = cpu.privMode !== 'M' || ((mstatus >>> 3) & 1) === 1
+  const enabled = (mie & p) !== 0
+  const inHandler = cpu.trapDepth > 0
+  const why = !enabled ? 'Not taken: its enable bit in mie is 0 (the program must set it)'
+    : !globalOn ? (inHandler
+        ? 'Held off: the CPU cleared mstatus.MIE on entering the handler; mret restores it'
+        : 'Not taken: mstatus.MIE is 0 (the program must set it)') : ''
+  const tag = !enabled || !globalOn ? (enabled && inHandler ? ' — held off in handler' : ' — masked') : ''
+  return { names, masked: !enabled || !globalOn, why, tag }
+})
+
+// Traps use mtvec / mepc / mcause: with traps on, the CSR box and PC Sel's
+// trap and mret inputs are shown too.
+watch(() => cpu.trapsEnabled, on => { if (on) config.enableCsr = true }, { immediate: true })
+
+/** Instruction info on hover: beside (right of) or below the element hovered */
+function hoverInstrPopup(asm: string, el: HTMLElement, where: 'right' | 'below') {
+  if (!asm || asm === 'nop') { instrPopup.value?.leave(); return }
+  const r = el.getBoundingClientRect()
+  if (where === 'right') instrPopup.value?.hover(asm.toUpperCase(), r.right + 6, r.top - 4)
+  else instrPopup.value?.hover(asm.toUpperCase(), r.left, r.bottom + 4)
 }
 
-function onRomClick(event: MouseEvent) {
-  // Find the clicked row's annotation cell
-  const target = event.target as HTMLElement
-  const row = target.closest('tr')
-  if (!row) return
-  const annotation = row.querySelector('.mem-row__annotation')
-  if (!annotation) return
-  const asm = annotation.textContent?.trim() ?? ''
-  if (asm) showInstrPopup(asm, event)
+/** Instruction memory: the row under the pointer */
+let romHoverRow: Element | null = null
+function onRomHover(event: MouseEvent) {
+  const row = (event.target as HTMLElement).closest('tr')
+  if (row === romHoverRow) return
+  romHoverRow = row
+  const asm = row?.querySelector('.mem-row__annotation')?.textContent?.trim() ?? ''
+  if (row && asm) hoverInstrPopup(asm, row as HTMLElement, 'right')
+  else instrPopup.value?.leave()
 }
+function onRomLeave() { romHoverRow = null; instrPopup.value?.leave() }
 
 // ── Program Load / Save ─────────────────────────────────────────────────────
 
@@ -972,6 +1009,66 @@ interface ProgramEntry { hex: string; asm: string }
 interface ProgramFile { name: string; program: ProgramEntry[] }
 
 const examplePrograms: ProgramFile[] = [
+  // Turn on Config → Traps, run it, then raise MEI from the IRQ menu. The line
+  // stays raised (the handler runs again and again) until IRQ → Clear IRQs.
+  {
+    name: 'Interrupt (sets mtvec)',
+    program: [
+      { hex: '0x04000293', asm: 'addi x5, x0, 0x40' },  // handler address
+      { hex: '0x30529073', asm: 'csrrw x0, mtvec, x5' },  // mtvec = 0x40: every trap jumps there
+      { hex: '0x00100293', asm: 'addi x5, x0, 1' },
+      { hex: '0x00b29293', asm: 'slli x5, x5, 11' },  // x5 = 0x800, the MEIE bit
+      { hex: '0x3042a073', asm: 'csrrs x0, mie, x5' },  // mie.MEIE = 1: external interrupt enabled
+      { hex: '0x30046073', asm: 'csrrsi x0, mstatus, 8' },  // mstatus.MIE = 1: interrupts on
+      { hex: '0x00150513', asm: 'addi x10, x10, 1' },  // main loop: x10 counts
+      { hex: '0xffdff06f', asm: 'jal x0, -4' },  // back to the loop
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x34202373', asm: 'csrrs x6, mcause, x0' },  // handler @ 0x40: x6 = cause
+      { hex: '0x00158593', asm: 'addi x11, x11, 1' },  // x11 counts interrupts
+      { hex: '0x30200073', asm: 'mret' },  // back to the interrupted instruction
+    ],
+  },
+  // Vectored mode: mtvec's low bit is 1, so each interrupt jumps to its own
+  // slot in a table (base + 4 x cause). Exceptions still go to the base.
+  // Turn on Config → Traps, run it, raise MTI or MEI, then IRQ → Clear IRQs.
+  {
+    name: 'Interrupt table (vectored mtvec)',
+    program: [
+      { hex: '0x02100293', asm: 'addi x5, x0, 0x21' },  // table at 0x20, low bit 1 = vectored mode
+      { hex: '0x30529073', asm: 'csrrw x0, mtvec, x5' },  // mtvec = 0x21
+      { hex: '0x01100293', asm: 'addi x5, x0, 0x11' },
+      { hex: '0x00729293', asm: 'slli x5, x5, 7' },  // x5 = 0x880: MTIE (bit 7) and MEIE (bit 11)
+      { hex: '0x3042a073', asm: 'csrrs x0, mie, x5' },  // enable timer and external interrupts
+      { hex: '0x30046073', asm: 'csrrsi x0, mstatus, 8' },  // mstatus.MIE = 1: interrupts on
+      { hex: '0x00150513', asm: 'addi x10, x10, 1' },  // main loop: x10 counts
+      { hex: '0xffdff06f', asm: 'jal x0, -4' },  // back to the loop
+      { hex: '0x0400006f', asm: 'jal x0, 64' },  // table @ 0x20, slot 0: all exceptions
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x0140006f', asm: 'jal x0, 20' },  // slot 7 @ 0x3c: machine timer (0x20 + 4*7)
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00000013', asm: 'nop' },
+      { hex: '0x00c0006f', asm: 'jal x0, 12' },  // slot 11 @ 0x4c: machine external (0x20 + 4*11)
+      { hex: '0x00158593', asm: 'addi x11, x11, 1' },  // timer handler @ 0x50: x11 counts
+      { hex: '0x30200073', asm: 'mret' },
+      { hex: '0x00160613', asm: 'addi x12, x12, 1' },  // external handler @ 0x58: x12 counts
+      { hex: '0x30200073', asm: 'mret' },
+      { hex: '0x00168693', asm: 'addi x13, x13, 1' },  // exception handler @ 0x60: x13 counts
+      { hex: '0x0000006f', asm: 'jal x0, 0' },  // stop here
+    ],
+  },
   {
     name: 'Add & Store',
     program: [
@@ -1213,9 +1310,10 @@ const junctions = computed(() => {
   const j: { x: number; y: number; color?: string }[] = [
     { x: 427, y: PC_OUT, color: '#0099cc' },        // pc → ROM addr / adder
     { x: 408, y: PC_OUT, color: '#0099cc' },        // pc → ALU A mux (AUIPC)
-    { x: 734, y: ADD_Y + 21, color: '#009977' },    // adder → PC Sel / WB (PC+4)
+    { x: 734, y: ADD_Y.value + 21, color: '#009977' },    // adder → PC Sel / WB (PC+4)
+    { x: 380, y: IMM_Y.value + 32 },                      // instr → Imm Gen
     { x: 380, y: DEC_T + 46 },                      // instr → decoder / ALU Control
-    { x: 675, y: IMM_Y + 32 },                      // imm → +4/Imm / ALU Src
+    { x: IMM_TAP, y: IMM_Y.value + 32 },                      // imm → +4/Imm / ALU Src
     { x: 676, y: AS_Y + 27 },                       // rs2 → ALU Src / store data
     { x: 1080, y: 636 },                            // ALU result → Load / Store addr
     { x: 1110, y: 636 },                            // ALU result → WB Sel / JALR target
@@ -1230,24 +1328,24 @@ const junctions = computed(() => {
 const wireNames = computed(() => {
   const n: { text: string; x: number; y: number; anchor?: 'start' | 'end'; color?: string }[] = [
     { text: 'pc', x: 300, y: PC_OUT - 4, color: PC_BLUE },
-    { text: 'pc', x: 600, y: 191, color: PC_BLUE },
+    { text: 'pc', x: 600, y: PCFB_Y.value - 4, color: PC_BLUE },
     { text: 'instr', x: 376, y: 312, anchor: 'end' },
-    { text: 'imm', x: 656, y: 540, anchor: 'end' },
+    { text: 'imm', x: IMM_TAP - 4, y: 540, anchor: 'end' },
     { text: 'rs1', x: 704, y: 540 },
     { text: 'rs2', x: 672, y: 526, anchor: 'end' },
     { text: 'pc', x: 560, y: DEC_B + 36, color: PC_BLUE },
     { text: 'alu out', x: 1049, y: 631 },
-    { text: 'jalr target', x: 962, y: 232 },
-    { text: 'pc+4', x: 962, y: 256, color: PC_GREEN },
+    { text: 'jalr target', x: 962, y: JT_Y.value - 3 },
+    { text: 'pc+4', x: 962, y: P4_Y.value - 3, color: PC_GREEN },
     { text: 'store data', x: 450, y: LS_Y + 17 },
     { text: 'addr', x: 900, y: LS_Y + 41 },
     { text: 'load data', x: 900, y: LS_Y + 65 },
     { text: 'wdata', x: 1296, y: 560, anchor: 'end' },
   ]
   if (config.enableCsr) n.push(
-    { text: 'mtvec', x: 1000, y: pcIn(2) - 4 },
-    { text: 'mepc', x: 1000, y: CSR_Y.value + CSR_ROW.mepc - 4 },
-    { text: 'csr data', x: 1150, y: CSR_Y.value + 176 },
+    { text: 'mtvec', x: 760, y: pcIn(2) - 4 },
+    { text: 'mepc', x: 760, y: CSR_Y.value + CSR_ROW.mepc - 4 },
+    { text: 'csr data', x: CSR_X + 84, y: P4_Y.value - 16 },
   )
   if (config.enableZmmul) n.push({ text: 'mul', x: 1060, y: MUL_Y + 19 })
   return n
@@ -1286,13 +1384,17 @@ const W = 1600, H = 434 + 388 + 12
 /** Decoder top / bottom edge (control lines leave from both) */
 /** Decoder: top port row, title, instruction row, bottom port row (73 px) */
 const DEC_T = 292, DEC_B = DEC_T + 73
-/** Decoder left edge / width: narrow enough for PC and imm to pass its left end */
-const DEC_X = 450, DEC_W = 640
+/** Decoder left edge / width: its left end leaves a channel for instr, pc and imm (x 380–590) */
+const DEC_X = 600, DEC_W = 490
 /** Decoder ports: top row (lines go up) and bottom row (lines go down), canvas x of each line */
 const DEC_SPLIT = { top: ['imm_sel', 'is_jalr', 'offset_sel', 'reg_write'], bottom: ['mem_read', 'mem_write', 'alu_a', 'alu_src', 'alu_op', 'wb_sel'] }
+/** Imm Gen sits under the PC (x 467); its ImmSel port is 45 px in */
+const IMM_X = 467
+/** imm branches just right of Imm Gen: right to +4/Imm, straight down the decoder's left side to ALU Src */
+const IMM_TAP = 590
 const DEC_PORT_X: Record<string, number> = {
-  imm_sel: 569, is_jalr: 640, offset_sel: 887, reg_write: 1060,
-  mem_read: 480, mem_write: 540, alu_a: 768, alu_src: 836, alu_op: 963, wb_sel: 1065,
+  imm_sel: 632, is_jalr: 690, offset_sel: 887, reg_write: 1060,
+  mem_read: 632, mem_write: 680, alu_a: 768, alu_src: 836, alu_op: 963, wb_sel: 1065,
 }
 /** ALU input muxes, one above the other: A (rs1 / PC) straight into ALU A (y 596);
     ALU Src (rs2 / imm) below it, its output jogs up to ALU B (y 646) */
@@ -1310,7 +1412,7 @@ const MUL_Y = 700
 /** Load / Store right side, top to bottom: store data, addr, load data (no crossings) */
 const LS_X = 240, LS_Y = RAM_Y + 388 - 90, LS_R = LS_X + 139
 /** Right column: register file */
-const RF_X = 1320, RF_Y = 112
+const RF_X = 1320, RF_Y = 240
 /** Register file ports on its left edge: write enable, rs2 / rs1 out, write data in.
     rs1 / rs2 drop down x 1290 / 1280 to the execute lanes (y 600 / 584). */
 const RF_PORT = { we: 280, rs2: 292, rs1: 304, wd: 316 }
@@ -1326,18 +1428,27 @@ const WB_Y = computed(() => Math.round(636 - wbRow(0)))
 const wbIn = (k: number) => Math.round(WB_Y.value + wbRow(k))
 /** Output sits at the middle of the box */
 const wbOutY = computed(() => Math.round(WB_Y.value + wbH.value / 2))
-/** PC Sel: with Zicsr it has 4 inputs (trap, mret) and moves up so its output stays at the PC (y 168) */
-const PC_OUT = 132
+/** PC row: PC, PC Sel, the adder and +4/Imm sit on one line (offset → adder → PC Sel → PC) */
+const PC_OUT = 100
+/** PC Sel: with Zicsr it has 4 inputs (trap, mret) and moves up so its output stays on the PC row */
 const pcsY = computed(() => PC_OUT - (config.enableCsr ? 60 : 38))
-/** Adder and +4/Imm sit above PC Sel (adder output steps down into input 0) */
-const ADD_Y = 50, OFS_Y = ADD_Y - 17
-/** IF/PC box below the PC → ROM line; Imm Gen below it */
-const IFPC_Y = 200, IMM_Y = 220
-/** CSR box: right of the ALU-result channel (x 1110–1145), below the next-PC row */
+/** pc → adder line: just below the PC box, clear of PC Sel (taller with Zicsr) */
+const PCFB_Y = computed(() => config.enableCsr ? pcsY.value + 128 : PC_OUT + 50)
+/** pc+4, then jalr target under it, run just below the imm line (IMM_Y + 32) */
+const P4_Y = computed(() => PCFB_Y.value + 66)
+const JT_Y = computed(() => PCFB_Y.value + 80)
+/** Imm Gen: under the PC, below the pc → adder line (and its instr input clear of the IF box) */
+const IMM_Y = computed(() => PCFB_Y.value + 20)
+/** Adder and +4/Imm: outputs in line with PC Sel input 0 (4BR), so that wire runs straight */
+const ADD_Y = computed(() => pcIn(0) - 21)
+const OFS_Y = computed(() => ADD_Y.value - 17)
+/** IF box just below the PC → ROM line; its one output leaves the bottom and branches to Imm Gen */
+const IFPC_Y = PC_OUT + 12
+/** CSR box: right of the +4/Imm mux and the imm line (x 953), on the next-PC row */
 /** CSR row centres in the box (mtvec, mepc) */
 const CSR_ROW = { mtvec: 95, mepc: 114 }
 /** CSR top: the mtvec row lines up with PC Sel's trap input, so that wire runs straight */
-const CSR_X = 1150
+const CSR_X = 970
 const CSR_Y = computed(() => pcIn(2) - CSR_ROW.mtvec)
 const pcIn = (k: number) => config.enableCsr ? Math.round(pcsY.value + 29 + 20.5 * k) : pcsY.value + 27 + 21 * k
 /** Base addresses shown in the memory headers (rows show offsets) */
@@ -1346,6 +1457,17 @@ const ramBase = computed(() => cpu.ramWords[0]?.address ?? 0)
 
 const fetchWord = computed(() => cpu.romWords.find(w => w.address === cpu.pc))
 const currentAsm = computed(() => fetchWord.value?.asm ?? '')
+/**
+ * The instruction the decoder is working on: nothing until it has been
+ * fetched (Ready and the fetch phase), then the fetched word. Not the word at
+ * the PC, which already points at the next instruction in the PC-update phase.
+ */
+/** The instruction has been fetched: the decoder and the immediate generator have something to work on */
+const fetched = computed(() => phases.currentPhase !== 'idle' && phases.currentPhase !== 'fetch')
+const decodedAsm = computed(() => {
+  if (!fetched.value) return ''
+  return cpu.romWords.find(w => w.value === cpu.lastInstr)?.asm ?? ''
+})
 
 // ── Control signal values ────────────────────────────────────────────────────
 
@@ -1638,13 +1760,18 @@ const ramLastValue = computed(() => {
   font-size: 11px;
   text-align: left;
   cursor: pointer;
+  white-space: nowrap;
 }
 .clock-menu__item:hover {
   background: #2a2a4a;
   color: #fff;
 }
+.clock-menu__item--current,
+.clock-menu__item--current:hover { color: #7fd4e4; background: none; cursor: default; }
+.clock-menu__item--current::before { content: '● '; }
 .clock-tag { padding: 2px 6px; border-radius: 3px; background: #222; }
 .clock-tag--trap { background: #a02020; color: #fff; }
+.clock-tag--masked { background: #6a5a20; color: #fff; cursor: help; }
 .modal__toggle--off { opacity: 0.5; }
 
 /* Config Modal */

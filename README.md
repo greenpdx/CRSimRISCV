@@ -71,3 +71,13 @@ npm run test:e2e -- --debug
 ```sh
 npm run lint
 ```
+
+## Instruction data
+
+The instruction popup and the editor's reference list show each instruction's
+official name, description and encoding, and link to it in the
+[RISC-V ISA Explorer](https://tech.riscv.org/isa-explorer/). That data is in
+`public/data/isa-instructions.json`. It is taken from the explorer's repository,
+<https://github.com/riscv/riscv-isa-explorer> (Apache-2.0), at commit
+`0ca9adf5e8e336618aa1250fce18af84ba2d82e4`, and built by `scripts/isa-slice.mjs`.
+The file records the source, the commit and the changes made.

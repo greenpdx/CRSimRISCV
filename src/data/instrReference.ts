@@ -242,4 +242,18 @@ export const INSTR_GROUPS: InstrGroup[] = [
     ],
     example: 'CSRRSI X3, MSTATUS, 1',
   },
+  {
+    label: 'FORK/JOIN/DONE/YIELD/TID/FORKRET',
+    operands: 'RD, RS1, RS2 / RS1 / RD',
+    format: 'custom-0 (barrel core only)',
+    variants: [
+      { mnemonic: 'FORK', description: 'FORK RD, RS1, RS2: start a thread at address RS1 with argument RS2; RD = its slot, or -1 if none is free' },
+      { mnemonic: 'JOIN', description: 'JOIN RS1: wait until thread RS1 is done' },
+      { mnemonic: 'DONE', description: 'End this thread and wake the threads joined on it' },
+      { mnemonic: 'YIELD', description: 'Give up one scheduler round' },
+      { mnemonic: 'TID', description: 'TID RD: RD = this thread\'s number' },
+      { mnemonic: 'FORKRET', description: 'FORKRET RD: end this thread, passing the value in RD back as its return value' },
+    ],
+    example: 'FORK X5, X10, X11',
+  },
 ]

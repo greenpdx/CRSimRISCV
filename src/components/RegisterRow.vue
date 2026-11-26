@@ -2,6 +2,7 @@
   <tr
     class="reg-row"
     :class="{
+      'reg-row--compact': compact,
       'reg-row--write':  reg.active,
       'reg-row--readA':  reg.readA,
       'reg-row--readB':  reg.readB,
@@ -61,6 +62,8 @@ const props = defineProps<{
   reg:     Register
   def?:    RegisterDef
   stripe?: boolean
+  /** Tight row, like a CSR row */
+  compact?: boolean
 }>()
 
 const editing = ref(false)
@@ -145,4 +148,11 @@ const hexValue = computed(() =>
 .reg-row__dot-inner--write { background: #f59e0b; }
 .reg-row__dot-inner--readA { background: #38bdf8; }
 .reg-row__dot-inner--readB { background: #22c55e; }
+
+/* Compact rows (CSR-block format) */
+.reg-row--compact > td { padding-top: 1px; padding-bottom: 1px; line-height: 14px; }
+.reg-row--compact .reg-row__abi { font-size: 9px; }
+.reg-row--compact .reg-row__hex,
+.reg-row--compact .reg-row__dec { font-size: 9px; }
+.reg-row--compact .reg-row__xnum { font-size: 8px; }
 </style>

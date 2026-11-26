@@ -8,7 +8,8 @@
         class="csr__row"
         v-for="reg in csrList"
         :key="reg.addr"
-        :class="{ 'csr__row--active': reg.addr === activeCsr }"
+        :class="{ 'csr__row--active': reg.addr === activeCsr, 'csr__row--help': reg.addr === 0x342 }"
+        :title="reg.addr === 0x342 ? causeHelp(valueOf(reg.addr)) : undefined"
       >
         <span class="csr__name">{{ reg.name }}</span>
         <span class="csr__addr">{{ reg.addrHex }}</span>
@@ -57,6 +58,24 @@ const csrList = [
   { name: 'mepc',    addr: 0x341, addrHex: '341' },
   { name: 'mcause',  addr: 0x342, addrHex: '342' },
 ]
+
+// mcause: top bit = interrupt, the rest = cause code
+const EXCEPTIONS: Record<number, string> = {
+  0: 'instruction address misaligned', 1: 'instruction access fault', 2: 'illegal instruction',
+  3: 'breakpoint (EBREAK)', 4: 'load address misaligned', 5: 'load access fault',
+  6: 'store address misaligned', 7: 'store access fault', 8: 'ECALL from U mode',
+  9: 'ECALL from S mode', 11: 'ECALL from M mode',
+}
+const INTERRUPTS: Record<number, string> = {
+  1: 'supervisor software (SSI)', 3: 'machine software (MSI)', 5: 'supervisor timer (STI)',
+  7: 'machine timer (MTI)', 9: 'supervisor external (SEI)', 11: 'machine external (MEI)',
+}
+function causeHelp(v: number): string {
+  const irq = (v >>> 31) === 1, code = v & 0x7fffffff
+  const now = `${fmtHex(v)} = ${irq ? 'interrupt' : 'exception'} ${code}: ${(irq ? INTERRUPTS : EXCEPTIONS)[code] ?? 'reserved'}`
+  const list = (t: Record<number, string>) => Object.entries(t).map(([c, n]) => `  ${c.padStart(2)}  ${n}`).join('\n')
+  return `mcause — why the last trap was taken\n${now}\n\nExceptions (top bit 0):\n${list(EXCEPTIONS)}\n\nInterrupts (top bit 1, 0x8000_00xx):\n${list(INTERRUPTS)}`
+}
 
 function fmtHex(v: number): string {
   return '0x' + (v >>> 0).toString(16).padStart(8, '0')
@@ -129,6 +148,8 @@ function commitEdit(event: Event, addr: number) {
   background: #d8f0ff !important;
   font-weight: 600;
 }
+.csr__row--help { cursor: help; }
+.csr__row--help .csr__name { text-decoration: underline dashed; text-underline-offset: 2px; }
 .csr__name {
   font-size: 9px;
   font-weight: 600;

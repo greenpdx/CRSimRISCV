@@ -1,5 +1,5 @@
 <template>
-  <div class="regfile">
+  <div class="regfile" :class="{ 'regfile--compact': compact }">
 
     <!-- Header with mode toggle -->
     <div class="regfile__header">
@@ -9,7 +9,7 @@
           class="regfile__mode-btn"
           :class="{ 'regfile__mode-btn--active': mode === 'simplified' }"
           @click="mode = 'simplified'"
-        >8-reg</button>
+        >{{ shortRows }}-reg</button>
         <button
           class="regfile__mode-btn"
           :class="{ 'regfile__mode-btn--active': mode === 'full' }"
@@ -37,6 +37,7 @@
             :reg="row.reg"
             :def="row.def"
             :stripe="i % 2 === 1"
+            :compact="compact"
           />
         </tbody>
       </table>
@@ -64,7 +65,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import RegisterRow from './RegisterRow.vue'
-import { REGISTER_DEFS, REGISTER_DEFS_8 } from '../data/registerData'
+import { REGISTER_DEFS, REGISTER_DEFS_8, REGISTER_DEFS_16 } from '../data/registerData'
 import type { RegisterDef } from '../data/registerData'
 import type { Register } from '../types/cpu'
 
@@ -72,7 +73,12 @@ import type { Register } from '../types/cpu'
 const props = defineProps<{
   /** All 32 register runtime values, indexed by xNum */
   registers: Register[]
+  /** Rows of the short view: 8 (teaching names) or 16 (x0–x15, the RV32E set) */
+  shortRows?: 8 | 16
+  /** Tight rows, like the CSR block */
+  compact?: boolean
 }>()
+const shortRows = computed(() => props.shortRows ?? 8)
 
 // ── Mode toggle ──────────────────────────────────────────────────────────────
 const mode = ref<'simplified' | 'full'>('simplified')
@@ -80,7 +86,7 @@ const mode = ref<'simplified' | 'full'>('simplified')
 // ── Merge static defs with live register values ──────────────────────────────
 const visibleRows = computed(() => {
   const defs: RegisterDef[] = mode.value === 'simplified'
-    ? REGISTER_DEFS_8
+    ? (shortRows.value === 16 ? REGISTER_DEFS_16 : REGISTER_DEFS_8)
     : REGISTER_DEFS
 
   return defs.map(def => ({
@@ -207,4 +213,8 @@ const fmtHex = (v: number) =>
 .regfile__port--b    { background: #c8f0c8; color: #004020; }
 .regfile__port--w    { background: #fff0b0; color: #604000; }
 .regfile__port--idle { color: #90d8e4; font-size: 9px; }
+
+/* Compact: tight rows; the 32-register view scrolls inside the panel height */
+.regfile--compact .regfile__scroll { max-height: 456px; }
+.regfile--compact .regfile__th { padding: 1px 6px; line-height: 12px; }
 </style>

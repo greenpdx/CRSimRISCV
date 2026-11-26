@@ -1,0 +1,853 @@
+{
+ "source": {
+  "name": "RISC-V ISA Explorer",
+  "repository": "https://github.com/riscv/riscv-isa-explorer",
+  "commit": "0ca9adf5e8e336618aa1250fce18af84ba2d82e4",
+  "license": "Apache-2.0",
+  "files": [
+   "src/instruction-metadata.json",
+   "src/instr_dict.json",
+   "src/riscv_extensions.json"
+  ],
+  "note": "name, description, assembly, extension and encoding are taken from these files; RV32 shift encodings are set here (scripts/isa-slice.mjs)"
+ },
+ "explorer": "https://tech.riscv.org/isa-explorer/",
+ "instructions": {
+  "lui": {
+   "group": "rv32i",
+   "name": "Load upper immediate",
+   "description": "Load the zero-extended imm into xd.",
+   "assembly": "xd, imm",
+   "extension": "I",
+   "encoding": "-------------------------0110111",
+   "fields": [
+    "rd",
+    "imm20"
+   ],
+   "match": "0x37",
+   "mask": "0x7f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=LUI"
+  },
+  "auipc": {
+   "group": "rv32i",
+   "name": "Add upper immediate to pc",
+   "description": "Add an immediate to the current PC.",
+   "assembly": "xd, imm",
+   "extension": "I",
+   "encoding": "-------------------------0010111",
+   "fields": [
+    "rd",
+    "imm20"
+   ],
+   "match": "0x17",
+   "mask": "0x7f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=AUIPC"
+  },
+  "jal": {
+   "group": "rv32i",
+   "name": "Jump and link",
+   "description": "Jump to a PC-relative offset and store the return\naddress in xd.",
+   "assembly": "xd, imm",
+   "extension": "I",
+   "encoding": "-------------------------1101111",
+   "fields": [
+    "rd",
+    "jimm20"
+   ],
+   "match": "0x6f",
+   "mask": "0x7f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=JAL"
+  },
+  "jalr": {
+   "group": "rv32i",
+   "name": "Jump and link register",
+   "description": "Jump to an address formed by adding xs1\nto a signed offset then clearing the least\nsignificant bit, and store the return address\nin xd.",
+   "assembly": "xd, imm(xs1)",
+   "extension": "I",
+   "encoding": "-----------------000-----1100111",
+   "fields": [
+    "rd",
+    "rs1",
+    "imm12"
+   ],
+   "match": "0x67",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=JALR"
+  },
+  "beq": {
+   "group": "rv32i",
+   "name": "Branch if equal",
+   "description": "Branch to PC + imm if\nthe value in register xs1 is equal to the value in register xs2.\n\nRaise a `MisalignedAddress` exception if PC + imm is misaligned.",
+   "assembly": "xs1, xs2, imm",
+   "extension": "I",
+   "encoding": "-----------------000-----1100011",
+   "fields": [
+    "bimm12hi",
+    "rs1",
+    "rs2",
+    "bimm12lo"
+   ],
+   "match": "0x63",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=BEQ"
+  },
+  "bne": {
+   "group": "rv32i",
+   "name": "Branch if not equal",
+   "description": "Branch to PC + imm if\nthe value in register xs1 is not equal to the value in register xs2.\n\nRaise a `MisalignedAddress` exception if PC + imm is misaligned.",
+   "assembly": "xs1, xs2, imm",
+   "extension": "I",
+   "encoding": "-----------------001-----1100011",
+   "fields": [
+    "bimm12hi",
+    "rs1",
+    "rs2",
+    "bimm12lo"
+   ],
+   "match": "0x1063",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=BNE"
+  },
+  "blt": {
+   "group": "rv32i",
+   "name": "Branch if less than",
+   "description": "Branch to PC + imm if\nthe signed value in register xs1 is less than the signed value in register xs2.\n\nRaise a `MisalignedAddress` exception if PC + imm is misaligned.",
+   "assembly": "xs1, xs2, imm",
+   "extension": "I",
+   "encoding": "-----------------100-----1100011",
+   "fields": [
+    "bimm12hi",
+    "rs1",
+    "rs2",
+    "bimm12lo"
+   ],
+   "match": "0x4063",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=BLT"
+  },
+  "bge": {
+   "group": "rv32i",
+   "name": "Branch if greater than or equal",
+   "description": "Branch to PC + imm if\nthe signed value in register xs1 is greater than or equal to the signed value in register xs2.\n\nRaise a `MisalignedAddress` exception if PC + imm is misaligned.",
+   "assembly": "xs1, xs2, imm",
+   "extension": "I",
+   "encoding": "-----------------101-----1100011",
+   "fields": [
+    "bimm12hi",
+    "rs1",
+    "rs2",
+    "bimm12lo"
+   ],
+   "match": "0x5063",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=BGE"
+  },
+  "bltu": {
+   "group": "rv32i",
+   "name": "Branch if less than unsigned",
+   "description": "Branch to PC + imm if\nthe unsigned value in register xs1 is less than the unsigned value in register xs2.\n\nRaise a `MisalignedAddress` exception if PC + imm is misaligned.",
+   "assembly": "xs1, xs2, imm",
+   "extension": "I",
+   "encoding": "-----------------110-----1100011",
+   "fields": [
+    "bimm12hi",
+    "rs1",
+    "rs2",
+    "bimm12lo"
+   ],
+   "match": "0x6063",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=BLTU"
+  },
+  "bgeu": {
+   "group": "rv32i",
+   "name": "Branch if greater than or equal unsigned",
+   "description": "Branch to PC + imm if\nthe unsigned value in register xs1 is greater than or equal to the unsigned value in register xs2.\n\nRaise a `MisalignedAddress` exception if PC + imm is misaligned.",
+   "assembly": "xs1, xs2, imm",
+   "extension": "I",
+   "encoding": "-----------------111-----1100011",
+   "fields": [
+    "bimm12hi",
+    "rs1",
+    "rs2",
+    "bimm12lo"
+   ],
+   "match": "0x7063",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=BGEU"
+  },
+  "lb": {
+   "group": "rv32i",
+   "name": "Load byte",
+   "description": "Load 8 bits of data into register `xd` from an\naddress formed by adding `xs1` to a signed offset.\nSign extend the result.",
+   "assembly": "xd, imm(xs1)",
+   "extension": "I",
+   "encoding": "-----------------000-----0000011",
+   "fields": [
+    "rd",
+    "rs1",
+    "imm12"
+   ],
+   "match": "0x3",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=LB"
+  },
+  "lh": {
+   "group": "rv32i",
+   "name": "Load halfword",
+   "description": "Load 16 bits of data into register `xd` from an\naddress formed by adding `xs1` to a signed offset.\nSign extend the result.",
+   "assembly": "xd, imm(xs1)",
+   "extension": "I",
+   "encoding": "-----------------001-----0000011",
+   "fields": [
+    "rd",
+    "rs1",
+    "imm12"
+   ],
+   "match": "0x1003",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=LH"
+  },
+  "lw": {
+   "group": "rv32i",
+   "name": "Load word",
+   "description": "Load 32 bits of data into register `xd` from an\naddress formed by adding `xs1` to a signed offset.\nSign extend the result.",
+   "assembly": "xd, imm(xs1)",
+   "extension": "I",
+   "encoding": "-----------------010-----0000011",
+   "fields": [
+    "rd",
+    "rs1",
+    "imm12"
+   ],
+   "match": "0x2003",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=LW"
+  },
+  "lbu": {
+   "group": "rv32i",
+   "name": "Load byte unsigned",
+   "description": "Load 8 bits of data into register `xd` from an\naddress formed by adding `xs1` to a signed offset.\nZero extend the result.",
+   "assembly": "xd, imm(xs1)",
+   "extension": "I",
+   "encoding": "-----------------100-----0000011",
+   "fields": [
+    "rd",
+    "rs1",
+    "imm12"
+   ],
+   "match": "0x4003",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=LBU"
+  },
+  "lhu": {
+   "group": "rv32i",
+   "name": "Load halfword unsigned",
+   "description": "Load 16 bits of data into register `xd` from an\naddress formed by adding `xs1` to a signed offset.\nZero extend the result.",
+   "assembly": "xd, imm(xs1)",
+   "extension": "I",
+   "encoding": "-----------------101-----0000011",
+   "fields": [
+    "rd",
+    "rs1",
+    "imm12"
+   ],
+   "match": "0x5003",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=LHU"
+  },
+  "sb": {
+   "group": "rv32i",
+   "name": "Store byte",
+   "description": "Store 8 bits of data from register `xs2` to an\naddress formed by adding `xs1` to a signed offset.",
+   "assembly": "xs2, imm(xs1)",
+   "extension": "I",
+   "encoding": "-----------------000-----0100011",
+   "fields": [
+    "imm12hi",
+    "rs1",
+    "rs2",
+    "imm12lo"
+   ],
+   "match": "0x23",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SB"
+  },
+  "sh": {
+   "group": "rv32i",
+   "name": "Store halfword",
+   "description": "Store 16 bits of data from register `xs2` to an\naddress formed by adding `xs1` to a signed offset.",
+   "assembly": "xs2, imm(xs1)",
+   "extension": "I",
+   "encoding": "-----------------001-----0100011",
+   "fields": [
+    "imm12hi",
+    "rs1",
+    "rs2",
+    "imm12lo"
+   ],
+   "match": "0x1023",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SH"
+  },
+  "sw": {
+   "group": "rv32i",
+   "name": "Store word",
+   "description": "Store 32 bits of data from register `xs2` to an\naddress formed by adding `xs1` to a signed offset.",
+   "assembly": "xs2, imm(xs1)",
+   "extension": "I",
+   "encoding": "-----------------010-----0100011",
+   "fields": [
+    "imm12hi",
+    "rs1",
+    "rs2",
+    "imm12lo"
+   ],
+   "match": "0x2023",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SW"
+  },
+  "addi": {
+   "group": "rv32i",
+   "name": "Add immediate",
+   "description": "Adds an immediate value to the value in xs1, and store the result in xd",
+   "assembly": "xd, xs1, imm",
+   "extension": "I",
+   "encoding": "-----------------000-----0010011",
+   "fields": [
+    "rd",
+    "rs1",
+    "imm12"
+   ],
+   "match": "0x13",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=ADDI"
+  },
+  "slti": {
+   "group": "rv32i",
+   "name": "Set on less than immediate",
+   "description": "Places the value 1 in register `xd` if register `xs1` is less than the sign-extended immediate\nwhen both are treated as signed numbers, else 0 is written to `xd`.",
+   "assembly": "xd, xs1, imm",
+   "extension": "I",
+   "encoding": "-----------------010-----0010011",
+   "fields": [
+    "rd",
+    "rs1",
+    "imm12"
+   ],
+   "match": "0x2013",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SLTI"
+  },
+  "sltiu": {
+   "group": "rv32i",
+   "name": "Set on less than immediate unsigned",
+   "description": "Places the value 1 in register `xd` if register `xs1` is less than the sign-extended immediate\nwhen both are treated as unsigned numbers (_i.e._, the immediate is first sign-extended to\nXLEN bits then treated as an unsigned number), else 0 is written to `xd`.\n\nNOTE: `sltiu xd, xs1, 1` sets `xd` to 1 if `xs1` equals zero, otherwise sets `xd` to 0\n(assembler pseudoinstruction `SEQZ xd, rs`).",
+   "assembly": "xd, xs1, imm",
+   "extension": "I",
+   "encoding": "-----------------011-----0010011",
+   "fields": [
+    "rd",
+    "rs1",
+    "imm12"
+   ],
+   "match": "0x3013",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SLTIU"
+  },
+  "xori": {
+   "group": "rv32i",
+   "name": "Exclusive Or immediate",
+   "description": "Exclusive or an immediate to the value in xs1, and store the result in xd",
+   "assembly": "xd, xs1, imm",
+   "extension": "I",
+   "encoding": "-----------------100-----0010011",
+   "fields": [
+    "rd",
+    "rs1",
+    "imm12"
+   ],
+   "match": "0x4013",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=XORI"
+  },
+  "ori": {
+   "group": "rv32i",
+   "name": "Or immediate",
+   "description": "Or an immediate to the value in xs1, and store the result in xd",
+   "assembly": "xd, xs1, imm",
+   "extension": "I",
+   "encoding": "-----------------110-----0010011",
+   "fields": [
+    "rd",
+    "rs1",
+    "imm12"
+   ],
+   "match": "0x6013",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=ORI"
+  },
+  "andi": {
+   "group": "rv32i",
+   "name": "And immediate",
+   "description": "And an immediate to the value in xs1, and store the result in xd",
+   "assembly": "xd, xs1, imm",
+   "extension": "I",
+   "encoding": "-----------------111-----0010011",
+   "fields": [
+    "rd",
+    "rs1",
+    "imm12"
+   ],
+   "match": "0x7013",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=ANDI"
+  },
+  "slli": {
+   "group": "rv32i",
+   "name": "Shift left logical immediate",
+   "description": "Shift the value in xs1 left by shamt, and store the result in xd",
+   "assembly": "xd, xs1, shamt",
+   "extension": "I",
+   "encoding": "0000000----------001-----0010011",
+   "fields": [
+    "rd",
+    "rs1",
+    "shamtw"
+   ],
+   "match": "0x1013",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SLLI"
+  },
+  "srli": {
+   "group": "rv32i",
+   "name": "Shift right logical immediate",
+   "description": "Shift the value in xs1 right by shamt, and store the result in xd",
+   "assembly": "xd, xs1, shamt",
+   "extension": "I",
+   "encoding": "0000000----------101-----0010011",
+   "fields": [
+    "rd",
+    "rs1",
+    "shamtw"
+   ],
+   "match": "0x5013",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SRLI"
+  },
+  "srai": {
+   "group": "rv32i",
+   "name": "Shift right arithmetic immediate",
+   "description": "Arithmetic shift (the original sign bit is copied into the vacated upper bits) the\nvalue in xs1 right by shamt, and store the result in xd.",
+   "assembly": "xd, xs1, shamt",
+   "extension": "I",
+   "encoding": "0100000----------101-----0010011",
+   "fields": [
+    "rd",
+    "rs1",
+    "shamtw"
+   ],
+   "match": "0x40005013",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SRAI"
+  },
+  "add": {
+   "group": "rv32i",
+   "name": "Integer add",
+   "description": "Add the value in xs1 to xs2, and store the result in xd.\nAny overflow is thrown away.",
+   "assembly": "xd, xs1, xs2",
+   "extension": "I",
+   "encoding": "0000000----------000-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x33",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=ADD"
+  },
+  "sub": {
+   "group": "rv32i",
+   "name": "Subtract",
+   "description": "Subtract the value in xs2 from xs1, and store the result in xd",
+   "assembly": "xd, xs1, xs2",
+   "extension": "I",
+   "encoding": "0100000----------000-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x40000033",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SUB"
+  },
+  "sll": {
+   "group": "rv32i",
+   "name": "Shift left logical",
+   "description": "Shift the value in `xs1` left by the value in the lower 6 bits of `xs2`, and store the result in `xd`.",
+   "assembly": "xd, xs1, xs2",
+   "extension": "I",
+   "encoding": "0000000----------001-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x1033",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SLL"
+  },
+  "slt": {
+   "group": "rv32i",
+   "name": "Set on less than",
+   "description": "Places the value 1 in register `xd` if register `xs1` is less than the value in register `xs2`, where\nboth sources are treated as signed numbers, else 0 is written to `xd`.",
+   "assembly": "xd, xs1, xs2",
+   "extension": "I",
+   "encoding": "0000000----------010-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x2033",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SLT"
+  },
+  "sltu": {
+   "group": "rv32i",
+   "name": "Set on less than unsigned",
+   "description": "Places the value 1 in register `xd` if register `xs1` is less than the value in register `xs2`, where\nboth sources are treated as unsigned numbers, else 0 is written to `xd`.",
+   "assembly": "xd, xs1, xs2",
+   "extension": "I",
+   "encoding": "0000000----------011-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x3033",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SLTU"
+  },
+  "xor": {
+   "group": "rv32i",
+   "name": "Exclusive Or",
+   "description": "Exclusive or xs1 with xs2, and store the result in xd",
+   "assembly": "xd, xs1, xs2",
+   "extension": "I",
+   "encoding": "0000000----------100-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x4033",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=XOR"
+  },
+  "srl": {
+   "group": "rv32i",
+   "name": "Shift right logical",
+   "description": "Logical shift the value in `xs1` right by the value in the lower bits of `xs2`, and store the result in `xd`.",
+   "assembly": "xd, xs1, xs2",
+   "extension": "I",
+   "encoding": "0000000----------101-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x5033",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SRL"
+  },
+  "sra": {
+   "group": "rv32i",
+   "name": "Shift right arithmetic",
+   "description": "Arithmetic shift the value in `xs1` right by the value in the lower 5 bits of `xs2`, and store the result in `xd`.",
+   "assembly": "xd, xs1, xs2",
+   "extension": "I",
+   "encoding": "0100000----------101-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x40005033",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=SRA"
+  },
+  "or": {
+   "group": "rv32i",
+   "name": "Or",
+   "description": "Or xs1 with xs2, and store the result in xd",
+   "assembly": "xd, xs1, xs2",
+   "extension": "I",
+   "encoding": "0000000----------110-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x6033",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=OR"
+  },
+  "and": {
+   "group": "rv32i",
+   "name": "And",
+   "description": "And xs1 with xs2, and store the result in xd",
+   "assembly": "xd, xs1, xs2",
+   "extension": "I",
+   "encoding": "0000000----------111-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x7033",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=AND"
+  },
+  "fence": {
+   "group": "rv32i",
+   "name": "Memory ordering fence",
+   "description": "Orders memory operations.\n\nThe `fence` instruction is used to order device I/O and memory accesses as\nviewed by other RISC-V harts and external devices or coprocessors. Any\ncombination of device input (I), device output (O), memory reads \\(R),\nand memory writes (W) may be ordered with respect to any combination of\nthe same. Informally, no other RISC-V hart or external device can\nobserve any operation in the _successor_ set following a `fence` before\nany operation in the _predecessor_ set preceding the `fence`.\n\nThe predecessor and successor fields have the same format to specify operation types:\n\n[%autowidth]\n|===\n4+| `pred` 4+| `succ`\n\n| 27 | 26 |25 | 24 | 23 | 22 | 21| 20\n| PI | PO |PR | PW | SI | SO |SR | SW\n|===\n\n[%autowidth,align=\"center\",cols=\"^1,^1,<3\",options=\"header\"]\n.Fence mode encoding\n|===\n|_fm_ field |Mnemonic |Meaning\n|0000 |_none_ |Normal Fence\n|1000 |TSO |With `FENCE RW,RW`: exclude write-to-read ordering; otherwise: _Reserved for future use._\n2+|_other_ |_Reserved for future use._\n|===\n\nWhen the mode field _fm_ is `0001` and both the predecessor and successor sets are 'RW',\nthen the instruction acts as a special-case `fence.tso`. `fence.tso` orders all load operations\nin its predecessor set before all memory operations in its successor set, and all store operations\nin its predecessor set before all store operations in its successor set. This leaves non-AMO store\noperations in the 'fence.tso's predecessor set unordered with non-AMO loads in its successor set.\n\nWhen mode field _fm_ is not `0001`, or when mode field _fm_ is `0001` but the _pred_ and\n_succ_ fields are not both 'RW' (0x3), then the fence acts as a baseline fence (_e.g._, _fm_ is\neffectively `0000`). This is unaffected by the FIOM bits, described below (implicit promotion does\nnot change how `fence.tso` is decoded).\n\nThe `xs1` and `xd` fields are unused and ignored.\n\nIn modes other than M-mode, `fence` is further affected by `menvcfg.FIOM`,\n`senvcfg.FIOM`<% if ext?(:H) %>, and/or `henvcfg.FIOM`<% end %>\nas follows:\n\n.Effective PR/PW/SR/SW in (H)S-mode\n[%autowidth,cols=\",,,\",options=\"header\",separator=\"!\"]\n!===\n! [.rotate]#`menvcfg.FIOM`# ! `pred.PI` +\n`pred.PO` +\n`succ.SI` +\n`succ.SO`\n! -> +\n-> +\n-> +\n->\n! effective `PR` +\neffective `PW` +\neffective `SR` +\neffective `SW`\n\n! 0 ! - ! ! from encoding\n! 1 ! 0 ! ! from encoding\n! 1 ! 1 ! ! 1\n!===\n\n.Effective PR/PW/SR/SW in U-mode\n[%autowidth,options=\"header\",separator=\"!\",cols=\",,,,\"]\n!===\n! [.rotate]#`menvcfg.FIOM`# ! [.rotate]#`senvcfg.FIOM`# !  `pred.PI` +\n`pred.PO` +\n`succ.SI` +\n`succ.SO`\n! -> +\n-> +\n-> +\n->\n! effective `PR` +\neffective `PW` +\neffective `SR` +\neffective `SW`\n\n! 0 ! 0 ! - ! ! from encoding\n! 0 ! 1 ! 0 ! ! from encoding\n! 0 ! 1 ! 1 ! ! 1\n! 1 ! - ! 0 ! ! from encoding\n! 1 ! - ! 1 ! ! 1\n!===\n\n<%- if ext?(:H) -%>\n.Effective PR/PW/SR/SW in VS-mode and VU-mode\n[%autowidth,options=\"header\",separator=\"!\",cols=\",,,,\"]\n!===\n! [.rotate]#`menvcfg.FIOM`# ! [.rotate]#`henvcfg.FIOM`# !  `pred.PI` +\n`pred.PO` +\n`succ.SI` +\n`succ.SO`\n! -> +\n-> +\n-> +\n->\n! effective `PR` +\neffective `PW` +\neffective `SR` +\neffective `SW`\n\n! 0 ! 0 ! - ! ! from encoding\n! 0 ! 1 ! 0 ! ! from encoding\n! 0 ! 1 ! 1 ! ! 1\n! 1 ! - ! 0 ! ! from encoding\n! 1 ! - ! 1 ! ! 1\n!===\n<%- end -%>",
+   "assembly": "pred, succ",
+   "extension": "I",
+   "encoding": "-----------------000-----0001111",
+   "fields": [
+    "fm",
+    "pred",
+    "succ",
+    "rs1",
+    "rd"
+   ],
+   "match": "0xf",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=FENCE"
+  },
+  "ecall": {
+   "group": "rv32i",
+   "name": "Environment call",
+   "description": "Makes a request to the supporting execution environment.\nWhen executed in U-mode, S-mode, or M-mode, it generates an environment-call-from-U-mode\nexception, environment-call-from-S-mode exception, or environment-call-from-M-mode\nexception, respectively, and performs no other operation.\n\n[NOTE]\nECALL generates a different exception for each originating privilege mode so that\nenvironment call exceptions can be selectively delegated.\nA typical use case for Unix-like operating systems is to delegate to S-mode\nthe environment-call-from-U-mode exception but not the others.\n\nECALL causes the receiving privilege mode's epc register to be set to the address of\nthe ECALL instruction itself, not the address of the following instruction.\nAs ECALL causes a synchronous exception, it is not considered to retire,\nand should not increment the `minstret` CSR.",
+   "assembly": "",
+   "extension": "I",
+   "encoding": "00000000000000000000000001110011",
+   "fields": [],
+   "match": "0x73",
+   "mask": "0xffffffff",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=ECALL"
+  },
+  "ebreak": {
+   "group": "rv32i",
+   "name": "Breakpoint exception",
+   "description": "The EBREAK instruction is used by debuggers to cause control to be transferred back to\na debugging environment. Unless overridden by an external debug environment,\nEBREAK raises a breakpoint exception and performs no other operation.\n\n[NOTE]\nAs described in the `C` Standaxd Extension for Compressed Instructions, the `c.ebreak`\ninstruction performs the same operation as the EBREAK instruction.\n\nEBREAK causes the receiving privilege mode's epc register to be set to the address of\nthe EBREAK instruction itself, not the address of the following instruction.\nAs EBREAK causes a synchronous exception, it is not considered to retire,\nand should not increment the `minstret` CSR.",
+   "assembly": "",
+   "extension": "I",
+   "encoding": "00000000000100000000000001110011",
+   "fields": [],
+   "match": "0x100073",
+   "mask": "0xffffffff",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=RV32I&insn=EBREAK"
+  },
+  "mul": {
+   "group": "zmmul",
+   "name": "Signed multiply",
+   "description": "MUL performs an XLEN-bitxXLEN-bit multiplication of `xs1` by `xs2` and places the lower\nXLEN bits in the destination register.\nAny overflow is thrown away.\n\n[NOTE]\nIf both the high and low bits of the same product are required, then the recommended code\nsequence is:\nMULH[[S]U] xdh, xs1, xs2; MUL xdl, xs1, xs2\n(source register specifiers must be in same order and xdh cannot be the same as xs1 or xs2).\nMicroarchitectures can then fuse these into a single multiply operation instead of\nperforming two separate multiplies.",
+   "assembly": "xd, xs1, xs2",
+   "extension": "Zmmul",
+   "encoding": "0000001----------000-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x2000033",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=Zmmul&insn=MUL"
+  },
+  "mulh": {
+   "group": "zmmul",
+   "name": "Signed multiply high",
+   "description": "Multiply the signed values in xs1 to xs2, and store the upper half of the result in xd.\nThe lower half is thrown away.\n\nIf both the upper and lower halves are needed, it suggested to use the sequence:\n\n---\n  mulh xdh, xs1, xs2\n  mul  xdl, xs1, xs2\n---\n\nMicroarchitectures may look for that sequence and fuse the operations.",
+   "assembly": "xd, xs1, xs2",
+   "extension": "Zmmul",
+   "encoding": "0000001----------001-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x2001033",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=Zmmul&insn=MULH"
+  },
+  "mulhsu": {
+   "group": "zmmul",
+   "name": "Signed/unsigned multiply high",
+   "description": "Multiply the signed value in xs1 by the unsigned value in xs2, and store the upper half of the result in xd.\nThe lower half is thrown away.\n\nIf both the upper and lower halves are needed, it suggested to use the sequence:\n\n---\n  mulhsu xdh, xs1, xs2\n  mul    xdl, xs1, xs2\n---\n\nMicroarchitectures may look for that sequence and fuse the operations.",
+   "assembly": "xd, xs1, xs2",
+   "extension": "Zmmul",
+   "encoding": "0000001----------010-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x2002033",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=Zmmul&insn=MULHSU"
+  },
+  "mulhu": {
+   "group": "zmmul",
+   "name": "Unsigned multiply high",
+   "description": "Multiply the unsigned values in xs1 to xs2, and store the upper half of the result in xd.\nThe lower half is thrown away.\n\nIf both the upper and lower halves are needed, it suggested to use the sequence:\n\n---\n  mulhu xdh, xs1, xs2\n  mul   xdl, xs1, xs2\n---\n\nMicroarchitectures may look for that sequence and fuse the operations.",
+   "assembly": "xd, xs1, xs2",
+   "extension": "Zmmul",
+   "encoding": "0000001----------011-----0110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "rs2"
+   ],
+   "match": "0x2003033",
+   "mask": "0xfe00707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=Zmmul&insn=MULHU"
+  },
+  "csrrw": {
+   "group": "zicsr",
+   "name": "Atomic Read/Write CSR",
+   "description": "Atomically swap values in the CSRs and integer registers.\n\nRead the old value of the CSR, zero-extends the value to `XLEN` bits,\nand then write it to integer register xd.\nThe initial value in xs1 is written to the CSR.\nIf `xd=x0`, then the instruction shall not read the CSR and shall not\ncause any of the side effects that might occur on a CSR read.",
+   "assembly": "xd, csr, xs1",
+   "extension": "Zicsr",
+   "encoding": "-----------------001-----1110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "csr"
+   ],
+   "match": "0x1073",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=Zicsr&insn=CSRRW"
+  },
+  "csrrs": {
+   "group": "zicsr",
+   "name": "Atomic Read and Set Bits in CSR",
+   "description": "Atomically read and set bits in a CSR.\n\nReads the value of the CSR, zero-extends the value to `XLEN` bits,\nand writes it to integer register `xd`. The initial value in integer\nregister `xs1` is treated as a bit mask that specifies bit positions\nto be set in the CSR. Any bit that is high in `xs1` will cause the\ncorresponding bit to be set in the CSR, if that CSR bit is writable.\nOther bits in the CSR are not explicitly written.",
+   "assembly": "xd, csr, xs1",
+   "extension": "Zicsr",
+   "encoding": "-----------------010-----1110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "csr"
+   ],
+   "match": "0x2073",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=Zicsr&insn=CSRRS"
+  },
+  "csrrc": {
+   "group": "zicsr",
+   "name": "Atomic Read and Clear Bits in CSR",
+   "description": "The CSRRC (Atomic Read and Clear Bits in CSR) instruction reads the value of the CSR, zero-extends\nthe value to XLEN bits, and writes it to integer register `xd`. The initial value in integer register `xs1` is\ntreated as a bit mask that specifies bit positions to be cleared in the CSR. Any bit that is high in `xs1` will\ncause the corresponding bit to be cleared in the CSR, if that CSR bit is writable.\n\nFor CSRRC, if `xs1=x0`, then the instruction will not write to the CSR at all, and so shall\nnot cause any of the side effects that might otherwise occur on a CSR write, nor raise illegal-\ninstruction exceptions on accesses to read-only CSRs. CSRRC always reads the addressed CSR and\ncause any read side effects regardless of `xs1` and `xd` fields.\nNote that if `xs1` specifies a register other than `x0`, and that register holds a zero value,\nthe instruction will not action any attendant per-field side effects, but will action any\nside effects caused by writing to the entire CSR.",
+   "assembly": "xd, csr, xs1",
+   "extension": "Zicsr",
+   "encoding": "-----------------011-----1110011",
+   "fields": [
+    "rd",
+    "rs1",
+    "csr"
+   ],
+   "match": "0x3073",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=Zicsr&insn=CSRRC"
+  },
+  "csrrwi": {
+   "group": "zicsr",
+   "name": "Atomic Read/Write CSR Immediate",
+   "description": "Atomically write CSR using a 5-bit immediate, and load the previous value into 'xd'.\n\nRead the old value of the CSR, zero-extends the value to `XLEN` bits,\nand then write it to integer register xd.\nThe 5-bit uimm field is zero-extended and written to the CSR.\nIf `xd=x0`, then the instruction shall not read the CSR and shall not\ncause any of the side effects that might occur on a CSR read.",
+   "assembly": "xd, csr, imm",
+   "extension": "Zicsr",
+   "encoding": "-----------------101-----1110011",
+   "fields": [
+    "rd",
+    "csr",
+    "zimm5"
+   ],
+   "match": "0x5073",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=Zicsr&insn=CSRRWI"
+  },
+  "csrrsi": {
+   "group": "zicsr",
+   "name": "Atomic Read and Set Bits in CSR with Immediate",
+   "description": "The CSRRSI variant is similar to CSRRS, except this updates the CSR using an XLEN-bit value obtained\nby zero-extending a 5-bit unsigned immediate (imm[4:0]) field encoded in the `xs1` field instead of a\nvalue from an integer register. For CSRRSI, if the `imm[4:0]` field is zero, then this instruction\nwill not write to the CSR, and shall not cause any of the side effects that might otherwise occur on\na CSR write, nor raise illegal-instruction exceptions on accesses to read-only CSRs. The CSRRSI will\nalways read the CSR and cause any read side effects regardless of `xd` and `xs1` fields.",
+   "assembly": "xd, csr, imm",
+   "extension": "Zicsr",
+   "encoding": "-----------------110-----1110011",
+   "fields": [
+    "rd",
+    "csr",
+    "zimm5"
+   ],
+   "match": "0x6073",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=Zicsr&insn=CSRRSI"
+  },
+  "csrrci": {
+   "group": "zicsr",
+   "name": "Atomic Read and Clear Bits in CSR with Immediate",
+   "description": "The CSRRCI variant is similar to CSRRC, except this updates the CSR using an XLEN-bit value obtained\nby zero-extending a 5-bit unsigned immediate (imm[4:0]) field encoded in the `xs1` field instead of a\nvalue from an integer register. For CSRRCI, if the `imm[4:0]` field is zero, then this instruction\nwill not write to the CSR, and shall not cause any of the side effects that might otherwise occur on\na CSR write, nor raise illegal-instruction exceptions on accesses to read-only CSRs. The CSRRCI will\nalways read the CSR and cause any read side effects regardless of `xd` and `xs1` fields.",
+   "assembly": "xd, csr, imm",
+   "extension": "Zicsr",
+   "encoding": "-----------------111-----1110011",
+   "fields": [
+    "rd",
+    "csr",
+    "zimm5"
+   ],
+   "match": "0x7073",
+   "mask": "0x707f",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=Zicsr&insn=CSRRCI"
+  },
+  "mret": {
+   "group": "priv",
+   "name": "Machine-mode Return from Trap",
+   "description": "Return from machine mode after handling a trap.",
+   "assembly": "",
+   "extension": "Sm",
+   "encoding": "00110000001000000000000001110011",
+   "fields": [],
+   "match": "0x30200073",
+   "mask": "0xffffffff",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=Sm&insn=MRET"
+  },
+  "sret": {
+   "group": "priv",
+   "name": "Supervisor Mode Return from Trap",
+   "description": "Returns from supervisor mode after handling a trap.\n\nWhen `sret` is allowed to execute, its behavior depends on whether or not the current privilege\nmode is virtualized.\n\n*When the current privilege mode is (H)S-mode or M-mode*\n\n`sret` sets  `hstatus.HPV` = 0, `mstatus.SPP` = 0,\n`mstatus.SIE` = `mstatus.SPIE`, and `mstatus.SPIE` = 1,\nchanges the privilege mode according to the table below,\nand then jumps to the address in `sepc`.\n\n.Next privilege mode following an `sret` in (H)S-mode or M-mode\n[%autowidth]\n|===\n| [.rotate]#`mstatus.SPP`# | [.rotate]#`hstatus.SPV`# .>| Mode after `sret`\n\n| 0 | 0 | U-mode\n| 0 | 1 | VU-mode\n| 1 | 0 | (H)S-mode\n| 1 | 1 | VS-mode\n|===\n\n*When the current privilege mode is VS-mode*\n\n`sret` sets\n`vsstatus.SPP` = 0, `vsstatus.SIE` = `vstatus.SPIE`, and `vsstatus.SPIE` = 1,\nchanges the privilege mode according to the table below,\nand then jumps to the address in `vsepc`.\n\n.Next privilege mode following an `sret` in (H)S-mode or M-mode\n[%autowidth]\n|===\n| [.rotate]#`vsstatus.SPP`# .>| Mode after `sret`\n\n| 0 | VU-mode\n| 1 | VS-mode\n|===",
+   "assembly": "",
+   "extension": "S",
+   "encoding": "00010000001000000000000001110011",
+   "fields": [],
+   "match": "0x10200073",
+   "mask": "0xffffffff",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=S&insn=SRET"
+  },
+  "wfi": {
+   "group": "priv",
+   "name": "Wait for interrupt",
+   "description": "Can causes the processor to enter a low-power state until the next interrupt occurs.\n\n<%- if ext?(:H) -%>\nThe behavior of `wfi` is affected by the `mstatus.TW`\nand `hstatus.VTW` bits, as summarized below.\n\n[%autowidth,%footer]\n|===\n.2+| [.rotate]#`mstatus.TW`# .2+| [.rotate]#`hstatus.VTW`# 4+^.>| `wfi` behavior\nh| HS-mode h| U-mode h| VS-mode h| in VU-mode\n\n| 0 | 0 | Wait | Trap (I) | Wait | Trap (V)\n| 0 | 1 | Wait | Trap (I) | Trap (V) | Trap (V)\n| 1 | - | Trap (I) | Trap (I) | Trap (I) | Trap (I)\n\n6+| Trap (I) - Trap with `Illegal Instruction` code +\nTrap (V) - Trap with `Virtual Instruction` code\n|===\n\n<%- else -%>\nThe `wfi` instruction is also affected by `mstatus.TW`, as shown below:\n\n[%autowidth,%footer]\n|===\n.2+| [.rotate]#`mstatus.TW`# 2+^.>| `wfi` behavior\nh| S-mode h| U-mode\n\n| 0 | Wait | Trap (I)\n| 1 | Trap (I) | Trap (I)\n\n3+| Trap (I) - Trap with `Illegal Instruction` code\n|===\n\n<%- end -%>\n\nWhen `wfi` is marked as causing a trap above, the implementation is allowed to wait\nfor an unspecified period of time to see if an interrupt occurs before raising the trap.\nThat period of time can be zero (_i.e._, `wfi` always causes a trap in the cases identified\nabove).",
+   "assembly": "",
+   "extension": "Sm",
+   "encoding": "00010000010100000000000001110011",
+   "fields": [],
+   "match": "0x10500073",
+   "mask": "0xffffffff",
+   "explorer": "https://tech.riscv.org/isa-explorer/?ext=Sm&insn=WFI"
+  }
+ }
+}

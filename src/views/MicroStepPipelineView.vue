@@ -12,7 +12,7 @@ import CsrLiveDisplay from '../components/CsrLiveDisplay.vue'
 import type { DisasmJson, Region } from '../stores/wasmCore'
 import type { CtrlJson, PipeCsrJson, Pipeline, PipelineSnapshot } from '../wasm/cpu_sim'
 
-const emit = defineEmits<{ 'switch-cpu': [] }>()
+const emit = defineEmits<{ 'switch-cpu': [], 'switch-memory': [], 'switch-ooo': [] }>()
 
 // The wasm Pipeline class and its snapshot types (generated from Rust).
 type Cpu = Pipeline
@@ -356,6 +356,8 @@ function ctrlPretty(c: CtrlJson): string[] {
   <div class="ms-root">
     <h1 class="title-row">
       <button class="back-btn" @click="emit('switch-cpu')">← CpuLayout</button>
+      <button class="back-btn" title="MMU, TLB and cache panel" @click="emit('switch-memory')">Memory</button>
+      <button class="back-btn" title="Out-of-order core panel" @click="emit('switch-ooo')">OoO</button>
       <span class="ms-name">5-stage pipeline</span>
       <template v-if="ready && snap">
         <span class="pill">cycle {{ Number(snap.cycle) }}</span>
