@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use rv_isa::encode::{b, i, j, r, s, shift, u};
 use rv_isa::reg::reg_number;
+use rv_isa::thread::{ThreadOp, ThreadOperands};
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
@@ -181,9 +182,27 @@ fn encode_instruction(
         operands_str.split(',').map(|s| s.trim()).collect()
     };
 
+    // Barrel thread instructions (custom-0; the barrel core only):
+    //   fork rd, rs1, rs2 · join rs1 · done · yield · tid rd · forkret rd
+    if let Some(op) = ThreadOp::ALL.into_iter().find(|o| o.mnemonic() == mnemonic) {
+        let (rd, rs1, rs2, n) = match op.operands() {
+            ThreadOperands::RdRs1Rs2 => (parse_reg(&operands, 0)?, parse_reg(&operands, 1)?, parse_reg(&operands, 2)?, 3),
+            ThreadOperands::Rs1 => (0, parse_reg(&operands, 0)?, 0, 1),
+            ThreadOperands::None => (0, 0, 0, 0),
+            ThreadOperands::Rd => (parse_reg(&operands, 0)?, 0, 0, 1),
+        };
+        if operands.len() != n { return Err(format!("{mnemonic} takes {n} operand{}", if n == 1 { "" } else { "s" })); }
+        return Ok(rv_isa::thread::encode(op, rd as u8, rs1 as u8, rs2 as u8));
+    }
+
     // Pseudo-instructions
     match mnemonic.as_str() {
         "nop" => return Ok(0x00000013), // addi x0, x0, 0
+        // Traps: return, environment call, breakpoint, wait for interrupt
+        "mret" => return Ok(0x3020_0073),
+        "ecall" => return Ok(0x0000_0073),
+        "ebreak" => return Ok(0x0010_0073),
+        "wfi" => return Ok(0x1050_0073),
         "mv" => {
             // mv rd, rs → addi rd, rs, 0
             let rd = parse_reg(&operands, 0)?;
@@ -407,6 +426,10 @@ fn resolve_csr(operands: &[&str], idx: usize) -> Result<u32, String> {
         "mtvec"     => return Ok(0x305),
         "mepc"      => return Ok(0x341),
         "mcause"    => return Ok(0x342),
+        "mie"       => return Ok(0x304),
+        "mip"       => return Ok(0x344),
+        "mtval"     => return Ok(0x343),
+        "mscratch"  => return Ok(0x340),
         "mvendorid" => return Ok(0xF11),
         "mimpid"    => return Ok(0xF13),
         _ => {}
@@ -534,5 +557,31 @@ mod branch_pseudo_tests {
             assert!(!out.success, "{src} should fail");
             assert!(out.errors[0].message.contains("expects"), "{src}: {}", out.errors[0].message);
         }
+    }
+
+    #[test]
+    fn thread_mnemonics() {
+        let src = "fork t0, a0, a1\njoin t1\ndone\nyield\ntid t2\nforkret a0";
+        let r = assemble(src);
+        assert!(r.success, "{:?}", r.errors.iter().map(|e| &e.message).collect::<Vec<_>>());
+        let w: Vec<u32> = r.instructions.iter().map(|i| i.value).collect();
+        // The encodings the barrel core's tests use (sim/tests/barrel_custom0.rs)
+        assert_eq!(w, [0x00b5_028b, 0x0203_000b, 0x0400_000b, 0x0600_000b, 0x0800_038b, 0x0a00_050b]);
+        for bad in ["fork t0, a0", "join", "done a0", "yield t0", "tid", "forkret a0, a1"] {
+            assert!(!assemble(bad).success, "{bad}");
+        }
+    }
+
+    #[test]
+    fn trap_mnemonics_and_csr_names() {
+        let w = |s: &str| { let r = assemble(s); assert!(r.success, "{s}: {:?}", r.errors.iter().map(|e| &e.message).collect::<Vec<_>>()); r.instructions[0].value };
+        assert_eq!(w("mret"), 0x3020_0073);
+        assert_eq!(w("ecall"), 0x73);
+        assert_eq!(w("ebreak"), 0x0010_0073);
+        assert_eq!(w("wfi"), 0x1050_0073);
+        assert_eq!(w("csrrs x0, mie, x5"), 0x3042_a073);
+        assert_eq!(w("csrrw x0, mip, x0"), 0x3440_1073);
+        assert_eq!(w("csrrs x6, mtval, x0") >> 20, 0x343);
+        assert_eq!(w("csrrw x0, mscratch, x5") >> 20, 0x340);
     }
 }

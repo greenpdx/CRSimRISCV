@@ -110,6 +110,9 @@ export const REG_BY_NAME = new Map<string, RegisterDef>(
 )
 
 // ── Simplified 8-register subset for Level 1 (educational) view ─────────────
+// x0–x15 with the standard ABI names (the RV32E register set)
+export const REGISTER_DEFS_16: RegisterDef[] = REGISTER_DEFS.slice(0, 16)
+
 // Maps x0–x7 with custom ABI names for an 8-register teaching CPU.
 //   x0 = zero   x1 = ra   x2 = sp   x3 = t0
 //   x4 = a0     x5 = a1   x6 = s0   x7 = s1

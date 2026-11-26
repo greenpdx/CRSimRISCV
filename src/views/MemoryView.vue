@@ -210,7 +210,7 @@
 
     <!-- ══ Controls ══ -->
     <div ref="barEl" class="bar">
-      <button class="btn btn--nav" @click="emit('switch-cpu')">CPU</button>
+      <button class="btn btn--nav" @click="emit('switch-pipeline')">← Pipeline</button>
       <button class="btn btn--page" title="scroll to the MMU page" @click="goPage(0)">◀ MMU</button>
       <button class="btn btn--page" title="scroll to the caches page" @click="goPage(1)">Caches ▶</button>
       <span class="bar__div">|</span>
@@ -246,7 +246,7 @@ import {
   type Group, type Phase, type PhaseKind, type Side, type MpCore,
 } from '../stores/memPanel'
 
-const emit = defineEmits<{ 'switch-cpu': [] }>()
+const emit = defineEmits<{ 'switch-pipeline': [] }>()
 const mp = useMemPanel()
 /** The canvas is taller by the fixed bar's height, so the page scrolls only when it does not fit */
 const barEl = ref<HTMLDivElement | null>(null)

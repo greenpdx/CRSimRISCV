@@ -56,13 +56,13 @@ watchEffect(() => { document.body.style.background = PAGE_BG[activeTab.value] })
       <MicroStepView @switch-cpu="activeTab = 'cpu'" />
     </div>
     <div v-if="activeTab === 'microstep-pipeline'">
-      <MicroStepPipelineView @switch-cpu="activeTab = 'cpu'" />
+      <MicroStepPipelineView @switch-cpu="activeTab = 'cpu'" @switch-memory="activeTab = 'memory'" @switch-ooo="activeTab = 'ooo'" />
     </div>
     <div v-if="activeTab === 'memory'">
-      <MemoryView @switch-cpu="activeTab = 'cpu'" />
+      <MemoryView @switch-pipeline="activeTab = 'microstep-pipeline'" />
     </div>
     <div v-if="activeTab === 'ooo'">
-      <OooView @switch-cpu="activeTab = 'cpu'" />
+      <OooView @switch-pipeline="activeTab = 'microstep-pipeline'" />
     </div>
     <div v-if="activeTab === 'microstep-barrel'">
       <MicroStepBarrelView @switch-cpu="activeTab = 'cpu'" />

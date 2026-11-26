@@ -10,7 +10,7 @@
 
     <div class="ctrl__header">
       <span class="ctrl__title">{{ title ?? 'Decoder / Control' }}</span>
-      <span v-if="asmText" class="ctrl__asm ctrl__asm--clickable" @click="emit('asm-click', $event)">{{ asmText }}</span>
+      <span v-if="asmText" class="ctrl__asm ctrl__asm--clickable" @click="emit('asm-click', $event)" @mouseenter="emit('asm-hover', $event)" @mouseleave="emit('asm-leave')">{{ asmText }}</span>
       <span class="ctrl__phase-label">{{ phaseText ?? '' }}</span>
     </div>
 
@@ -123,6 +123,8 @@ const showBadge = (port: string) => !props.badgeX || port in props.badgeX
 
 const emit = defineEmits<{
   'asm-click': [event: MouseEvent]
+  'asm-hover': [event: MouseEvent]
+  'asm-leave': []
 }>()
 
 const entry = computed(() => OPCODE_BY_VALUE.get(props.opcode & 0x7f))
@@ -164,6 +166,8 @@ const signals = computed<ControlSignals>(() => ({
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 14px;
+  white-space: nowrap;
   background: #cc2222;
   padding: 4px 8px;
 }
@@ -180,10 +184,13 @@ const signals = computed<ControlSignals>(() => ({
   letter-spacing: 1px;
   color: #ffffff;
   text-transform: uppercase;
-  margin-left: 5em;
+  margin-left: 1em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ctrl__asm--clickable {
-  cursor: pointer;
+  cursor: help;
   border-bottom: 1px dashed rgba(255,255,255,0.4);
 }
 .ctrl__asm--clickable:hover {

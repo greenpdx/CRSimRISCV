@@ -84,6 +84,15 @@
               >
                 <span class="editor__popup-mnemonic">{{ v.mnemonic }}</span>
                 <span class="editor__popup-desc">{{ v.description }}</span>
+                <a
+                  v-if="explorerLink(v.mnemonic)"
+                  class="editor__popup-link"
+                  :href="explorerLink(v.mnemonic)!"
+                  target="_blank"
+                  rel="noopener"
+                  title="Open this instruction in the RISC-V ISA Explorer"
+                  @click.stop
+                >explorer ↗</a>
               </div>
             </div>
             <div class="editor__popup-example">
@@ -256,6 +265,7 @@ import { useCpuPhases } from '../stores/cpuPhases'
 import { compileWithGodbolt } from '../data/godbolt'
 import { INSTR_GROUPS } from '../data/instrReference'
 import type { InstrGroup } from '../data/instrReference'
+import { useIsaData, isaInstruction } from '../data/isaData'
 
 const emit = defineEmits<{
   'switch-tab': []
@@ -291,6 +301,10 @@ const asmErrors = ref<string[]>([])
 const selectedGroup = ref<string | null>(null)
 const popupGroup = ref<InstrGroup | null>(null)
 const instrGroups = INSTR_GROUPS
+
+// Link of an instruction in the RISC-V ISA Explorer (bundled data), if it has one
+const isaData = useIsaData()
+const explorerLink = (mnemonic: string) => isaInstruction(isaData.value, mnemonic)?.explorer ?? null
 
 // Drop wizard state
 const wizardGroup = ref<InstrGroup | null>(null)
@@ -952,6 +966,14 @@ function fmtAddr(addr: number): string {
   font-size: 10px;
   color: #ccc;
 }
+.editor__popup-link {
+  margin-left: auto;
+  flex: none;
+  font-size: 10px;
+  color: #7fd4e4;
+  text-decoration: none;
+}
+.editor__popup-link:hover { text-decoration: underline; }
 .editor__popup-example {
   padding: 8px 14px;
   border-top: 1px solid #222;

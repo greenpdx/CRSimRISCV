@@ -62,10 +62,25 @@ pub fn disassemble(instr: u32) -> Disasm {
         if let Some(d) = fp::try_decode(instr)   { return d; }
         if let Some(d) = h::try_decode(instr)    { return d; }
     }
+    if let Some(d) = thread_instr(instr)         { return d; }
     if let Some(d) = system::decode(instr)       { return d; }
     if let Some(d) = misc_mem::decode(instr)     { return d; }
     if let Some(d) = rv32i::decode(instr)        { return d; }
     Disasm::unknown((instr & 0x7f) as u8)
+}
+
+/// The barrel core's thread instructions (custom-0 opcode).
+fn thread_instr(instr: u32) -> Option<Disasm> {
+    use crate::thread::{decode, ThreadOperands};
+    let op = decode(instr)?;
+    let (rd, rs1, rs2) = (((instr >> 7) & 31) as u8, ((instr >> 15) & 31) as u8, ((instr >> 20) & 31) as u8);
+    let operands = match op.operands() {
+        ThreadOperands::RdRs1Rs2 => format!("{}, {}, {}", r(rd), r(rs1), r(rs2)),
+        ThreadOperands::Rs1 => r(rs1),
+        ThreadOperands::None => String::new(),
+        ThreadOperands::Rd => r(rd),
+    };
+    Some(Disasm { class: "Thread", mnemonic: op.mnemonic().to_uppercase(), operands })
 }
 
 /// Disassemble a 16-bit compressed instruction directly.
@@ -79,6 +94,19 @@ mod tests {
     fn d(instr: u32) -> Disasm { disassemble(instr) }
     fn mnem(instr: u32) -> String { d(instr).mnemonic }
     fn ops(instr: u32) -> String  { d(instr).operands }
+
+    // ── Barrel thread instructions (custom-0) ──
+    #[test] fn thread_instructions() {
+        use crate::thread::{encode, ThreadOp::*};
+        let t = |w| { let x = d(w); (x.mnemonic, x.operands) };
+        assert_eq!(t(encode(Fork, 5, 10, 11)), ("FORK".into(), "x5, x10, x11".into()));
+        assert_eq!(t(encode(Join, 0, 6, 0)), ("JOIN".into(), "x6".into()));
+        assert_eq!(t(encode(Done, 0, 0, 0)), ("DONE".into(), "".into()));
+        assert_eq!(t(encode(Yield, 0, 0, 0)), ("YIELD".into(), "".into()));
+        assert_eq!(t(encode(Tid, 7, 0, 0)), ("TID".into(), "x7".into()));
+        assert_eq!(t(encode(Forkret, 10, 0, 0)), ("FORKRET".into(), "x10".into()));
+        assert_eq!(mnem(0x0c00_000b), "?");     // custom-0, not a thread instruction
+    }
 
     fn r_type(funct7: u32, rs2: u32, rs1: u32, f3: u32, rd: u32) -> u32 {
         (funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (f3 << 12) | (rd << 7) | 0b0110011

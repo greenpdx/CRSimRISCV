@@ -15,3 +15,4 @@ pub mod instr;
 pub mod lsu;
 pub mod mul;
 pub mod reg;
+pub mod thread;

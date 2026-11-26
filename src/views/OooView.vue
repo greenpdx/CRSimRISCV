@@ -214,7 +214,7 @@
 
     <!-- ══ controls ══ -->
     <div ref="barEl" class="bar">
-      <button class="btn btn--nav" @click="emit('switch-cpu')">CPU</button>
+      <button class="btn btn--nav" @click="emit('switch-pipeline')">← Pipeline</button>
       <span class="bar__div">|</span>
       <select class="bar__sel" :value="o.exampleIndex" @change="o.loadExample(+($event.target as HTMLSelectElement).value)">
         <option v-for="(e, i) in o.examples" :key="i" :value="i">{{ e.name }}</option>
@@ -241,7 +241,7 @@ import MemWire from '../components/memory/MemWire.vue'
 import RsTable from '../components/ooo/RsTable.vue'
 import { useOoo, describe, STAGES, type OooEvent, type Operand, type LsqEntry, type Unit, type Stage, type Times } from '../stores/ooo'
 
-const emit = defineEmits<{ 'switch-cpu': [] }>()
+const emit = defineEmits<{ 'switch-pipeline': [] }>()
 const o = useOoo()
 /** The canvas is taller by the fixed bar's height, so the page scrolls only when it does not fit */
 const barEl = ref<HTMLDivElement | null>(null)
